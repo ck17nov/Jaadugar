@@ -214,9 +214,12 @@ class ThumbnailGenerator:
                  video: Path | None = None,
                  video_format: str = "SHORT",
                  made_for_kids: bool = False,
+                 language: str = "",
                  variants: int = 3) -> tuple[Path, list[ThumbnailVariant]]:
         out_dir.mkdir(parents=True, exist_ok=True)
-        font_path, _ = display_font()
+        # Same tofu problem as captions: the headline comes from the title, so
+        # a Hindi title needs a face with Devanagari glyphs.
+        font_path, _ = display_font(language=language)
         headline = _headline(title, max_words=3 if video_format == "SHORT" else 4)
 
         base_path: Path | None = None

@@ -101,3 +101,65 @@ class TestScriptPromptsPinVisualLanguage:
     def test_english_gets_no_script_instruction(self):
         from engine.content.script import _language_line
         assert _language_line("en") == "Write the narration in English."
+
+
+class TestScriptFonts:
+    """Devanagari captions rendered as tofu boxes until this existed.
+
+    The display faces cover Latin only, and the deployed box has no Indic
+    fonts installed, so the fallback was empty rectangles rather than a
+    different-looking face.
+    """
+
+    def test_indic_languages_map_to_a_script(self):
+        from engine.video.fonts import script_for_language
+        for lang in ("hi", "mr", "ta", "te", "bn", "gu"):
+            assert script_for_language(lang), lang
+
+    def test_english_needs_no_script_font(self):
+        from engine.video.fonts import script_for_language
+        assert script_for_language("en") == ""
+        assert script_for_language("en-IN") == ""
+
+    def test_hinglish_uses_the_latin_display_face(self):
+        """It is Hindi written in Latin letters, so Anton is correct."""
+        from engine.video.fonts import script_for_language
+        assert script_for_language("hi-latn") == ""
+
+    def test_a_regional_code_resolves_by_base_language(self):
+        from engine.video.fonts import script_for_language
+        assert script_for_language("hi-IN") == "deva"
+
+    def test_every_script_has_a_bundled_font(self):
+        """Bundled, not downloaded: a failed download would ship tofu."""
+        from engine.video.fonts import FONT_DIR, SCRIPT_FONTS
+        for script, (family, _url) in SCRIPT_FONTS.items():
+            path = FONT_DIR / f"{family}.ttf"
+            assert path.exists(), f"{script}: {family}.ttf is not bundled"
+            assert path.stat().st_size > 20000, f"{family}.ttf looks truncated"
+
+    def test_the_font_actually_contains_the_glyphs(self):
+        """The real bug was a font without the characters in it."""
+        from PIL import ImageFont
+        from engine.video.fonts import display_font
+        font_file, _ = display_font("Anton", language="hi")
+        face = ImageFont.truetype(str(font_file), 48)
+        # A face missing these would report the same width for both, because
+        # every character would fall back to the same .notdef box.
+        assert face.getlength("क्या जादू") != face.getlength("XXXXXXXXX")
+
+    def test_hindi_does_not_get_the_latin_face(self):
+        from engine.video.fonts import display_font
+        latin, _ = display_font("Anton", language="en")
+        hindi, _ = display_font("Anton", language="hi")
+        assert latin.name != hindi.name
+
+    def test_the_caption_width_budget_is_measured_per_script(self):
+        """One constant for both scripts wraps one and wastes the other."""
+        from engine.core.config import load_config
+        from engine.video.captions import CaptionEngine
+        engine = CaptionEngine(load_config())
+        latin = engine._glyph_ratio("en", 112)
+        deva = engine._glyph_ratio("hi", 112)
+        assert 0.2 < deva < 0.8 and 0.2 < latin < 0.8
+        assert abs(deva - latin) > 0.01, "expected different measurements"

@@ -20,6 +20,50 @@ DOWNLOADABLE = {
     "Oswald": "https://github.com/google/fonts/raw/main/ofl/oswald/Oswald%5Bwght%5D.ttf",
 }
 
+# Faces that can actually draw Indic scripts.
+#
+# This exists because the display faces above cover Latin only. Once Hindi
+# scripts started generating correctly, every caption rendered as a row of
+# tofu boxes - the glyphs simply were not in Anton or Arial Black, and the
+# deployed box has no Indic fonts installed at all (only DejaVu). A missing
+# glyph is not a degraded caption, it is an unreadable one.
+#
+# All Noto, all SIL OFL 1.1. These are the variable fonts, which is what
+# Google Fonts ships now; libass renders them at their default instance,
+# which is Regular rather than Black. Less punchy than Anton and completely
+# legible, which is the right trade.
+_NOTO = "https://github.com/google/fonts/raw/main/ofl/"
+SCRIPT_FONTS: dict[str, tuple[str, str]] = {
+    "deva": ("NotoSansDevanagari",
+             _NOTO + "notosansdevanagari/NotoSansDevanagari%5Bwdth,wght%5D.ttf"),
+    "taml": ("NotoSansTamil",
+             _NOTO + "notosanstamil/NotoSansTamil%5Bwdth,wght%5D.ttf"),
+    "telu": ("NotoSansTelugu",
+             _NOTO + "notosanstelugu/NotoSansTelugu%5Bwdth,wght%5D.ttf"),
+    "beng": ("NotoSansBengali",
+             _NOTO + "notosansbengali/NotoSansBengali%5Bwdth,wght%5D.ttf"),
+    "gujr": ("NotoSansGujarati",
+             _NOTO + "notosansgujarati/NotoSansGujarati%5Bwdth,wght%5D.ttf"),
+}
+
+# Language code -> writing system. Hinglish (hi-latn) is deliberately absent:
+# it is written in Latin letters, so it wants the display face.
+LANGUAGE_SCRIPT = {
+    "hi": "deva", "mr": "deva", "ne": "deva", "sa": "deva",
+    "ta": "taml", "te": "telu", "bn": "beng", "as": "beng", "gu": "gujr",
+}
+
+
+def script_for_language(language: str) -> str:
+    """Writing system for a language code, or "" for Latin."""
+    code = (language or "").strip().lower()
+    if not code or code.startswith("en"):
+        return ""
+    if code in ("hi-latn", "hinglish"):
+        return ""
+    return LANGUAGE_SCRIPT.get(code.split("-")[0], "")
+
+
 # System fallbacks, in preference order per platform.
 SYSTEM_CANDIDATES = [
     Path("C:/Windows/Fonts/ariblk.ttf"),      # Arial Black
@@ -66,16 +110,56 @@ def _try_download(name: str) -> Path | None:
     return None
 
 
-def display_font(preferred: str = "Anton") -> tuple[Path, str]:
+def script_font(language: str) -> tuple[Path, str] | None:
+    """A face that can draw this language, or None if Latin will do.
+
+    Downloads once into assets/fonts/ and reuses it afterwards. Returns None
+    rather than raising when the download fails, so the caller falls back to
+    the display face - tofu boxes are bad, but no captions at all is worse.
+    """
+    script = script_for_language(language)
+    if not script:
+        return None
+    family, url = SCRIPT_FONTS[script]
+    target = ensure_font_dir() / f"{family}.ttf"
+    if target.exists() and target.stat().st_size > 20000:
+        return target, family
+    try:
+        import httpx
+        resp = httpx.get(url, timeout=90, follow_redirects=True)
+        if resp.status_code == 200 and len(resp.content) > 20000:
+            target.write_bytes(resp.content)
+            log_event("FONT", "downloaded a font for this script",
+                      font=family, script=script, license="SIL OFL 1.1")
+            return target, family
+        log_event("FONT", "script font download rejected", font=family,
+                  status=resp.status_code)
+    except Exception as exc:
+        log_event("FONT", "script font download failed", font=family,
+                  error=str(exc)[:120])
+    return None
+
+
+def display_font(preferred: str = "Anton",
+                 language: str = "") -> tuple[Path, str]:
     """Return (font_file, family_name) for caption rendering.
 
+    A language whose script the display faces cannot draw takes priority over
+    `preferred`: a punchy face that renders every character as a box is not a
+    style choice.
+
     Resolution order:
+      0. a face that covers the language's writing system
       1. `preferred` already present in assets/fonts/
       2. any font already present in assets/fonts/
       3. download a free OFL face
       4. copy a system font into assets/fonts/ (keeps `fontsdir` self-contained)
     """
     ensure_font_dir()
+
+    for_script = script_font(language)
+    if for_script:
+        return for_script
 
     direct = FONT_DIR / f"{preferred}.ttf"
     if direct.exists():

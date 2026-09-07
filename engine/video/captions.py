@@ -141,7 +141,8 @@ class CaptionEngine:
     # ------------------------------------------------------------------
     def build(self, clips: list[tuple[float, SceneAudio]], out_ass: Path,
               out_srt: Path, width: int, height: int, *,
-              style_override: str | None = None) -> tuple[Path, Path, int]:
+              style_override: str | None = None,
+              language: str = "") -> tuple[Path, Path, int]:
         words = absolute_words(clips)
         if not words:
             raise RuntimeError("no word timings available for captions")
@@ -155,11 +156,11 @@ class CaptionEngine:
         # caption that was legal by the config wrapped onto a second line on
         # the phone - which doubled the area the text covered and pushed it up
         # into the picture. One line is a layout guarantee, not a preference.
-        max_chars = min(max_chars, self._chars_per_line(width, height))
+        max_chars = min(max_chars, self._chars_per_line(width, height, language))
         groups = group_words(words, max_words=max_words, max_chars=max_chars)
 
         style = style_override or self.style
-        ass_text = self._render_ass(groups, width, height, style)
+        ass_text = self._render_ass(groups, width, height, style, language)
         out_ass.parent.mkdir(parents=True, exist_ok=True)
         out_ass.write_text(ass_text, encoding="utf-8")
         out_srt.write_text(self._render_srt(groups), encoding="utf-8")
@@ -170,8 +171,12 @@ class CaptionEngine:
 
     # ------------------------------------------------------------------
     def _render_ass(self, groups: list[CaptionGroup], width: int, height: int,
-                    style: str) -> str:
-        font_file, family = display_font(str(self.cfg.get("captions.font_file", "Anton")))
+                    style: str, language: str = "") -> str:
+        # The language decides the FONT, not just the text. Anton and Arial
+        # Black have no Devanagari glyphs, so a Hindi caption rendered as a row
+        # of tofu boxes once Hindi scripts started generating correctly.
+        font_file, family = display_font(
+            str(self.cfg.get("captions.font_file", "Anton")), language=language)
         size = self._scaled_font_size(width, height)
         # MarginV is measured from the bottom for bottom-aligned text.
         margin_v = int(height * self.safe_bottom)
@@ -211,18 +216,52 @@ class CaptionEngine:
 
         return "\n".join(header + events) + "\n"
 
-    # Average glyph advance as a fraction of font size. Anton and the other
-    # display faces used here are condensed, so this is narrower than a normal
-    # sans. Measured against rendered output rather than guessed: at 92px on a
-    # 1080-wide frame roughly 22 characters fit inside the safe margins.
+    # Fallback only, used if the font cannot be measured. Deliberately on the
+    # wide side so the estimate errs towards a shorter caption than necessary
+    # rather than one that wraps.
     GLYPH_RATIO = 0.46
 
-    def _chars_per_line(self, width: int, height: int) -> int:
+    # Representative text per script, for measuring the real average advance.
+    _RULERS = {
+        "deva": "क्या जादू दिखता है जब माँ कहानी पढ़ती है",
+        "taml": "ஒரு அணைப்பு இருண்ட அறையை நட்சத்திர வானமாக",
+        "telu": "ఒక కౌగిలి చీకటి గదిని నక్షత్రాల ఆకాశంగా",
+        "beng": "একটি আলিঙ্গন অন্ধকার ঘরকে তারার আকাশে",
+        "gujr": "એક ભેટ અંધારા રૂમને તારાઓના આકાશમાં",
+        "": "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG",
+    }
+
+    def _glyph_ratio(self, language: str, size: int) -> float:
+        """Average advance per character, as a fraction of font size.
+
+        MEASURED from the actual font file rather than assumed. Two different
+        constants were wrong in opposite directions: Anton is condensed
+        (~0.436) while Devanagari is narrower still (~0.380), because its
+        vowel signs stack above and below rather than advancing. Guessing one
+        number for both either wraps the caption or wastes half the width.
+        """
+        try:
+            from PIL import ImageFont
+            from .fonts import script_for_language
+            font_file, _ = display_font(
+                str(self.cfg.get("captions.font_file", "Anton")),
+                language=language)
+            ruler = self._RULERS.get(script_for_language(language),
+                                     self._RULERS[""])
+            face = ImageFont.truetype(str(font_file), size)
+            return max(0.20, face.getlength(ruler) / (len(ruler) * size))
+        except Exception:
+            return self.GLYPH_RATIO
+
+    def _chars_per_line(self, width: int, height: int,
+                        language: str = "") -> int:
         """How many characters fit on ONE line inside the side margins."""
         size = self._scaled_font_size(width, height)
         usable = width * (1.0 - 2 * self.margin_fraction)
         spacing = 1.2                       # matches the Spacing in the style
-        per_char = size * self.GLYPH_RATIO + spacing
+        # 6% headroom: the ruler is an average, and one caption of unusually
+        # wide characters should still not wrap.
+        per_char = size * self._glyph_ratio(language, size) * 1.06 + spacing
         return max(8, int(usable / per_char))
 
     @property

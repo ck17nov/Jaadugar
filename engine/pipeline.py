@@ -578,7 +578,7 @@ class Pipeline:
                          else str(self.cfg.get("captions.style")))
         ass_path, srt_path, groups = self.caption_engine.build(
             offsets, job_dir / "captions.ass", job_dir / "captions.srt",
-            w, h, style_override=caption_style)
+            w, h, style_override=caption_style, language=request.language)
         job.subtitle_path = str(srt_path)
 
         # ---- music + sfx ------------------------------------------------
@@ -668,7 +668,8 @@ class Pipeline:
             thumbnail, variants = self.thumbnail_engine.generate(
                 title=meta.title, out_dir=job_dir / "thumbnails", video=video,
                 video_format=request.video_format,
-                made_for_kids=profile.made_for_kids)
+                made_for_kids=profile.made_for_kids,
+                language=request.language)
             job.thumbnail_path = str(thumbnail)
             safe_write_json(job_dir / "thumbnail_report.json",
                             {"selected": thumbnail.name,
