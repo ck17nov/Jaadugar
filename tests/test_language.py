@@ -163,3 +163,80 @@ class TestScriptFonts:
         deva = engine._glyph_ratio("hi", 112)
         assert 0.2 < deva < 0.8 and 0.2 < latin < 0.8
         assert abs(deva - latin) > 0.01, "expected different measurements"
+
+    def test_the_family_name_matches_the_font_file(self):
+        """libass matches by FAMILY NAME and silently falls back otherwise.
+
+        This is the test that was missing. The file is NotoSansDevanagari.ttf
+        but the font calls itself "Noto Sans Devanagari", and passing the
+        filename stem as the family put libass on a face with no Devanagari
+        glyphs - so the captions were still tofu after the first fix, and only
+        a rendered frame showed it.
+        """
+        from PIL import ImageFont
+        from engine.video.fonts import display_font
+        for lang in ("hi", "ta", "te", "bn", "gu", "en"):
+            path, family = display_font("Anton", language=lang)
+            internal = ImageFont.truetype(str(path), 24).getname()[0]
+            assert family == internal, (
+                f"{lang}: passed {family!r} to libass but the font is "
+                f"{internal!r}")
+
+    def test_the_ass_style_names_a_font_that_exists(self, tmp_path):
+        """End to end: the family in the ASS header must be resolvable."""
+        from PIL import ImageFont
+        from engine.core.config import load_config
+        from engine.video.captions import CaptionEngine
+        from engine.video.fonts import FONT_DIR
+        engine = CaptionEngine(load_config())
+        ass = engine._render_ass([], 1080, 1920, "none", "hi")
+        style = next(l for l in ass.splitlines() if l.startswith("Style:"))
+        named = style.split(",")[1]
+        available = {ImageFont.truetype(str(f), 24).getname()[0]
+                     for f in FONT_DIR.glob("*.ttf")}
+        assert named in available, f"{named!r} not among {sorted(available)}"
+
+    def test_complex_scripts_get_no_letter_spacing(self):
+        """Tracking detaches Devanagari matras from their consonants.
+
+        The second reason Hindi captions were unreadable, after the font. ASS
+        Spacing is applied between every GLYPH, and an Indic syllable is a
+        base plus combining marks - so tracking scatters each matra away from
+        its base. Isolated by rendering the same line with tracking on and
+        off, identical in every other respect.
+        """
+        from engine.core.config import load_config
+        from engine.video.captions import CaptionEngine
+        engine = CaptionEngine(load_config())
+        for lang in ("hi", "mr", "ta", "te", "bn", "gu"):
+            assert engine._letter_spacing(lang) == 0.0, lang
+
+    def test_latin_keeps_its_tracking(self):
+        from engine.core.config import load_config
+        from engine.video.captions import CaptionEngine
+        engine = CaptionEngine(load_config())
+        assert engine._letter_spacing("en") > 0
+        # Hinglish is Latin letters, so it keeps the display treatment.
+        assert engine._letter_spacing("hi-latn") > 0
+
+    def test_the_spacing_comes_from_the_template(self):
+        """It was hard-coded in the ASS style, making the field decorative."""
+        from engine.core.config import load_config
+        from engine.video.captions import CaptionEngine
+        cfg = load_config()
+        cfg.set("captions.letter_spacing", 3.5)
+        assert CaptionEngine(cfg)._letter_spacing("en") == 3.5
+
+    def test_the_rendered_style_carries_zero_spacing_for_hindi(self):
+        from engine.core.config import load_config
+        from engine.video.captions import CaptionEngine
+        ass = CaptionEngine(load_config())._render_ass([], 1080, 1920, "none", "hi")
+        lines = ass.splitlines()
+        # Read the column position from the Format line rather than counting
+        # by hand - the first attempt at this test picked ScaleY and passed
+        # for the wrong reason.
+        fmt = next(l for l in lines if l.startswith("Format:") and "Fontname" in l)
+        columns = [c.strip() for c in fmt.split(":", 1)[1].split(",")]
+        style = next(l for l in lines if l.startswith("Style:"))
+        values = [v.strip() for v in style.split(":", 1)[1].split(",")]
+        assert float(values[columns.index("Spacing")]) == 0.0

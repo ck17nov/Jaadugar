@@ -350,6 +350,8 @@ def caption_overrides(template: StyleTemplate,
         "captions.highlight_color": template.highlight_color,
         "captions.outline": template.outline,
         "captions.safe_bottom": template.safe_bottom,
+        # The style had 1.2 hard-coded, so this field was decorative.
+        "captions.letter_spacing": template.letter_spacing,
         "captions.style": template.caption_style,
     }
 

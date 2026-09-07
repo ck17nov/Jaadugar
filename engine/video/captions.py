@@ -198,7 +198,8 @@ class CaptionEngine:
              "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
              "Alignment, MarginL, MarginR, MarginV, Encoding"),
             (f"Style: Main,{family},{size},{self.primary},{self.highlight},"
-             f"&H00101010,&H80000000,-1,0,0,0,100,100,1.2,0,1,"
+             f"&H00101010,&H80000000,-1,0,0,0,100,100,"
+             f"{self._letter_spacing(language)},0,1,"
              f"{self.outline},{self.shadow},2,{margin_h},{margin_h},{margin_v},1"),
             "",
             "[Events]",
@@ -231,6 +232,26 @@ class CaptionEngine:
         "": "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG",
     }
 
+    def _letter_spacing(self, language: str) -> float:
+        """ASS Spacing (letter tracking). ZERO for complex scripts.
+
+        This is what made Hindi captions unreadable even after the right font
+        was loaded. libass applies tracking between every GLYPH, and in
+        Devanagari a syllable is a base plus combining marks - so tracking
+        pushes each matra off its consonant and the result is a row of
+        detached fragments. Isolated by rendering the same line with tracking
+        on and off: identical font, identical everything else.
+
+        Tracking is a Latin display-typography flourish. For Indic scripts it
+        is not a weaker effect, it is wrong.
+        """
+        from .fonts import script_for_language
+        if script_for_language(language):
+            return 0.0
+        # Was hard-coded at 1.2 here, ignoring the template that already had a
+        # letter_spacing field.
+        return float(self.cfg.get("captions.letter_spacing", 1.2))
+
     def _glyph_ratio(self, language: str, size: int) -> float:
         """Average advance per character, as a fraction of font size.
 
@@ -258,7 +279,7 @@ class CaptionEngine:
         """How many characters fit on ONE line inside the side margins."""
         size = self._scaled_font_size(width, height)
         usable = width * (1.0 - 2 * self.margin_fraction)
-        spacing = 1.2                       # matches the Spacing in the style
+        spacing = self._letter_spacing(language)   # matches the ASS Spacing
         # 6% headroom: the ruler is an average, and one caption of unusually
         # wide characters should still not wrap.
         per_char = size * self._glyph_ratio(language, size) * 1.06 + spacing

@@ -87,6 +87,24 @@ FAMILY_FOR_FILE = {
 }
 
 
+
+def family_name(path: Path, fallback: str = "") -> str:
+    """The font's OWN family name, read from its name table.
+
+    libass matches by family name, not by filename, and it silently falls back
+    to a default face when the name does not match anything in `fontsdir`.
+    That is how Hindi captions came out as tofu twice: the file is called
+    NotoSansDevanagari.ttf but the font calls itself "Noto Sans Devanagari",
+    and the mismatch put libass on a face with no Devanagari glyphs. Reading
+    the name from the file removes the chance to get it wrong.
+    """
+    try:
+        from PIL import ImageFont
+        return ImageFont.truetype(str(path), 24).getname()[0] or fallback
+    except Exception:
+        return fallback or path.stem
+
+
 def ensure_font_dir() -> Path:
     FONT_DIR.mkdir(parents=True, exist_ok=True)
     return FONT_DIR
@@ -120,22 +138,23 @@ def script_font(language: str) -> tuple[Path, str] | None:
     script = script_for_language(language)
     if not script:
         return None
-    family, url = SCRIPT_FONTS[script]
-    target = ensure_font_dir() / f"{family}.ttf"
+    stem, url = SCRIPT_FONTS[script]
+    target = ensure_font_dir() / f"{stem}.ttf"
     if target.exists() and target.stat().st_size > 20000:
-        return target, family
+        return target, family_name(target, stem)
     try:
         import httpx
         resp = httpx.get(url, timeout=90, follow_redirects=True)
         if resp.status_code == 200 and len(resp.content) > 20000:
             target.write_bytes(resp.content)
+            family = family_name(target, stem)
             log_event("FONT", "downloaded a font for this script",
                       font=family, script=script, license="SIL OFL 1.1")
             return target, family
-        log_event("FONT", "script font download rejected", font=family,
+        log_event("FONT", "script font download rejected", font=stem,
                   status=resp.status_code)
     except Exception as exc:
-        log_event("FONT", "script font download failed", font=family,
+        log_event("FONT", "script font download failed", font=stem,
                   error=str(exc)[:120])
     return None
 
