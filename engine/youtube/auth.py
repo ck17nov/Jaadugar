@@ -14,6 +14,8 @@ both paths land in the same TokenStore.
 """
 from __future__ import annotations
 
+import datetime
+
 import json
 import os
 import stat
@@ -173,6 +175,76 @@ class YouTubeAuth:
             return False
         return bool(data.get("client_id") or self.configured)
 
+def _public_client_credentials_class():
+    """A Credentials subclass that can refresh WITHOUT a client secret.
+
+    google-auth refuses outright:
+
+        RefreshError: The credentials do not contain the necessary fields
+        need to refresh the access token. You must specify refresh_token,
+        token_uri, client_id, and client_secret.
+
+    It raises that whenever `client_secret is None` - but an Android OAuth
+    client is a PUBLIC client and has no secret by design, and Google's token
+    endpoint happily accepts a refresh_token grant with `client_id` alone for
+    one. So the check is wrong for this case, not the stored token.
+
+    This was the reason approving a video did nothing: the upload could never
+    obtain an access token, and the same error showed up in the app as
+    "Authorised: yes" next to a refresh failure. Storing the token correctly
+    was necessary but not sufficient.
+
+    Built lazily inside a function because google-auth is imported lazily
+    everywhere else in this module - the CLI must work without it installed.
+    """
+    from google.oauth2.credentials import Credentials
+
+    class PublicClientCredentials(Credentials):
+        def refresh(self, request):                     # noqa: D102
+            import httpx
+            from google.auth import exceptions
+
+            body = {
+                "grant_type": "refresh_token",
+                "refresh_token": self._refresh_token,
+                "client_id": self._client_id,
+            }
+            if self._scopes:
+                body["scope"] = " ".join(self._scopes)
+            try:
+                response = httpx.post(
+                    self._token_uri, data=body, timeout=30,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"})
+            except Exception as exc:
+                raise exceptions.RefreshError(
+                    f"could not reach the token endpoint: {exc}") from exc
+            if response.status_code != 200:
+                # Surface Google's own words: `invalid_grant` means the user
+                # revoked access or the token expired from disuse, and that
+                # needs reconnecting, not retrying.
+                raise exceptions.RefreshError(
+                    f"token refresh failed ({response.status_code}): "
+                    f"{response.text[:300]}")
+            payload = response.json()
+            self.token = payload.get("access_token")
+            if not self.token:
+                raise exceptions.RefreshError(
+                    "token endpoint returned no access_token")
+            expires_in = payload.get("expires_in")
+            if expires_in:
+                # google-auth compares expiry against a NAIVE utc datetime,
+                # so an aware one here would raise on the first comparison.
+                # The 60s margin stops a token expiring mid-upload.
+                self.expiry = (datetime.datetime.utcnow()
+                               + datetime.timedelta(
+                                   seconds=int(expires_in) - 60))
+            # Google may rotate the refresh token; keep the new one if so.
+            if payload.get("refresh_token"):
+                self._refresh_token = payload["refresh_token"]
+
+    return PublicClientCredentials
+
+
     # ------------------------------------------------------------------
     def _client_config(self) -> dict[str, Any]:
         return {
@@ -214,7 +286,11 @@ class YouTubeAuth:
             client_id = self.client_id
             client_secret = self.client_secret
 
-        creds = Credentials(
+        # A public client needs the secret-less refresh; a confidential one
+        # uses the library's own path unchanged.
+        factory = (_public_client_credentials_class()
+                   if client_secret is None else Credentials)
+        creds = factory(
             token=data.get("token"),
             refresh_token=data["refresh_token"],
             token_uri=data.get("token_uri", "https://oauth2.googleapis.com/token"),
