@@ -241,10 +241,18 @@ class YouTubeAuth:
         if not self.store.exists():
             return False
         data = self.store.read()
-        if not data.get("refresh_token"):
-            return False
+        # The multi-channel shape is checked FIRST.
+        #
+        # This block used to start with `if not data.get("refresh_token")`,
+        # which is a LEGACY top-level field: once the store moved to
+        # {"channels": {...}} there is no top-level token, so it returned
+        # False and every upload failed with "YouTube account not connected"
+        # while credentials() and the channel listing both worked perfectly.
+        # Order matters here, not the individual checks.
         if data.get("channels"):
             return any(c.refresh_token for c in self.channels_store.all())
+        if not data.get("refresh_token"):
+            return False
         return bool(data.get("client_id") or self.configured)
 
     # ------------------------------------------------------------------

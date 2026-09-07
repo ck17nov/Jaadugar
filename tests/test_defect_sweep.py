@@ -680,3 +680,95 @@ class TestCaptionsOff:
         clip = SceneAudio(scene_index=0, path=tmp_path / "a.wav",
                           duration=1.0, text="", provider="gtts", words=[])
         assert CaptionEngine(load_config()).srt_only([(0.0, clip)]) == ""
+
+# ==========================================================================
+class TestMultiChannel:
+    """Several brand channels under one Google account.
+
+    A YouTube token is bound to ONE channel - the channel is chosen in
+    Google's chooser during consent and there is no per-request override for
+    an ordinary client - so each channel has its own refresh token.
+    """
+
+    def _store(self, tmp_path, data=None):
+        from engine.youtube.auth import TokenStore
+        from engine.youtube.channels import ChannelStore
+        tokens = TokenStore(tmp_path / "t.json")
+        if data is not None:
+            tokens.write(data)
+        return ChannelStore(tokens), tokens
+
+    def test_the_old_single_token_format_is_migrated(self, tmp_path):
+        """An existing connection must keep working with no reconnection."""
+        legacy = {"refresh_token": "1//abc", "client_id": "530-x.apps.gc.com",
+                  "public_client": True,
+                  "token_uri": "https://oauth2.googleapis.com/token"}
+        store, _ = self._store(tmp_path, legacy)
+        channel = store.get()
+        assert channel is not None
+        assert channel.refresh_token == "1//abc"
+        assert channel.client_id == "530-x.apps.gc.com"
+
+    def test_authorized_reads_the_new_shape(self, tmp_path):
+        """THE REGRESSION. The legacy top-level check ran first, so once the
+        store moved to {"channels": ...} every upload failed with "YouTube
+        account not connected" while credentials() worked fine."""
+        from engine.core.config import load_config
+        from engine.youtube.auth import YouTubeAuth
+        cfg = load_config()
+        cfg.set("app.workspace", str(tmp_path))
+        auth = YouTubeAuth(cfg)
+        from engine.youtube.channels import Channel
+        auth.channels_store.put(Channel(
+            channel_id="UCkids", title="Kids", refresh_token="1//kids",
+            client_id="530-x.apps.gc.com"))
+        assert auth.authorized is True
+
+    def test_an_unknown_channel_is_an_error_not_a_fallback(self, tmp_path):
+        """Publishing a finance video to the kids channel is worse than
+        failing."""
+        from engine.youtube.channels import Channel
+        store, _ = self._store(tmp_path, {})
+        store.put(Channel(channel_id="UCkids", refresh_token="1//k"))
+        assert store.get("UCnope") is None
+
+    def test_a_niche_maps_to_exactly_one_channel(self, tmp_path):
+        from engine.youtube.channels import Channel
+        store, _ = self._store(tmp_path, {})
+        store.put(Channel(channel_id="UCa", title="A", refresh_token="1//a"))
+        store.put(Channel(channel_id="UCb", title="B", refresh_token="1//b"))
+        store.set_niches("UCa", ["kids bedtime stories"])
+        store.set_niches("UCb", ["kids bedtime stories"])
+        assert store.for_niche("kids bedtime stories").channel_id == "UCb"
+        assert store.get("UCa").niches == []
+
+    def test_re_authorising_keeps_the_niche_mapping(self, tmp_path):
+        """The mapping is the user's work; a token refresh must not lose it."""
+        from engine.youtube.channels import Channel
+        store, _ = self._store(tmp_path, {})
+        store.put(Channel(channel_id="UCa", refresh_token="1//old"))
+        store.set_niches("UCa", ["science facts"])
+        store.put(Channel(channel_id="UCa", refresh_token="1//new"))
+        assert store.get("UCa").refresh_token == "1//new"
+        assert store.get("UCa").niches == ["science facts"]
+
+    def test_the_secret_never_leaves_via_the_public_view(self, tmp_path):
+        from engine.youtube.channels import Channel
+        store, _ = self._store(tmp_path, {})
+        store.put(Channel(channel_id="UCa", refresh_token="1//secret"))
+        public = store.get("UCa").public()
+        assert "1//secret" not in str(public)
+        assert "refresh_token" not in public
+
+    def test_removing_a_channel_moves_the_default(self, tmp_path):
+        from engine.youtube.channels import Channel
+        store, _ = self._store(tmp_path, {})
+        store.put(Channel(channel_id="UCa", refresh_token="1//a"))
+        store.put(Channel(channel_id="UCb", refresh_token="1//b"))
+        assert store.default_id() == "UCa"
+        store.remove("UCa")
+        assert store.default_id() == "UCb"
+
+    def test_the_request_carries_the_channel(self):
+        assert AutomationRequest().channel_id == ""
+        assert AutomationRequest(channel_id="UCx").channel_id == "UCx"
