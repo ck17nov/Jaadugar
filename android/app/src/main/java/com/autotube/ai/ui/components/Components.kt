@@ -276,6 +276,9 @@ fun LabeledDropdown(
     allowOther: Boolean = false,
     otherLabel: String = "Other…",
     display: (String) -> String = { it },
+    // Off means the value still SHOWS but cannot be changed. Used by the
+    // Settings screen, where every field is read-only until Edit is tapped.
+    enabled: Boolean = true,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val isOther = allowOther && value.isNotBlank() && value !in options
@@ -288,14 +291,15 @@ fun LabeledDropdown(
 
     Column(modifier = modifier.fillMaxWidth()) {
         ExposedDropdownMenuBox(
-            expanded = expanded,
-            onExpandedChange = { expanded = !expanded },
+            expanded = expanded && enabled,
+            onExpandedChange = { if (enabled) expanded = !expanded },
         ) {
             OutlinedTextField(
                 value = shown,
                 onValueChange = {},
                 readOnly = true,
                 label = { Text(label) },
+                enabled = enabled,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                 modifier = Modifier
                     .fillMaxWidth()

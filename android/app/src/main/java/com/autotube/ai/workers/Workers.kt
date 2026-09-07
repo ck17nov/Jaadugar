@@ -119,8 +119,18 @@ class AutomationWorker(appContext: Context, params: WorkerParameters) :
 
         val automationId = inputData.getString(KEY_AUTOMATION_ID)
         val automation = automationId?.let { app.database.automations().byId(it) }
-            ?: return Result.success()
-        if (!automation.enabled) return Result.success()
+        // Self-cancel when the automation is gone or switched off.
+        //
+        // Returning success alone left the periodic work in place, so a
+        // stopped daily automation went on waking the phone every 24 hours
+        // for ever - doing nothing, but keeping a schedule the user believed
+        // they had cancelled.
+        if (automation == null || !automation.enabled) {
+            if (automationId != null) {
+                WorkScheduler.cancelAutomation(applicationContext, automationId)
+            }
+            return Result.success()
+        }
 
         val request = AutomationRequestDto(
             niche = automation.niche,
@@ -151,6 +161,9 @@ class AutomationWorker(appContext: Context, params: WorkerParameters) :
     companion object {
         const val KEY_AUTOMATION_ID = "automation_id"
         fun nameFor(automationId: String) = "autotube-automation-$automationId"
+
+        /** Tag used to cancel a schedule even if the unique name has drifted. */
+        fun tagFor(automationId: String) = "autotube-auto-tag-$automationId"
     }
 }
 
@@ -216,6 +229,7 @@ object WorkScheduler {
             .setConstraints(networkConstraints)
             .setInitialDelay(initialDelayMinutes.coerceAtLeast(0), TimeUnit.MINUTES)
             .setInputData(workDataOf(AutomationWorker.KEY_AUTOMATION_ID to automationId))
+            .addTag(AutomationWorker.tagFor(automationId))
             .setBackoffCriteria(
                 androidx.work.BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
             .build()
@@ -227,8 +241,16 @@ object WorkScheduler {
     }
 
     fun cancelAutomation(context: Context, automationId: String) {
-        WorkManager.getInstance(context)
-            .cancelUniqueWork(AutomationWorker.nameFor(automationId))
+        val manager = WorkManager.getInstance(context)
+        manager.cancelUniqueWork(AutomationWorker.nameFor(automationId))
+        // Also cancel by TAG.
+        //
+        // The unique-work name is derived from the automation id the backend
+        // returned the FIRST time, while every later run returns a new id and
+        // Room accumulates rows - so the name and the id can drift apart and
+        // cancelUniqueWork alone would miss the schedule that is actually
+        // running. The tag is attached in scheduleAutomation below.
+        manager.cancelAllWorkByTag(AutomationWorker.tagFor(automationId))
     }
 }
 

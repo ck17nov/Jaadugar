@@ -210,9 +210,10 @@ visuals:
   #                   costs nothing and needs no decision in advance.
   #   cloudflare    - needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN,
   #                   both free and neither needs a card. 10,000 neurons a day,
-  #                   which is roughly 230 FLUX images - about 28 Shorts, or
-  #                   two thirds of a thirty-minute video - resetting at 00:00
-  #                   UTC. This is the best free option for the illustrated
+  #                   resetting at 00:00 UTC. At 1024x1024 and the default 4
+  #                   steps that is roughly 170 FLUX images - about 20 Shorts,
+  #                   or half a thirty-minute video. (The headline "230 images"
+  #                   assumes 512x512.) Best free option for the illustrated
   #                   look, because the catalogue includes FLUX.1 schnell.
   #
   #                   Caveat: flux-1-schnell has no width/height parameter and
@@ -223,7 +224,7 @@ visuals:
   cloudflare_model: "@cf/black-forest-labs/flux-1-schnell"
   # Neurons are charged per step, so this trades daily allowance for detail.
   # 4 is the documented default for this distilled model and 8 the ceiling.
-  cloudflare_steps: 6
+  cloudflare_steps: 4
   gemini_image_model: gemini-3.1-flash-image
   # Used by the huggingface backend. Ignored by pollinations.
   ai_image_model: black-forest-labs/FLUX.1-schnell

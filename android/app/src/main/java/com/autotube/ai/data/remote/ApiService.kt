@@ -21,6 +21,14 @@ interface ApiService {
         @Query("duration") duration: Int = 45,
     ): NichePreviewDto
 
+    @GET("automations")
+    suspend fun automations(
+        @Query("include_cancelled") includeCancelled: Boolean = false,
+    ): AutomationListDto
+
+    @POST("jobs/clear")
+    suspend fun clearJobs(@Body body: ClearRequestDto): ClearAckDto
+
     @POST("jobs/{jobId}/cancel")
     suspend fun cancelJob(@Path("jobId") jobId: String): CancelAckDto
 

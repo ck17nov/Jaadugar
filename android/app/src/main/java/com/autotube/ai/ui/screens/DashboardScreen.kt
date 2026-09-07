@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -26,6 +27,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -59,6 +63,39 @@ fun DashboardScreen(
     val scheduled by vm.scheduledCount.collectAsStateWithLifecycle()
     val failed by vm.failedCount.collectAsStateWithLifecycle()
     val today by vm.todayCount.collectAsStateWithLifecycle()
+    var showClear by rememberSaveable { mutableStateOf(false) }
+
+    if (showClear) {
+        // Two choices, because both were asked for: tidy up now, or keep the
+        // last week. The backend decides what is eligible and keeps anything
+        // in flight or awaiting approval, so neither option can lose work.
+        AlertDialog(
+            onDismissRequest = { showClear = false },
+            title = { Text("Clear finished jobs?") },
+            text = {
+                Text(
+                    "Removes finished jobs from this list and deletes their " +
+                        "video files from the backend. Anything still " +
+                        "rendering or waiting for your approval is kept."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClear = false
+                    vm.clearJobs(0.0)
+                }) { Text("Clear all now") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        showClear = false
+                        vm.clearJobs(7.0)
+                    }) { Text("Older than 7 days") }
+                    TextButton(onClick = { showClear = false }) { Text("Cancel") }
+                }
+            },
+        )
+    }
     val views by vm.totalViews.collectAsStateWithLifecycle()
     val health by vm.health.collectAsStateWithLifecycle()
     val quota by vm.quota.collectAsStateWithLifecycle()
@@ -230,6 +267,7 @@ fun DashboardScreen(
             ) {
                 SectionTitle("Recent jobs", Modifier.weight(1f))
                 TextButton(onClick = onOpenContent) { Text("All content") }
+                TextButton(onClick = { showClear = true }) { Text("Clear") }
             }
         }
 
@@ -315,10 +353,17 @@ private fun ApprovalCard(
     }
 }
 
-/** Statuses a job can still be stopped from. */
+/** Statuses where stopping actually does something.
+ *
+ * READY and SCHEDULED are deliberately absent. Stop was offered on them and
+ * did nothing: cancellation is checked at stage boundaries, and those jobs
+ * have no stages left to run. A READY job is finished, and a SCHEDULED one is
+ * already on YouTube waiting for its publish time - the way to undo that is
+ * to reject it, not to stop it.
+ */
 private val STOPPABLE = setOf(
     "IDEA", "RESEARCH", "SCRIPT", "VOICE", "VISUALS", "RENDERING",
-    "QUALITY_CHECK", "AWAITING_APPROVAL", "READY", "SCHEDULED",
+    "QUALITY_CHECK",
 )
 
 @Composable

@@ -30,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,15 +63,49 @@ fun SettingsScreen() {
     val message by vm.message.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    var backendUrl by remember { mutableStateOf(store.backendUrl) }
-    var apiKey by remember { mutableStateOf(store.apiKey) }
-    var oauthClientId by remember { mutableStateOf(store.oauthClientId) }
-    var ytAccount by remember { mutableStateOf(store.youtubeAccountEmail) }
-    var defaultNiche by remember { mutableStateOf(store.defaultNiche) }
-    var timezone by remember { mutableStateOf(store.timezone) }
-    var defaultLanguage by remember { mutableStateOf(store.defaultLanguage) }
-    var threshold by remember { mutableIntStateOf(store.qualityThreshold) }
-    var autoApprove by remember { mutableStateOf(store.autoApprove) }
+    // Nothing here writes to storage until Save.
+    //
+    // Every field used to commit on each keystroke, so brushing a slider or a
+    // dropdown changed a live setting with no way back - which is exactly what
+    // happened. The drafts below are the only source of truth for the controls
+    // while editing, and rememberSaveable is load-bearing now that they are
+    // not committed immediately: a rotation mid-edit would otherwise re-seed
+    // from storage and silently discard the changes.
+    var editing by rememberSaveable { mutableStateOf(false) }
+    var backendUrl by rememberSaveable { mutableStateOf(store.backendUrl) }
+    var apiKey by rememberSaveable { mutableStateOf(store.apiKey) }
+    var oauthClientId by rememberSaveable { mutableStateOf(store.oauthClientId) }
+    var ytAccount by rememberSaveable { mutableStateOf(store.youtubeAccountEmail) }
+    var defaultNiche by rememberSaveable { mutableStateOf(store.defaultNiche) }
+    val timezone = store.timezone
+    var defaultLanguage by rememberSaveable { mutableStateOf(store.defaultLanguage) }
+    var threshold by rememberSaveable { mutableIntStateOf(store.qualityThreshold) }
+    var autoApprove by rememberSaveable { mutableStateOf(store.autoApprove) }
+
+    fun save() {
+        store.backendUrl = backendUrl
+        store.apiKey = apiKey
+        store.oauthClientId = oauthClientId
+        store.youtubeAccountEmail = ytAccount
+        store.defaultNiche = defaultNiche
+        store.defaultLanguage = defaultLanguage
+        store.qualityThreshold = threshold
+        store.autoApprove = autoApprove
+        editing = false
+    }
+
+    fun cancel() {
+        // Re-seed from storage so a half-finished edit leaves nothing behind.
+        backendUrl = store.backendUrl
+        apiKey = store.apiKey
+        oauthClientId = store.oauthClientId
+        ytAccount = store.youtubeAccountEmail
+        defaultNiche = store.defaultNiche
+        defaultLanguage = store.defaultLanguage
+        threshold = store.qualityThreshold
+        autoApprove = store.autoApprove
+        editing = false
+    }
 
     val authManager = remember { YouTubeAuthManager(context, store) }
     val signingSha1 = remember { YouTubeAuthManager.signingSha1(context) }
@@ -105,7 +140,23 @@ fun SettingsScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Settings", style = MaterialTheme.typography.displaySmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Settings", style = MaterialTheme.typography.displaySmall,
+                 modifier = Modifier.weight(1f))
+            if (editing) {
+                TextButton(onClick = { cancel() }) { Text("Cancel") }
+                Button(onClick = { save() }) { Text("Save") }
+            } else {
+                Button(onClick = { editing = true }) { Text("Edit") }
+            }
+        }
+        if (!editing) {
+            Text(
+                "Read-only. Tap Edit to change anything.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         message?.let { msg ->
             InfoBanner(
@@ -130,7 +181,8 @@ fun SettingsScreen() {
         SectionTitle("Backend")
         OutlinedTextField(
             value = backendUrl,
-            onValueChange = { backendUrl = it; store.backendUrl = it },
+            onValueChange = { backendUrl = it },
+            enabled = editing,
             label = { Text("Backend URL") },
             placeholder = { Text("http://192.168.1.20:8099/") },
             singleLine = true,
@@ -138,7 +190,8 @@ fun SettingsScreen() {
         )
         OutlinedTextField(
             value = apiKey,
-            onValueChange = { apiKey = it; store.apiKey = it },
+            onValueChange = { apiKey = it },
+            enabled = editing,
             label = { Text("Backend API key (AUTOTUBE_API_TOKEN)") },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
@@ -196,7 +249,8 @@ fun SettingsScreen() {
         SectionTitle("YouTube account")
         OutlinedTextField(
             value = oauthClientId,
-            onValueChange = { oauthClientId = it; store.oauthClientId = it },
+            onValueChange = { oauthClientId = it },
+            enabled = editing,
             label = { Text("Android OAuth client ID") },
             placeholder = { Text("123456789012-abc123def.apps.googleusercontent.com") },
             singleLine = true,
@@ -210,7 +264,8 @@ fun SettingsScreen() {
         )
         OutlinedTextField(
             value = ytAccount,
-            onValueChange = { ytAccount = it; store.youtubeAccountEmail = it },
+            onValueChange = { ytAccount = it },
+            enabled = editing,
             label = { Text("Google account for the channel (optional)") },
             placeholder = { Text("name@gmail.com") },
             singleLine = true,
@@ -331,7 +386,8 @@ fun SettingsScreen() {
             options = NICHE_OPTIONS,
             allowOther = true,
             otherLabel = "Other topic…",
-            onValueChange = { defaultNiche = it; store.defaultNiche = it },
+            onValueChange = { defaultNiche = it },
+            enabled = editing,
         )
 
         LabeledDropdown(
@@ -339,7 +395,8 @@ fun SettingsScreen() {
             value = defaultLanguage,
             options = LANGUAGES.map { it.first },
             display = { code -> LANGUAGES.firstOrNull { it.first == code }?.second ?: code },
-            onValueChange = { defaultLanguage = it; store.defaultLanguage = it },
+            onValueChange = { defaultLanguage = it },
+            enabled = editing,
         )
 
         // Timezone is fixed to Asia/Kolkata. It only affects when a scheduled
@@ -354,10 +411,10 @@ fun SettingsScreen() {
 
         SectionTitle("Minimum quality score to publish: $threshold/100")
         Slider(
+            enabled = editing,
             value = threshold.toFloat(),
             onValueChange = {
                 threshold = it.roundToInt()
-                store.qualityThreshold = threshold
             },
             valueRange = 50f..95f,
             steps = 8,
@@ -373,7 +430,8 @@ fun SettingsScreen() {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(
                 checked = autoApprove,
-                onCheckedChange = { autoApprove = it; store.autoApprove = it },
+                enabled = editing,
+                onCheckedChange = { autoApprove = it },
             )
             Column(Modifier.padding(start = 12.dp)) {
                 Text("Default to AUTO mode", style = MaterialTheme.typography.bodyMedium)

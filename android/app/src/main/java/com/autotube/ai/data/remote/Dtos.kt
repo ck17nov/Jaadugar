@@ -284,3 +284,41 @@ data class CancelAckDto(
     @SerialName("dropped_from_queue") val droppedFromQueue: Int = 0,
     val note: String = "",
 )
+
+@Serializable
+data class AutomationSummaryDto(
+    val id: String = "",
+    val niche: String = "",
+    val frequency: String = "once",
+    @SerialName("upload_time") val uploadTime: String = "",
+    val days: List<Int> = emptyList(),
+    val timezone: String = "",
+    val enabled: Boolean = true,
+    @SerialName("created_at") val createdAt: Double = 0.0,
+    @SerialName("video_format") val videoFormat: String = "",
+    val language: String = "",
+    @SerialName("made_for_kids") val madeForKids: Boolean = false,
+    @SerialName("videos_made") val videosMade: Int = 0,
+    val running: Boolean = false,
+)
+
+@Serializable
+data class AutomationListDto(
+    val automations: List<AutomationSummaryDto> = emptyList(),
+    @SerialName("queue_depth") val queueDepth: Int = 0,
+    val running: String = "",
+)
+
+@Serializable
+data class ClearRequestDto(
+    @SerialName("job_ids") val jobIds: List<String> = emptyList(),
+    @SerialName("older_than_days") val olderThanDays: Double = 0.0,
+    @SerialName("free_disk") val freeDisk: Boolean = true,
+)
+
+@Serializable
+data class ClearAckDto(
+    val cleared: Int = 0,
+    @SerialName("freed_mb") val freedMb: Double = 0.0,
+    @SerialName("job_ids") val jobIds: List<String> = emptyList(),
+)

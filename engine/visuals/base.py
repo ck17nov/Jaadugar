@@ -48,6 +48,13 @@ class VisualProvider(Protocol):
 # --------------------------------------------------------------------------
 # Conditioning: cover-crop to the exact frame, then sharpen.
 # --------------------------------------------------------------------------
+# How much larger than the frame a still is rendered, so a Ken Burns zoom has
+# real pixels to pan into rather than magnifying as it moves. Shared with
+# engine/video/compose.py, which crops back to this same size - the two were
+# separate literals and rounded differently.
+OVERSIZE = 1.18
+
+
 def condition_image(path: Path, width: int, height: int, *,
                     sharpen: bool = True) -> Path:
     """Make any downloaded/generated image render-ready.
@@ -75,9 +82,22 @@ def condition_image(path: Path, width: int, height: int, *,
             top = int((src_h - new_h) * 0.38)
             img = img.crop((0, top, src_w, top + new_h))
 
-        upscale_factor = width / img.size[0]
-        # Render at 1.18x the frame so Ken Burns zoom has real pixels to pan into.
-        render_w, render_h = int(width * 1.18), int(height * 1.18)
+        # Render at 1.18x the frame so Ken Burns zoom has real pixels to pan
+        # into. `& ~1` matches compose.py exactly: it rounds the same numbers
+        # down to even, and a one-pixel disagreement made ffmpeg silently drop
+        # a row on every still.
+        render_w = int(width * OVERSIZE) & ~1
+        render_h = int(height * OVERSIZE) & ~1
+
+        # Measured against the RENDER width, not the frame width.
+        #
+        # This was `width / img.size[0]`, which ignores the 1.18 oversize and
+        # so understated the real magnification by 15%: a 576x1024 source -
+        # what the keyless generator actually returns however large an image
+        # you ask it for - is blown up 2.21x to fill a 1274x2265 buffer, while
+        # this reported 1.875. The sharpening below is compensation for exactly
+        # that factor, so it was being tuned off the wrong number.
+        upscale_factor = render_w / max(img.size[0], 1)
         img = img.resize((render_w, render_h), Image.LANCZOS)
 
         if sharpen and upscale_factor > 1.05:

@@ -49,6 +49,8 @@ class AppViewModelFactory(private val app: AutoTubeApp) : ViewModelProvider.Fact
                 DashboardViewModel(repo, store, app) as T
             modelClass.isAssignableFrom(CreateViewModel::class.java) ->
                 CreateViewModel(repo, store, app) as T
+            modelClass.isAssignableFrom(ScheduleViewModel::class.java) ->
+                ScheduleViewModel(repo, store, app) as T
             modelClass.isAssignableFrom(JobViewModel::class.java) ->
                 JobViewModel(repo, store) as T
             modelClass.isAssignableFrom(SettingsViewModel::class.java) ->
@@ -164,6 +166,52 @@ class DashboardViewModel(
         refresh()
     }) { repo.cancelJob(jobId) }
 
+    /**
+     * Stop a recurring automation for good.
+     *
+     * Three things, in this order, because each covers a different failure:
+     *  1. the backend, so a queued or in-progress run stops and the
+     *     cancellation is persisted (its in-memory set does not survive a
+     *     restart);
+     *  2. the Room row, so a worker that fires before WorkManager settles
+     *     sees "disabled" rather than "unknown";
+     *  3. WorkManager, which is the thing that actually makes it recur. Without
+     *     this the phone still produces tomorrow's video - the whole reason
+     *     stopping appeared not to work.
+     */
+    fun stopAutomation(automationId: String) =
+        runTask<com.autotube.ai.data.remote.CancelAckDto>({
+            info("Automation stopped. No further videos will be created.")
+            refresh()
+        }) {
+            repo.cancelAutomation(automationId).also { outcome ->
+                // Only tear the schedule down if the backend agreed. Killing
+                // the local schedule after a failed call would leave an
+                // automation the server still believes in and the phone no
+                // longer runs.
+                if (outcome.isSuccess) {
+                    com.autotube.ai.workers.WorkScheduler.cancelAutomation(
+                        app, automationId)
+                }
+            }
+        }
+
+    /**
+     * Clear finished jobs and free the disk they were using.
+     *
+     * `olderThanDays = 0` clears everything eligible now. The backend decides
+     * what is eligible and keeps anything in flight or awaiting approval, so
+     * this cannot abandon work in progress.
+     */
+    fun clearJobs(olderThanDays: Double) =
+        runTask<com.autotube.ai.data.remote.ClearAckDto>({
+            info(
+                if (it.cleared == 0) "Nothing to clear."
+                else "Cleared ${it.cleared} jobs and freed ${it.freedMb} MB."
+            )
+            refresh()
+        }) { repo.clearJobs(olderThanDays) }
+
     fun approve(jobId: String) = runTask<Unit>({
         // Do not promise an upload the backend cannot perform.
         //
@@ -254,6 +302,51 @@ class CreateViewModel(
     }
 
     fun resetStarted() { _started.value = false }
+}
+
+// --------------------------------------------------------------------------
+class ScheduleViewModel(
+    private val repo: AutoTubeRepository,
+    val store: SecureStore,
+    private val app: AutoTubeApp,
+) : BaseViewModel() {
+
+    val jobs: StateFlow<List<JobEntity>> = repo.observeJobs(80)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Recurring automations, from the BACKEND.
+     *
+     * Room holds them too, but the server list is authoritative and survives a
+     * reinstall - and until it existed there was nowhere to see what had been
+     * scheduled at all.
+     */
+    private val _automations =
+        MutableStateFlow<List<com.autotube.ai.data.remote.AutomationSummaryDto>>(
+            emptyList())
+    val automations: StateFlow<
+        List<com.autotube.ai.data.remote.AutomationSummaryDto>> =
+        _automations.asStateFlow()
+
+    fun refresh() {
+        if (!store.isConfigured) return
+        viewModelScope.launch {
+            repo.automations().onSuccess { _automations.value = it.automations }
+        }
+    }
+
+    fun stopAutomation(automationId: String) =
+        runTask<com.autotube.ai.data.remote.CancelAckDto>({
+            info("Automation stopped. No further videos will be created.")
+            refresh()
+        }) {
+            repo.cancelAutomation(automationId).also { outcome ->
+                if (outcome.isSuccess) {
+                    com.autotube.ai.workers.WorkScheduler.cancelAutomation(
+                        app, automationId)
+                }
+            }
+        }
 }
 
 // --------------------------------------------------------------------------

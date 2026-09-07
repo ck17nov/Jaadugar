@@ -17,7 +17,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,10 +32,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.autotube.ai.data.local.JobEntity
+import com.autotube.ai.ui.components.BannerTone
+import com.autotube.ai.ui.components.InfoBanner
+import com.autotube.ai.data.remote.AutomationSummaryDto
 import com.autotube.ai.ui.components.EmptyState
 import com.autotube.ai.ui.components.SectionTitle
 import com.autotube.ai.ui.components.StatusChip
 import com.autotube.ai.ui.vm.JobViewModel
+import com.autotube.ai.ui.vm.ScheduleViewModel
 import com.autotube.ai.ui.vm.appViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -103,8 +109,11 @@ fun ContentScreen(onOpenJob: (String) -> Unit) {
 /** Screen 6: the publishing calendar / list. */
 @Composable
 fun SchedulerScreen(onOpenJob: (String) -> Unit) {
-    val vm: JobViewModel = appViewModel()
+    val vm: ScheduleViewModel = appViewModel()
     val jobs by vm.jobs.collectAsStateWithLifecycle()
+    val automations by vm.automations.collectAsStateWithLifecycle()
+    val message by vm.message.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.refresh() }
 
     val scheduled = remember(jobs) {
         jobs.filter { it.scheduledFor.isNotBlank() }
@@ -128,6 +137,49 @@ fun SchedulerScreen(onOpenJob: (String) -> Unit) {
                 )
             }
         }
+
+        message?.let { msg ->
+            item(key = "schedule-message") {
+                InfoBanner(
+                    text = msg.text,
+                    tone = if (msg.isError) BannerTone.Error else BannerTone.Success,
+                    actionLabel = "Dismiss",
+                    onAction = { vm.clearMessage() },
+                )
+            }
+        }
+
+        // ---- recurring automations --------------------------------------
+        //
+        // Previously invisible: automations lived only in the phone's own
+        // database and nothing displayed them, so a daily automation could be
+        // started and then never seen again - and there was no way to stop one
+        // except by catching a video it had already begun.
+        item(key = "automations-title") {
+            SectionTitle(
+                if (automations.isEmpty()) "Recurring automations"
+                else "Recurring automations (${automations.count { it.enabled }})"
+            )
+        }
+        if (automations.isEmpty()) {
+            item(key = "automations-empty") {
+                Text(
+                    "None. An automation set to daily, weekly or specific days " +
+                        "will appear here with a Stop button.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            items(automations, key = { "auto-${it.id}" }) { automation ->
+                AutomationRow(
+                    automation = automation,
+                    onStop = { vm.stopAutomation(automation.id) },
+                )
+            }
+        }
+
+        item(key = "scheduled-title") { SectionTitle("Scheduled videos") }
 
         if (grouped.isEmpty()) {
             item {
@@ -225,4 +277,69 @@ private fun localTime(utc: String, timezone: String): String {
         timeZone = TimeZone.getTimeZone(timezone)
     }
     return fmt.format(date)
+}
+
+/**
+ * One recurring automation, with the one control that matters.
+ *
+ * Stop here ends the whole automation - the backend drops queued runs and
+ * records the cancellation, and the phone's WorkManager schedule is torn down
+ * so tomorrow's video is never made. That is different from stopping a single
+ * job on the Dashboard, which only abandons the run in progress.
+ */
+@Composable
+private fun AutomationRow(
+    automation: AutomationSummaryDto,
+    onStop: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    automation.niche.ifBlank { "(no niche)" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (automation.running) StatusChip("RUNNING")
+                else if (!automation.enabled) StatusChip("STOPPED")
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                buildString {
+                    append(
+                        when (automation.frequency) {
+                            "daily" -> "Every day"
+                            "weekly" -> "Every week"
+                            "days" -> "On chosen days"
+                            else -> "One run"
+                        }
+                    )
+                    if (automation.uploadTime.isNotBlank()) {
+                        append(" at ${automation.uploadTime}")
+                    }
+                    if (automation.videoFormat.isNotBlank()) {
+                        append(" - ${automation.videoFormat}")
+                    }
+                    if (automation.language.isNotBlank()) {
+                        append(" - ${automation.language}")
+                    }
+                    append(" - ${automation.videosMade} made")
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (automation.enabled) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onStop) { Text("Stop automation") }
+                }
+            }
+        }
+    }
 }

@@ -9,6 +9,9 @@ import com.autotube.ai.data.local.ResearchEntity
 import com.autotube.ai.data.prefs.SecureStore
 import com.autotube.ai.data.remote.ApiClient
 import com.autotube.ai.data.remote.AutomationRequestDto
+import com.autotube.ai.data.remote.AutomationListDto
+import com.autotube.ai.data.remote.ClearAckDto
+import com.autotube.ai.data.remote.ClearRequestDto
 import com.autotube.ai.data.remote.CancelAckDto
 import com.autotube.ai.data.remote.HealthDto
 import com.autotube.ai.data.remote.JobDetailDto
@@ -145,6 +148,30 @@ class AutoTubeRepository(
         Unit
     }
 
+    /** Every automation the backend knows about, running or scheduled. */
+    suspend fun automations(): Result<AutomationListDto> =
+        call { api.service().automations() }
+
+    /**
+     * Clear finished jobs and free their disk.
+     *
+     * `olderThanDays = 0` clears everything eligible now. The backend keeps
+     * anything in flight or awaiting approval whatever is asked, so this
+     * cannot abandon a running render.
+     */
+    suspend fun clearJobs(olderThanDays: Double = 0.0): Result<ClearAckDto> =
+        call {
+            val ack = api.service().clearJobs(
+                ClearRequestDto(olderThanDays = olderThanDays))
+            // Mirror exactly what the backend cleared. A local time cutoff
+            // would delete a render that is still in progress, which the
+            // backend deliberately kept.
+            if (ack.jobIds.isNotEmpty()) db.jobs().deleteByIds(ack.jobIds)
+            logEvent("CLEANUP", "cleared ${ack.cleared} jobs, " +
+                "${ack.freedMb} MB freed")
+            ack
+        }
+
     /**
      * Stop a job. Cancellation is cooperative on the backend, so this returns
      * as soon as the request is recorded, not when the job actually stops -
@@ -158,7 +185,11 @@ class AutoTubeRepository(
 
     suspend fun cancelAutomation(automationId: String): Result<CancelAckDto> = call {
         val ack = api.service().cancelAutomation(automationId)
-        db.automations().delete(automationId)
+        // Disabled, not deleted. A worker that fires before WorkManager
+        // settles then sees "switched off" instead of "unknown", and the
+        // Schedule screen can still show it as stopped rather than having it
+        // vanish - which looks like the cancel lost the automation.
+        db.automations().setEnabled(automationId, false)
         logEvent("CANCEL", "automation $automationId cancelled")
         ack
     }

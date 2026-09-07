@@ -198,6 +198,17 @@ interface JobDao {
 
     @Query("DELETE FROM jobs WHERE updated_at < :before")
     suspend fun pruneOlderThan(before: Long)
+
+    /**
+     * Delete exactly the jobs the BACKEND cleared.
+     *
+     * Not a local time cutoff: the backend refuses to clear anything in
+     * flight or awaiting approval, so mirroring its answer keeps the two in
+     * step. A local `updated_at <` sweep would happily delete a render that
+     * is halfway through and leave the list disagreeing with the server.
+     */
+    @Query("DELETE FROM jobs WHERE job_id IN (:jobIds)")
+    suspend fun deleteByIds(jobIds: List<String>)
 }
 
 @Dao

@@ -309,10 +309,15 @@ class CloudflareBackend:
     every account 10,000 neurons a day at no cost and no card, and the catalogue
     includes FLUX.1 schnell - the model that actually draws clean cel-shaded
     illustration rather than the painterly blur the keyless endpoint produces.
-    At roughly 230 images a day that is about 28 Shorts, or two thirds of a
-    thirty-minute video.
 
-    Two API details that decide the code:
+    The daily allowance in real terms, since the headline "230 images" assumes
+    512x512: flux-1-schnell costs about 4.8 neurons per 512x512 tile plus about
+    9.6 per step, so a 1024x1024 frame is four tiles. At the documented default
+    of 4 steps that is roughly 170 images a day - about 20 Shorts, or half a
+    thirty-minute video. Every extra step costs ~10 neurons, which is why the
+    default here is 4 rather than something higher.
+
+    Three API details decide the code:
 
       * flux-1-schnell answers with JSON - {"result": {"image": "<base64>"}} -
         NOT raw image bytes, unlike the stable-diffusion models on the same
@@ -325,6 +330,11 @@ class CloudflareBackend:
         the face is blurry" complaint. `stable-diffusion-xl-base-1.0` on the
         same account does accept width and height, so the model is a config
         key rather than a constant.
+
+      * It has no SEED parameter either. The per-scene seed cannot be honoured
+        on flux, so a rerun will not reproduce the same pictures - unlike every
+        other backend here. Retries still produce something different, because
+        unseeded generation is random, which is what the duplicate check needs.
     """
 
     id = "cloudflare"
@@ -337,13 +347,15 @@ class CloudflareBackend:
 
     def __init__(self, account_id: str, token: str,
                  model: str = "@cf/black-forest-labs/flux-1-schnell",
-                 steps: int = 6, timeout: int = 120):
+                 steps: int = 4, timeout: int = 120):
         self.account_id = account_id
         self.token = token
         self.model = model
         # flux-1-schnell is a distilled model: 4 is the documented default and
-        # 8 the ceiling. 6 buys a little detail for a little more of the daily
-        # allowance, since neurons are charged per step.
+        # 8 the ceiling. Kept at 4 because neurons are charged per step - each
+        # extra step is ~10 of the 10,000 a day, so 6 steps costs a third of
+        # the daily image count for a difference this pipeline then downscales
+        # away anyway.
         self.steps = max(1, min(8, int(steps)))
         self.timeout = timeout
 
