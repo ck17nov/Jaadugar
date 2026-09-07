@@ -165,7 +165,13 @@ class MetadataGenerator:
 
     def _title_prompt(self, script: Script, idea: ContentIdea,
                       profile: NicheProfile) -> str:
+        language = (getattr(script, "language", "") or "en")
+        from .translate import language_name
         return f"""Write 10 title options for this video.
+
+LANGUAGE: write every title in {language_name(language)} ({language}), in that
+language's own script. The title is the first thing a viewer sees, so it must
+be in the language they are about to hear.
 
 NICHE: {profile.name}   AUDIENCE: {profile.audience}
 TOPIC: {idea.topic}
@@ -175,8 +181,17 @@ HOOK (first spoken line): {script.hook}
 FULL NARRATION:
 {truncate(script.script, 1400)}
 
-Every title must be supported by the narration above. Vary the structure across
-the ten: question, reveal, mechanism, number, consequence.
+RULES, and the first one matters most:
+- BE SPECIFIC. Name the actual thing the video is about - the object, the
+  number, the place, the person. A title made of abstractions could belong to
+  any video and tells a viewer nothing. "How Account Changes Kids" is the
+  failure mode: three vague words and no subject.
+- Every title must be supported by the narration above. Do not promise
+  anything the video does not deliver.
+- Under 70 characters, so it is not cut off on a phone.
+- No clickbait punctuation pile-ups, no ALL CAPS words, no emoji.
+- Vary the structure across the ten: question, reveal, mechanism, number,
+  consequence, contrast.
 
 Return JSON: {{"titles": ["...", "..."]}}"""
 

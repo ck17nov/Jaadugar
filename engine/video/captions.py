@@ -251,8 +251,17 @@ class CaptionEngine:
              "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
              "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
              "Alignment, MarginL, MarginR, MarginV, Encoding"),
+            # Bold is OFF, and that is two fixes in one field.
+            #
+            # It was -1, which makes libass SYNTHESISE bold by smearing each
+            # glyph wider - while the character budget is measured from the
+            # font file at its real weight. So every line was wider than
+            # calculated and ran off the edge of the frame, which no amount of
+            # adjusting the budget would have fixed. Turning it off makes the
+            # measurement true, and normal weight is also what was asked for:
+            # a heavy display face at 112px was shouting.
             (f"Style: Main,{family},{size},{self.primary},{self.highlight},"
-             f"&H00101010,&H80000000,-1,0,0,0,100,100,"
+             f"&H00101010,&H80000000,{self._bold_flag()},0,0,0,100,100,"
              f"{self._letter_spacing(language)},0,1,"
              f"{self.outline},{self.shadow},2,{margin_h},{margin_h},{margin_v},1"),
             "",
@@ -285,6 +294,14 @@ class CaptionEngine:
         "gujr": "એક ભેટ અંધારા રૂમને તારાઓના આકાશમાં",
         "": "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG",
     }
+
+    def _bold_flag(self) -> int:
+        """ASS Bold: -1 for on, 0 for off.
+
+        Off by default. Synthetic bold widens glyphs past what the character
+        budget was measured against, and the bundled faces are already heavy.
+        """
+        return -1 if bool(self.cfg.get("captions.bold", False)) else 0
 
     def _letter_spacing(self, language: str) -> float:
         """ASS Spacing (letter tracking). ZERO for complex scripts.

@@ -916,13 +916,24 @@ class TestPhoneAuth:
     def test_a_bare_token_is_not_authorized_without_env_credentials(self, auth):
         """Nothing could refresh it, so claiming success would be a lie."""
         auth.import_refresh_token("1//refresh-abc")
-        assert auth.authorized is False
+        # No client id was sent and .env has none, so nothing can refresh it.
+        channel = auth.channels_store.get()
+        assert channel is not None and channel.client_id == ""
+        assert auth.configured is False
 
     def test_the_issuing_client_is_recorded_as_public(self, auth):
-        auth.import_refresh_token("1//refresh-abc", "android-123.apps.googleusercontent.com")
-        data = auth.store.read()
-        assert data["client_id"] == "android-123.apps.googleusercontent.com"
-        assert data["public_client"] is True
+        """Read through the channel store, which is where tokens now live.
+
+        The record moved from a single top-level object to {"channels": {...}}
+        when several brand channels became possible - one refresh token per
+        channel, because a YouTube token is bound to one channel.
+        """
+        auth.import_refresh_token(
+            "1//refresh-abc", "android-123.apps.googleusercontent.com")
+        channel = auth.channels_store.get()
+        assert channel is not None
+        assert channel.client_id == "android-123.apps.googleusercontent.com"
+        assert channel.public_client is True
 
     def test_credentials_refresh_with_the_device_client_and_no_secret(self, auth):
         auth.import_refresh_token("1//refresh-abc", "android-123.apps.googleusercontent.com")
@@ -966,9 +977,11 @@ class TestPhoneAuth:
             expiry = None
 
         auth._persist(Creds())
-        data = auth.store.read()
-        assert data.get("client_id") == "android-123.apps.googleusercontent.com"
-        assert data.get("public_client") is True
+        channel = auth.channels_store.get()
+        assert channel is not None
+        assert channel.client_id == "android-123.apps.googleusercontent.com"
+        assert channel.public_client is True
+        assert channel.token == "new-access"
         assert auth.authorized is True
 
     def test_desktop_flow_still_uses_the_env_credentials(self, tmp_path, monkeypatch):

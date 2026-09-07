@@ -304,8 +304,15 @@ video:
 captions:
   enabled: true
   style: karaoke                 # karaoke | block | none
-  font: Arial Black
-  font_size: 112
+  # A normal-weight face, not a heavy display one.
+  #
+  # Arial Black at 112px with synthetic bold on top was shouting, and it also
+  # broke the fit: the character budget is measured from the font file at its
+  # real weight, so smeared-bold glyphs ran off the edge of the frame.
+  font: Anton
+  font_size: 96
+  # Synthetic bold. Off - see CaptionEngine._bold_flag.
+  bold: false
   primary_color: "&H00FFFFFF"
   highlight_color: "&H0000E5FF"
   outline: 7
