@@ -23,6 +23,7 @@ from ..core.logging import log_event
 from ..core.models import ContentIdea, Scene, Script
 from ..core.niche import NicheProfile
 from ..core.util import agree, count_words, sentences, truncate
+from ..video.templates import KIDS_LEARNING_HINTS
 from .llm import LLMError, LLMRouter
 
 # Openings that waste the first seconds. Retention dies here (spec section 15).
@@ -187,6 +188,54 @@ def _language_line(language: str) -> str:
                  f"transliteration is mispronounced and unreadable for native "
                  f"speakers.")
     return line
+
+
+
+def _kids_instruction(profile) -> str:
+    """The child-directed block, and it has to distinguish the two jobs.
+
+    The previous version told every child-directed request "no danger, no
+    conflict", bedtime stories included - and a story with no conflict is not
+    a story. What came back was exactly that: an opening question ("Can a hug
+    turn a dark room into a starry sky?") followed by abstract statements
+    about hugs. The complaint was that it read as narration and philosophy
+    rather than something a child would follow, and the prompt was asking for
+    it.
+
+    Gentle stakes are not danger. A child cannot find her shoe; a puppy is
+    afraid of the dark; the moon looks lonely. Something has to want something
+    and then get it, or the piece has nowhere to go.
+
+    Teaching content is the opposite job and keeps the old shape: repetition,
+    call-and-response, no narrative arc to interrupt.
+    """
+    if not profile.made_for_kids:
+        return ""
+    name = (getattr(profile, "name", "") or "").lower()
+    if any(hint in name for hint in KIDS_LEARNING_HINTS):
+        return (
+            "\nTHIS IS CHILD-DIRECTED TEACHING CONTENT.\n"
+            "- Simple words, one idea per sentence, warm and calm.\n"
+            "- Repeat the thing being taught in EVERY scene: say it, use it "
+            "in a short example, then say it again.\n"
+            "- Ask the child to join in out loud at least twice.\n"
+            "- Nothing scary. No danger.\n")
+    return (
+        "\nTHIS IS A CHILD-DIRECTED STORY, so tell an actual STORY.\n"
+        "- ONE named character a small child can picture, introduced by name "
+        "in the first two scenes.\n"
+        "- Something the character WANTS, or a small gentle problem: a lost "
+        "toy, a dark room, a friend who will not share. Gentle stakes are the "
+        "point - with nothing at stake there is no story, only description.\n"
+        "- Events in ORDER, each scene moving to the next. No scene may be a "
+        "general statement about the theme.\n"
+        "- A warm resolution where the problem is solved, and one line of "
+        "feeling at the end.\n"
+        "- Concrete and sensory: what things look like, sound like and feel "
+        "like. No abstraction, no moral lecture, no rhetorical questions "
+        "about life.\n"
+        "- Simple words, one idea per sentence, calm. Nothing scary, no real "
+        "danger, no romance.\n")
 
 
 class ScriptGenerator:
@@ -596,10 +645,7 @@ Return this exact JSON shape and nothing else:
         already = ("\nSECTIONS ALREADY WRITTEN (do not repeat these):\n"
                    + "\n".join(f"  - {c}" for c in covered)) if covered else ""
         lang_line = _language_line(language)
-        kids_line = ""
-        if profile.made_for_kids:
-            kids_line = ("\nTHIS IS CHILD-DIRECTED CONTENT. Simple words, one "
-                         "idea per sentence, warm and calm. Nothing scary.\n")
+        kids_line = _kids_instruction(profile)
         edge = ""
         if is_first:
             edge = (f"\nThis is the OPENING. Scene 1 must be the hook, stated "
@@ -686,13 +732,7 @@ Return this exact JSON shape and nothing else:
             f"- {role.upper()} (~{int(frac * duration)}s): {purpose}"
             for role, purpose, frac in structure)
         lang_line = _language_line(language)
-        kids_line = ""
-        if profile.made_for_kids:
-            kids_line = (
-                "\nTHIS IS CHILD-DIRECTED CONTENT. Simple words, one idea per "
-                "sentence, warm and calm. Nothing scary, no danger, no conflict, "
-                "no romance, no pressure to act.\n")
-
+        kids_line = _kids_instruction(profile)
         return f"""Write an original {duration}-second {'YouTube Short' if is_short else 'YouTube video'} script.
 
 {profile.prompt_block()}

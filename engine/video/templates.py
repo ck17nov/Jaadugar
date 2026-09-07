@@ -228,6 +228,15 @@ TEMPLATES: dict[str, StyleTemplate] = {
 DEFAULT_TEMPLATE = "EDUCATIONAL"
 
 # Words in the niche / user style that point at a template.
+# Child-directed niches that TEACH rather than tell a story. Exported because
+# the script prompt needs the same distinction: a drill wants repetition and
+# call-and-response, a story wants a character and something that happens.
+KIDS_LEARNING_HINTS: tuple[str, ...] = (
+    "alphabet", "letter", "letters", "abc", "number", "numbers", "counting",
+    "count", "phonics", "spelling", "shapes", "colours", "colors", "word",
+    "words", "sentence", "sentences", "speaking",
+)
+
 _HINTS: dict[str, tuple[str, ...]] = {
     "KIDS_STORY": ("kids", "children", "toddler", "nursery", "bedtime",
                    "preschool", "cartoon"),
@@ -277,10 +286,7 @@ def select_template(niche: str, style: str = "", *,
         # Teaching letters or numbers is a different job from telling a story,
         # and it wants different visuals: a flashcard where the character IS
         # the content, against a full-frame illustration where the picture is.
-        learning = ("alphabet", "letter", "letters", "abc", "number",
-                    "numbers", "counting", "count", "phonics", "spelling",
-                    "shapes", "colours", "colors", "word", "words",
-                    "sentence", "sentences", "speaking")
+        learning = KIDS_LEARNING_HINTS
         # Rhymes and poems are deliberately NOT here. They are performances
         # with illustrated scenes, not drills - a flashcard showing one word
         # at a time is the wrong shape for a nursery rhyme.

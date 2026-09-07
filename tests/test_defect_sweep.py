@@ -410,3 +410,198 @@ class TestCloudflareBackend:
         src = inspect.getsource(CloudflareBackend.fetch)
         assert "b64decode" in src
         assert "content_type" in src
+
+# ==========================================================================
+class TestKidsStoryPrompt:
+    """A bedtime story came back as narration and philosophy.
+
+    The prompt was asking for it: every child-directed request was told "no
+    danger, no conflict", and a story with no conflict is not a story.
+    """
+
+    def _instruction(self, niche, audience="5-7"):
+        from engine.content.script import _kids_instruction
+        return _kids_instruction(build_profile(niche, audience=audience))
+
+    def test_a_story_niche_is_told_to_tell_a_story(self):
+        text = self._instruction("kids bedtime stories")
+        assert "actual STORY" in text
+
+    def test_a_story_needs_a_named_character(self):
+        assert "named character" in self._instruction("kids moral stories")
+
+    def test_gentle_stakes_are_required_rather_than_forbidden(self):
+        """"no conflict" is what produced an essay about hugs."""
+        text = self._instruction("kids bedtime stories")
+        assert "no conflict" not in text
+        assert "at stake" in text
+
+    def test_abstraction_is_ruled_out(self):
+        text = self._instruction("kids bedtime stories")
+        assert "rhetorical questions" in text
+
+    def test_rhymes_are_stories_not_drills(self):
+        """A nursery rhyme is a performance, not a flashcard."""
+        assert "actual STORY" in self._instruction("kids rhymes and poems")
+
+    def test_teaching_content_keeps_repetition(self):
+        text = self._instruction("kids alphabet learning")
+        assert "TEACHING" in text
+        assert "Repeat" in text
+        assert "actual STORY" not in text
+
+    def test_adult_content_gets_no_kids_block(self):
+        assert self._instruction("personal finance", audience="25-44") == ""
+
+    def test_both_prompt_builders_use_it(self):
+        import inspect
+        from engine.content.script import ScriptGenerator
+        joined = (inspect.getsource(ScriptGenerator._build_prompt)
+                  + inspect.getsource(ScriptGenerator._section_prompt))
+        assert joined.count("_kids_instruction(profile)") == 2
+
+    def test_the_learning_keywords_are_shared_with_the_templates(self):
+        """Two copies of this list would drift."""
+        import inspect
+        from engine.content import script as script_mod
+        from engine.video.templates import KIDS_LEARNING_HINTS
+        assert "alphabet" in KIDS_LEARNING_HINTS
+        assert "KIDS_LEARNING_HINTS" in inspect.getsource(script_mod)
+
+# ==========================================================================
+class TestCaptionLanguage:
+    """Captions in a different language from the voice.
+
+    Asked for directly: Hindi narration with English captions, and the
+    reverse. The hard part is that captions ARE the TTS word-mark stream, so
+    translated text has no per-word timing and cannot be karaoke.
+    """
+
+    def _needs(self, narration, caption):
+        from engine.content.translate import needs_translation
+        return needs_translation(narration, caption)
+
+    def test_a_different_language_is_translated(self):
+        assert self._needs("hi", "en") is True
+        assert self._needs("en", "hi") is True
+
+    def test_blank_follows_the_narration(self):
+        """The default, and what every previous version did."""
+        assert self._needs("hi", "") is False
+
+    def test_the_same_language_costs_no_call(self):
+        assert self._needs("hi", "hi") is False
+
+    def test_a_regional_variant_is_the_same_language(self):
+        """en against en-IN must not spend an LLM call."""
+        assert self._needs("en", "en-IN") is False
+
+    def test_hinglish_is_not_a_translation_target(self):
+        """It is Hindi in Latin letters, so the base language matches."""
+        assert self._needs("hi", "hi-latn") is False
+
+    def test_language_names_are_resolved_for_the_prompt(self):
+        """A bare code gets Hinglish about as often as Hindi."""
+        from engine.content.translate import language_name
+        assert language_name("hi") == "Hindi"
+        assert language_name("en-IN") == "Indian English"
+        # An unmapped regional code falls back to its base language.
+        assert language_name("en-GB") == "English"
+
+    def test_a_failed_translation_degrades_rather_than_raising(self):
+        """Losing the second language beats losing the video."""
+        from engine.content.translate import translate_scenes
+        from engine.core.models import Scene
+
+        class Broken:
+            def complete_json(self, *a, **k):
+                raise RuntimeError("rate limited")
+
+        scenes = [Scene(index=0, narration="hello")]
+        assert translate_scenes(scenes, target="hi", router=Broken()) == 0
+        assert scenes[0].caption_text == ""
+
+    def test_a_good_reply_fills_every_scene(self):
+        from engine.content.translate import translate_scenes
+        from engine.core.models import Scene
+
+        class Router:
+            def complete_json(self, prompt, **k):
+                return {"lines": [{"n": 1, "text": "एक"},
+                                  {"n": 2, "text": "दो"}]}, "fake"
+
+        scenes = [Scene(index=0, narration="one"), Scene(index=1, narration="two")]
+        assert translate_scenes(scenes, target="hi", router=Router()) == 2
+        assert scenes[0].caption_text == "एक"
+        assert scenes[1].caption_text == "दो"
+
+    def test_an_unnumbered_list_is_still_accepted(self):
+        """Models drop the numbering; the shape has to tolerate it."""
+        from engine.content.translate import translate_scenes
+        from engine.core.models import Scene
+
+        class Router:
+            def complete_json(self, prompt, **k):
+                return {"lines": ["first", "second"]}, "fake"
+
+        scenes = [Scene(index=0, narration="a"), Scene(index=1, narration="b")]
+        assert translate_scenes(scenes, target="en", router=Router()) == 2
+
+    def test_translated_blocks_are_timed_to_scene_spans(self, tmp_path):
+        from engine.video.captions import CaptionEngine
+        engine = CaptionEngine(load_config())
+        spans = [(0.0, 3.0, "पहली पंक्ति"), (3.2, 6.0, "दूसरी पंक्ति")]
+        ass_path, srt_path, count = engine.build_translated(
+            spans, tmp_path / "c.ass", tmp_path / "c.srt", 1080, 1920,
+            language="hi")
+        assert count == 2
+        body = ass_path.read_text(encoding="utf-8")
+        assert body.count("Dialogue:") == 2
+        # The Devanagari font, chosen from the CAPTION language.
+        assert "Noto Sans Devanagari" in body
+
+    def test_a_very_short_scene_is_held_long_enough_to_read(self, tmp_path):
+        from engine.video.captions import CaptionEngine
+        engine = CaptionEngine(load_config())
+        ass_path, _, _ = engine.build_translated(
+            [(0.0, 0.2, "a line")], tmp_path / "c.ass", tmp_path / "c.srt",
+            1080, 1920, language="en")
+        line = next(l for l in ass_path.read_text(encoding="utf-8").splitlines()
+                    if l.startswith("Dialogue:"))
+        end = line.split(",")[2]
+        # 0.2s would flash. The floor holds it for at least 0.85s.
+        assert end > "0:00:00.60"
+
+    def test_a_translated_block_is_not_uppercased(self, tmp_path):
+        """Uppercasing a whole sentence is shouting, and some scripts have no
+        case at all."""
+        from engine.video.captions import CaptionEngine
+        cfg = load_config()
+        cfg.set("captions.uppercase", True)
+        ass_path, _, _ = CaptionEngine(cfg).build_translated(
+            [(0.0, 3.0, "a quiet village morning")],
+            tmp_path / "c.ass", tmp_path / "c.srt", 1080, 1920, language="en")
+        assert "a quiet village morning" in ass_path.read_text(encoding="utf-8")
+
+    def test_empty_text_is_skipped_rather_than_rendered_blank(self, tmp_path):
+        from engine.video.captions import CaptionEngine
+        engine = CaptionEngine(load_config())
+        _, _, count = engine.build_translated(
+            [(0.0, 2.0, "kept"), (2.0, 4.0, "   ")],
+            tmp_path / "c.ass", tmp_path / "c.srt", 1080, 1920, language="en")
+        assert count == 1
+
+    def test_nothing_to_render_is_an_error_not_a_silent_empty_file(self, tmp_path):
+        from engine.video.captions import CaptionEngine
+        with pytest.raises(RuntimeError):
+            CaptionEngine(load_config()).build_translated(
+                [], tmp_path / "c.ass", tmp_path / "c.srt", 1080, 1920)
+
+    def test_the_request_carries_the_choice(self):
+        assert AutomationRequest().caption_language == ""
+        assert AutomationRequest(caption_language="en").caption_language == "en"
+
+    def test_the_api_accepts_it(self):
+        from backend.api.main import AutomationBody
+        body = AutomationBody(niche="science", caption_language="hi")
+        assert body.caption_language == "hi"

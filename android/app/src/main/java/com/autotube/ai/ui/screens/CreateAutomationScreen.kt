@@ -109,6 +109,20 @@ val LANGUAGES = listOf(
     "hi-Latn" to "Hinglish",
 )
 
+// Subtitle language. The blank first entry follows the narration, which is
+// the default; anything else is translated per scene.
+val CAPTION_LANGUAGES = listOf(
+    "" to "Same as narration",
+    "en" to "English",
+    "hi" to "Hindi",
+    "en-IN" to "Indian English",
+    "ta" to "Tamil",
+    "te" to "Telugu",
+    "bn" to "Bengali",
+    "mr" to "Marathi",
+    "gu" to "Gujarati",
+)
+
 val VOICES = listOf(
     "female" to "Female",
     "male" to "Male",
@@ -180,6 +194,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     // video up straight away.
     var publishMode by rememberSaveable { mutableStateOf("scheduled") }
     var voiceGender by rememberSaveable { mutableStateOf("female") }
+    var captionLanguage by rememberSaveable { mutableStateOf("") }
 
     // Made for Kids follows the NICHE and the AGE BAND, and is cleared when
     // neither applies.
@@ -329,6 +344,27 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                 "A real child voice exists only for English. For other " +
                     "languages this is the female voice pitched up and slowed " +
                     "slightly - child-friendly rather than an actual child.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        LabeledDropdown(
+            label = "Caption language",
+            value = captionLanguage,
+            options = CAPTION_LANGUAGES.map { it.first },
+            display = { key ->
+                CAPTION_LANGUAGES.firstOrNull { it.first == key }?.second ?: key
+            },
+            onValueChange = { captionLanguage = it },
+        )
+        if (captionLanguage.isNotBlank() &&
+            captionLanguage.substringBefore("-") != language.substringBefore("-")
+        ) {
+            Text(
+                "Captions are translated and shown one line per scene rather " +
+                    "than word by word - the word timings come from the voice, " +
+                    "so they do not fit translated text.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -570,6 +606,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                         durationSeconds = lengthSeconds,
                         style = style,
                         voiceGender = voiceGender,
+                        captionLanguage = captionLanguage,
                         count = count,
                         mode = if (autoMode) "AUTO" else "APPROVAL",
                         frequency = frequency,

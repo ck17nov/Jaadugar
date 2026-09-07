@@ -98,6 +98,10 @@ class AutomationRequest(JsonMixin):
     # female | male | child. "child" is a real voice for English only; for
     # every other language it is the female voice pitched up and slowed.
     voice_gender: str = "female"
+    # Subtitle language. Empty follows the narration. Set to a DIFFERENT
+    # language to reach people who will not watch in the other one - a
+    # Hindi-narrated video with English captions, or the reverse.
+    caption_language: str = ""
     count: int = 1
     mode: str = Mode.APPROVAL.value
     # scheduling
@@ -200,6 +204,10 @@ class Scene(JsonMixin):
     visual_keywords: list[str] = field(default_factory=list)
     on_screen_text: str = ""
     role: str = "value"               # hook | context | value | payoff | cta
+    # Subtitle text when the caption language differs from the narration.
+    # Empty means "use the narration", which is the default and what every
+    # previous version did.
+    caption_text: str = ""
     # filled in after TTS / render planning
     start: float = 0.0
     duration: float = 0.0

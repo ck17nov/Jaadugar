@@ -139,6 +139,45 @@ class CaptionEngine:
         self.uppercase = bool(cfg.get("captions.uppercase", True))
 
     # ------------------------------------------------------------------
+    def build_translated(self, spans: list[tuple[float, float, str]],
+                         out_ass: Path, out_srt: Path,
+                         width: int, height: int, *,
+                         language: str = "") -> tuple[Path, Path, int]:
+        """Captions in a DIFFERENT language from the narration.
+
+        One block per scene, timed to the span the scene occupies. Not
+        karaoke, and there is deliberately no option to make it karaoke:
+        word-level timing comes from the synthesiser, so it describes the
+        words the VOICE says. Highlighting translated words in an order the
+        voice is not saying them looks broken.
+
+        `spans` is (start, end, text) per scene, already in absolute timeline
+        seconds - the same offsets the audio was assembled from, so this is
+        exact rather than estimated.
+        """
+        groups: list[CaptionGroup] = []
+        floor = float(self.cfg.get("captions.min_block_seconds", 0.85))
+        for start, end, text in spans:
+            clean = (text or "").strip()
+            if not clean:
+                continue
+            # A very short scene would flash text nobody can read. Hold it for
+            # the floor instead, overlapping into the next scene's span - which
+            # is what a human subtitler does.
+            stop = max(end, start + floor)
+            groups.append(CaptionGroup(
+                words=[CaptionWord(start=start, end=stop, text=clean)]))
+        if not groups:
+            raise RuntimeError("no translated caption text available")
+
+        ass_text = self._render_ass(groups, width, height, "block", language)
+        out_ass.parent.mkdir(parents=True, exist_ok=True)
+        out_ass.write_text(ass_text, encoding="utf-8")
+        out_srt.write_text(self._render_srt(groups), encoding="utf-8")
+        log_event("CAPTION", "translated captions built", blocks=len(groups),
+                  language=language)
+        return out_ass, out_srt, len(groups)
+
     def build(self, clips: list[tuple[float, SceneAudio]], out_ass: Path,
               out_srt: Path, width: int, height: int, *,
               style_override: str | None = None,
@@ -337,7 +376,12 @@ class CaptionEngine:
         """Whole phrase, no per-word highlight (calmer; used for kids content)."""
         events: list[str] = []
         for group in groups:
-            tokens = [_escape(w.text.upper() if self.uppercase else w.text)
+            # A translated block arrives as ONE "word" holding a whole
+            # sentence. Uppercasing that is shouting rather than emphasis, and
+            # several scripts have no case at all, so it is left alone.
+            translated = len(group.words) == 1 and " " in group.words[0].text
+            upper = self.uppercase and not translated
+            tokens = [_escape(w.text.upper() if upper else w.text)
                       for w in group.words]
             text = "{\\fad(90,70)}" + " ".join(tokens)
             events.append(

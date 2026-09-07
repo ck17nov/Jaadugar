@@ -324,6 +324,17 @@ captions:
   # Side margin as a fraction of width, per side. Was hard-coded at 0.075,
   # which discarded 15% of the frame and forced captions onto a second line.
   margin_fraction: 0.045
+  # Subtitle language when it should differ from the narration.
+  #
+  # Empty follows the narration, which is the default. Set to a different
+  # language and each scene's line is translated and shown as a BLOCK for the
+  # scene's span - not karaoke, because word-level timing comes from the voice
+  # and a translation has different words in a different order.
+  language: ""
+  translate: true
+  # Floor on a translated block's time on screen. Below this, a short scene
+  # flashes text nobody can read.
+  min_block_seconds: 0.85
   max_words_on_screen: 3
   # An upper bound only. The real limit is computed from the font size and
   # frame width so a caption can never wrap - see CaptionEngine._chars_per_line.

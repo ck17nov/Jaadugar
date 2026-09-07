@@ -526,6 +526,34 @@ class Pipeline:
         self.db.save_job(job)
         return job_dir / "voice.wav", total, offsets
 
+    def _caption_language(self, request: AutomationRequest) -> str:
+        """The caption language, or "" to follow the narration."""
+        if not bool(self.cfg.get("captions.translate", True)):
+            return ""
+        wanted = (getattr(request, "caption_language", "") or "").strip()
+        if not wanted:
+            wanted = str(self.cfg.get("captions.language", "") or "").strip()
+        from .content.translate import needs_translation
+        return wanted if needs_translation(request.language, wanted) else ""
+
+    def _translate_captions(self, job_dir: Path, request: AutomationRequest,
+                            script: Script) -> None:
+        """Fill Scene.caption_text when the caption language differs.
+
+        Degrades rather than fails: losing the second language is a
+        disappointment, losing the video over it is not a trade worth making.
+        """
+        target = self._caption_language(request)
+        if not target:
+            return
+        from .content.translate import dump, translate_scenes
+        scenes = script.scene_objects()
+        filled = translate_scenes(scenes, target=target, router=self.router)
+        if not filled:
+            return
+        script.scenes = [s.to_dict() for s in scenes]
+        safe_write_json(job_dir / "captions_translated.json", dump(scenes))
+
     def _character_bible(self, job_dir: Path, script: Script):
         """The recurring cast, or None when it would not be used.
 
@@ -592,9 +620,33 @@ class Pipeline:
         caption_style = (profile.caption_style
                          if self.cfg.get("captions.style") == "karaoke"
                          else str(self.cfg.get("captions.style")))
-        ass_path, srt_path, groups = self.caption_engine.build(
-            offsets, job_dir / "captions.ass", job_dir / "captions.srt",
-            w, h, style_override=caption_style, language=request.language)
+        # Captions in a DIFFERENT language from the narration, when asked for.
+        #
+        # Word-level karaoke is impossible here: the timings come from the
+        # synthesiser and describe the words the VOICE says, so translated text
+        # has no per-word timing. One block per scene, on the span the scene
+        # actually occupies.
+        caption_language = self._caption_language(request)
+        # Translate here rather than at the script stage: the blocks are timed
+        # to scene spans, and scene.start/duration are only filled in once the
+        # voice has been measured.
+        if caption_language:
+            self._translate_captions(job_dir, request, script)
+        translated = [
+            (scene.start, scene.start + scene.duration,
+             getattr(scene, "caption_text", ""))
+            for scene in script.scene_objects()
+            if getattr(scene, "caption_text", "").strip()
+        ]
+        if caption_language and translated:
+            ass_path, srt_path, groups = self.caption_engine.build_translated(
+                translated, job_dir / "captions.ass",
+                job_dir / "captions.srt", w, h, language=caption_language)
+        else:
+            ass_path, srt_path, groups = self.caption_engine.build(
+                offsets, job_dir / "captions.ass", job_dir / "captions.srt",
+                w, h, style_override=caption_style,
+                language=request.language)
         job.subtitle_path = str(srt_path)
 
         # ---- music + sfx ------------------------------------------------

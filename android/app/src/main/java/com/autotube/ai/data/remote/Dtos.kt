@@ -37,6 +37,7 @@ data class AutomationRequestDto(
     @SerialName("duration_seconds") val durationSeconds: Int = 45,
     val style: String = "fast-paced, curiosity-driven",
     @SerialName("voice_gender") val voiceGender: String = "female",
+    @SerialName("caption_language") val captionLanguage: String = "",
     val count: Int = 1,
     val mode: String = "APPROVAL",
     val frequency: String = "once",
