@@ -111,6 +111,7 @@ class AutomationBody(BaseModel):
     voice_gender: Literal["female", "male", "child"] = "female"
     caption_language: str = Field(default="", max_length=12)
     caption_style: Literal["", "karaoke", "block", "none"] = ""
+    channel_id: str = Field(default="", max_length=64)
     count: int = Field(default=1, ge=1, le=10)
     mode: Literal["AUTO", "APPROVAL"] = "APPROVAL"
     frequency: Literal["once", "daily", "weekly", "days"] = "once"
@@ -780,6 +781,73 @@ def youtube_status() -> dict[str, Any]:
             # of showing "Authorised: yes" beside a refresh error.
             out["authorized"] = False
     return out
+
+
+class NicheMapBody(BaseModel):
+    niches: list[str] = Field(default_factory=list, max_length=40)
+
+
+@app.get("/youtube/accounts", dependencies=[Depends(require_api_key)])
+def list_accounts() -> dict[str, Any]:
+    """Every brand channel this backend can publish to.
+
+    One entry per authorisation. A YouTube token is bound to a single channel -
+    the channel is chosen in Google's chooser during consent - so posting to
+    several brand channels under one Google account means several
+    authorisations, not one token with a channel parameter.
+    """
+    from engine.youtube.auth import YouTubeAuth
+    auth = YouTubeAuth(CFG)
+    store = auth.channels_store
+    default = store.default_id()
+    return {
+        "accounts": [
+            {**channel.public(), "is_default": channel.channel_id == default}
+            for channel in store.all()
+        ],
+        "default": default,
+    }
+
+
+@app.post("/youtube/accounts/{channel_id}/default",
+          dependencies=[Depends(require_api_key)])
+def set_default_account(channel_id: str) -> dict[str, Any]:
+    from engine.youtube.auth import YouTubeAuth
+    if not YouTubeAuth(CFG).channels_store.set_default(channel_id):
+        raise HTTPException(status_code=404,
+                            detail={"error": "channel_not_found"})
+    return {"default": channel_id}
+
+
+@app.post("/youtube/accounts/{channel_id}/niches",
+          dependencies=[Depends(require_api_key)])
+def set_account_niches(channel_id: str, body: NicheMapBody) -> dict[str, Any]:
+    """Map niches to a channel, so a kids video posts to the kids channel.
+
+    A niche belongs to exactly one channel - otherwise "which channel does
+    this go to" has two answers - so assigning it here removes it from any
+    other channel.
+    """
+    from engine.youtube.auth import YouTubeAuth
+    store = YouTubeAuth(CFG).channels_store
+    if not store.set_niches(channel_id, body.niches):
+        raise HTTPException(status_code=404,
+                            detail={"error": "channel_not_found"})
+    log_event("API", "channel niches set", channel=channel_id,
+              niches=",".join(body.niches) or "-")
+    return {"channel_id": channel_id, "niches": body.niches}
+
+
+@app.delete("/youtube/accounts/{channel_id}",
+            dependencies=[Depends(require_api_key)])
+def remove_account(channel_id: str) -> dict[str, Any]:
+    """Forget a channel's authorisation. Videos already published stay up."""
+    from engine.youtube.auth import YouTubeAuth
+    if not YouTubeAuth(CFG).channels_store.remove(channel_id):
+        raise HTTPException(status_code=404,
+                            detail={"error": "channel_not_found"})
+    log_event("API", "channel authorisation removed", channel=channel_id)
+    return {"removed": channel_id}
 
 
 @app.post("/youtube/token", dependencies=[Depends(require_api_key)])

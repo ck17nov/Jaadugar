@@ -125,6 +125,7 @@ class YouTubeUploader:
                subtitle: Path | None = None,
                playlist_id: str = "",
                schedule: bool = False,
+               channel_id: str = "",
                dry_run: bool | None = None) -> UploadResult:
         dry = self.cfg.dry_run if dry_run is None else dry_run
         upload_enabled = bool(self.cfg.get("youtube.upload_enabled", False))
@@ -158,7 +159,7 @@ class YouTubeUploader:
         from googleapiclient.errors import HttpError
         from googleapiclient.http import MediaFileUpload
 
-        yt = self.auth.service()
+        yt = self.auth.service(channel_id=channel_id)
         media = MediaFileUpload(str(video), chunksize=CHUNK_SIZE,
                                 resumable=True, mimetype="video/mp4")
         request = yt.videos().insert(

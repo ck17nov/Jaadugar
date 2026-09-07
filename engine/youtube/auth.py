@@ -243,6 +243,8 @@ class YouTubeAuth:
         data = self.store.read()
         if not data.get("refresh_token"):
             return False
+        if data.get("channels"):
+            return any(c.refresh_token for c in self.channels_store.all())
         return bool(data.get("client_id") or self.configured)
 
     # ------------------------------------------------------------------
@@ -257,16 +259,40 @@ class YouTubeAuth:
             }
         }
 
-    def credentials(self):
-        """Return live google-auth Credentials, refreshing if needed."""
+    @property
+    def channels_store(self):
+        """The multi-channel view of the same token file."""
+        from .channels import ChannelStore
+        if getattr(self, "_channel_store", None) is None:
+            self._channel_store = ChannelStore(self.store)
+        return self._channel_store
+
+    def credentials(self, channel_id: str = ""):
+        """Live Credentials for one channel, refreshing if needed.
+
+        `channel_id` selects which brand channel to act as. A YouTube token is
+        bound to ONE channel - the channel is chosen during consent and there
+        is no per-request override for an ordinary client - so each channel has
+        its own stored refresh token.
+
+        An unknown id is an error rather than a fall back to the default:
+        uploading a finance video to the kids channel because a stale id was
+        passed is worse than failing and saying so.
+        """
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
 
-        data = self.store.read()
-        if not data.get("refresh_token"):
+        channel = self.channels_store.get(channel_id)
+        if channel is None:
+            if channel_id:
+                known = ", ".join(self.channels_store.ids()) or "none"
+                raise AuthError(
+                    f"no stored authorisation for channel {channel_id!r} "
+                    f"(known: {known}). Add it under Settings > YouTube.")
             raise AuthError(
                 "not authorized yet - run `autotube auth login`, or connect "
                 "YouTube from the Android app")
+        data = channel.to_dict()
 
         # Refresh with the client that ISSUED the token. A phone-issued token
         # comes from a public Android client (PKCE, no secret); a desktop token
@@ -300,11 +326,12 @@ class YouTubeAuth:
         )
         if not creds.valid:
             creds.refresh(Request())
-            self._persist(creds)
-            log_event("YOUTUBE", "access token refreshed")
+            self._persist(creds, channel_id=channel.channel_id)
+            log_event("YOUTUBE", "access token refreshed",
+                      channel=channel.title or channel.channel_id)
         return creds
 
-    def _persist(self, creds) -> None:
+    def _persist(self, creds, channel_id: str = "") -> None:
         """Write refreshed credentials back, KEEPING the issuing client.
 
         This used to replace the whole record, which silently discarded the
@@ -314,18 +341,31 @@ class YouTubeAuth:
         refresh after that fell back to the desktop credentials in .env and
         failed with `unauthorized_client`.
         """
-        previous = self.store.read() if self.store.exists() else {}
-        record = {
-            "token": creds.token,
-            "refresh_token": creds.refresh_token,
-            "token_uri": creds.token_uri,
-            "scopes": list(creds.scopes or SCOPES),
-            "expiry": creds.expiry.isoformat() if creds.expiry else None,
-        }
-        for carried in ("client_id", "public_client"):
-            if previous.get(carried):
-                record[carried] = previous[carried]
-        self.store.write(record)
+        from .channels import Channel
+        target = channel_id or self.channels_store.default_id()
+        existing = self.channels_store.get(target)
+        if existing is None:
+            # Nothing to update against - a first desktop login. Store it as
+            # the default and let the channel identity rename it later.
+            existing = Channel(channel_id=target or "default")
+        updated = Channel(
+            channel_id=existing.channel_id,
+            title=existing.title,
+            refresh_token=creds.refresh_token or existing.refresh_token,
+            # Carried, not recomputed. Dropping these is what made a phone
+            # authorisation work exactly once: the first refresh wiped the
+            # client id, and every refresh after it fell back to the desktop
+            # credentials in .env and failed with unauthorized_client.
+            client_id=existing.client_id,
+            public_client=existing.public_client,
+            token=creds.token,
+            token_uri=creds.token_uri or existing.token_uri,
+            scopes=list(creds.scopes or SCOPES),
+            expiry=creds.expiry.isoformat() if creds.expiry else None,
+            added_at=existing.added_at,
+            niches=list(existing.niches or []),
+        )
+        self.channels_store.put(updated)
 
     # ------------------------------------------------------------------
     def login_local_server(self, port: int = 8765) -> dict[str, Any]:
@@ -358,33 +398,81 @@ class YouTubeAuth:
         """
         if not refresh_token.strip():
             raise AuthError("empty refresh token")
-        record: dict[str, Any] = {
-            "token": None,
-            "refresh_token": refresh_token.strip(),
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "scopes": SCOPES,
-        }
-        if client_id.strip():
-            record["client_id"] = client_id.strip()
-            record["public_client"] = True
-        self.store.write(record)
+        from .channels import Channel
+        # Filed under a placeholder until the channel identity is fetched -
+        # the phone does not know which brand channel the user picked in
+        # Google's chooser, only that consent succeeded. identify_channel()
+        # below asks YouTube and refiles it under the real id.
+        channel = Channel(
+            channel_id="pending",
+            refresh_token=refresh_token.strip(),
+            client_id=client_id.strip(),
+            public_client=bool(client_id.strip()),
+            token_uri="https://oauth2.googleapis.com/token",
+            scopes=list(SCOPES),
+        )
+        self.channels_store.put(channel)
         log_event("YOUTUBE", "refresh token imported from device",
                   client=("device client recorded" if client_id.strip()
                           else "no client id sent - will use .env credentials"))
+        try:
+            self.identify_channel("pending")
+        except Exception as exc:
+            # Not fatal: the token works, the label is cosmetic until the next
+            # successful call. Saying so beats a silent "pending" in the list.
+            log_event("YOUTUBE", "could not identify the channel yet",
+                      error=str(exc)[:160])
+
+    def identify_channel(self, channel_id: str = "") -> dict[str, Any]:
+        """Ask YouTube which channel a stored token acts as, and refile it.
+
+        This is what makes several brand channels distinguishable: the token
+        itself carries no name, so the id and title have to be fetched once and
+        stored beside it.
+        """
+        from .channels import Channel
+        stored = self.channels_store.get(channel_id)
+        if stored is None:
+            raise AuthError(f"no stored authorisation for {channel_id!r}")
+        service = self.service(channel_id=stored.channel_id)
+        resp = service.channels().list(part="id,snippet", mine=True,
+                                       maxResults=1).execute()
+        items = resp.get("items") or []
+        if not items:
+            raise AuthError("the token is valid but owns no channel")
+        real_id = str(items[0].get("id", ""))
+        title = str((items[0].get("snippet") or {}).get("title", ""))
+        if not real_id:
+            raise AuthError("YouTube returned a channel with no id")
+        if real_id != stored.channel_id:
+            self.channels_store.remove(stored.channel_id)
+        renamed = Channel(**{**stored.to_dict(), "channel_id": real_id,
+                             "title": title})
+        self.channels_store.put(renamed)
+        log_event("YOUTUBE", "channel identified", channel=title, id=real_id)
+        return {"channel_id": real_id, "title": title}
 
     def logout(self) -> None:
         self.store.clear()
         log_event("YOUTUBE", "credentials cleared")
 
     # ------------------------------------------------------------------
-    def service(self, name: str = "youtube", version: str = "v3"):
+    def service(self, name: str = "youtube", version: str = "v3",
+                channel_id: str = ""):
         from googleapiclient.discovery import build
-        return build(name, version, credentials=self.credentials(),
+        return build(name, version,
+                     credentials=self.credentials(channel_id),
                      cache_discovery=False)
 
-    def channels(self) -> list[dict[str, Any]]:
-        """The authorised user's channels (for channel selection in the app)."""
-        yt = self.service()
+    def channels(self, channel_id: str = "") -> list[dict[str, Any]]:
+        """The channels this TOKEN can see.
+
+        Note what this is and is not: a token is bound to one channel, so for a
+        brand-channel setup this returns that one channel, not every channel
+        the Google account owns. The list of channels the app can post to is
+        `channels_store.all()` - one entry per authorisation.
+        """
+        yt = self.service(channel_id=channel_id)
         resp = yt.channels().list(part="id,snippet,statistics,status",
                                   mine=True, maxResults=50).execute()
         out = []

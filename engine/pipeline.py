@@ -836,11 +836,22 @@ class Pipeline:
                 upload_time=request.upload_time, timezone=request.timezone,
                 days=request.days or None)
 
+        # Resolve the channel: an explicit choice, else the niche mapping, else
+        # the default. Done here so the log and the job record say which
+        # channel a video went to.
+        channel_id = (getattr(request, "channel_id", "") or "").strip()
+        if not channel_id:
+            mapped = self.auth.channels_store.for_niche(request.niche)
+            channel_id = mapped.channel_id if mapped else ""
+        if channel_id:
+            log_event("YOUTUBE", "publishing to a specific channel",
+                      channel=channel_id, niche=request.niche)
+
         result = self.uploader.upload(
             video=Path(job.video_path), meta=meta,
             thumbnail=Path(job.thumbnail_path) if job.thumbnail_path else None,
             subtitle=Path(job.subtitle_path) if job.subtitle_path else None,
-            schedule=bool(meta.publish_at))
+            schedule=bool(meta.publish_at), channel_id=channel_id)
 
         safe_write_json(job_dir / "upload_result.json", result.to_dict())
         job.metadata = meta.to_dict()

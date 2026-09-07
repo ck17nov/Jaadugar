@@ -107,6 +107,10 @@ class AutomationRequest(JsonMixin):
     # with nothing over it reads as calmer and more finished, and YouTube's own
     # subtitle track still carries the SRT for anyone who wants it.
     caption_style: str = ""
+    # Which brand channel to publish to. Empty uses the niche mapping set in
+    # Settings, and failing that the default channel. A YouTube token is bound
+    # to one channel, so this selects WHICH stored authorisation to use.
+    channel_id: str = ""
     count: int = 1
     mode: str = Mode.APPROVAL.value
     # scheduling
