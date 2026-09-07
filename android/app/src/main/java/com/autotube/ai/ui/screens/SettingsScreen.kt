@@ -311,11 +311,19 @@ fun SettingsScreen() {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
+                    // Save first. The button was enabled from the DRAFT client
+                    // id while YouTubeAuthManager reads the SAVED one, so
+                    // pasting an id and tapping Connect refused with "Set the
+                    // OAuth client ID in Settings first" while the field
+                    // visibly contained it.
+                    if (editing) save()
                     runCatching { authManager.launch(authLauncher) }
-                        .onFailure { vm.reportAuthError(it.message ?: "Cannot start sign-in") }
+                        .onFailure {
+                            vm.reportAuthError(it.message ?: "Cannot start sign-in")
+                        }
                 },
                 enabled = oauthClientId.isNotBlank() && !busy,
-            ) { Text("Connect YouTube") }
+            ) { Text(if (editing) "Save and connect" else "Connect YouTube") }
             OutlinedButton(onClick = { vm.refreshYouTube() }) { Text("Refresh") }
         }
 

@@ -43,6 +43,16 @@ data class AutomationEntity(
     @ColumnInfo(name = "made_for_kids") val madeForKids: Boolean,
     @ColumnInfo(name = "created_at") val createdAt: Long,
     val enabled: Boolean = true,
+    // Everything below was missing, so every recurring run after the first
+    // rebuilt the request without it and silently fell back to the DTO
+    // defaults: a female voice, karaoke captions in the narration language
+    // and a scheduled publish, whatever was actually chosen.
+    @ColumnInfo(name = "voice_gender") val voiceGender: String = "female",
+    @ColumnInfo(name = "caption_language") val captionLanguage: String = "",
+    @ColumnInfo(name = "caption_style") val captionStyle: String = "",
+    @ColumnInfo(name = "publish_mode") val publishMode: String = "scheduled",
+    @ColumnInfo(name = "channel_id") val channelId: String = "",
+    @ColumnInfo(name = "min_quality_score") val minQualityScore: Int = 0,
 )
 
 @Entity(tableName = "jobs")
@@ -278,7 +288,12 @@ interface EventDao {
         ScheduleEntity::class,
         EventEntity::class,
     ],
-    version = 1,
+    // 2: AutomationEntity gained the voice, caption, publish-mode, channel
+    // and quality columns. Destructive migration is right here - the table is
+    // a local cache of automations the BACKEND now persists, so a rebuild
+    // costs nothing and writing a hand migration for a cache does not earn
+    // its keep.
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)

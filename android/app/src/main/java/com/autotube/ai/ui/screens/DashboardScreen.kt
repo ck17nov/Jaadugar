@@ -104,6 +104,19 @@ fun DashboardScreen(
 
     LaunchedEffect(Unit) { if (vm.isConfigured) vm.refresh() }
 
+    // Keep the dashboard live while a job is in flight, so the stage a video
+    // is at is visible without hunting for the refresh button.
+    val anyWorking = jobs.any {
+        it.status in setOf("IDEA", "RESEARCH", "SCRIPT", "VOICE", "VISUALS",
+                           "RENDERING", "QUALITY_CHECK")
+    }
+    LaunchedEffect(anyWorking) {
+        while (anyWorking) {
+            kotlinx.coroutines.delay(15_000)
+            vm.refresh()
+        }
+    }
+
     LazyColumn(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),

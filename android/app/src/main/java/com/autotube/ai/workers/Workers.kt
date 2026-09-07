@@ -118,6 +118,15 @@ class AutomationWorker(appContext: Context, params: WorkerParameters) :
         if (!app.secureStore.isConfigured) return Result.success()
 
         val automationId = inputData.getString(KEY_AUTOMATION_ID)
+        // "Specific days": a daily worker that does nothing on the other days.
+        val allowedDays = inputData.getIntArray(KEY_DAYS) ?: IntArray(0)
+        if (allowedDays.isNotEmpty()) {
+            // java.time DayOfWeek is 1=Monday; the app stores 0=Monday.
+            val today = java.time.LocalDate.now().dayOfWeek.value - 1
+            if (today !in allowedDays) {
+                return Result.success()
+            }
+        }
         val automation = automationId?.let { app.database.automations().byId(it) }
         // Self-cancel when the automation is gone or switched off.
         //
@@ -138,6 +147,11 @@ class AutomationWorker(appContext: Context, params: WorkerParameters) :
             language = automation.language,
             videoFormat = automation.videoFormat,
             durationSeconds = automation.durationSeconds,
+            voiceGender = automation.voiceGender,
+            captionLanguage = automation.captionLanguage,
+            captionStyle = automation.captionStyle,
+            publishMode = automation.publishMode,
+            channelId = automation.channelId,
             style = automation.style,
             count = 1,
             mode = automation.mode,
@@ -160,6 +174,7 @@ class AutomationWorker(appContext: Context, params: WorkerParameters) :
 
     companion object {
         const val KEY_AUTOMATION_ID = "automation_id"
+        const val KEY_DAYS = "allowed_days"
         fun nameFor(automationId: String) = "autotube-automation-$automationId"
 
         /** Tag used to cancel a schedule even if the unique name has drifted. */
@@ -222,13 +237,21 @@ object WorkScheduler {
         automationId: String,
         intervalHours: Long,
         initialDelayMinutes: Long,
+        days: List<Int> = emptyList(),
     ) {
         val request = PeriodicWorkRequestBuilder<AutomationWorker>(
             intervalHours.coerceAtLeast(1), TimeUnit.HOURS
         )
             .setConstraints(networkConstraints)
             .setInitialDelay(initialDelayMinutes.coerceAtLeast(0), TimeUnit.MINUTES)
-            .setInputData(workDataOf(AutomationWorker.KEY_AUTOMATION_ID to automationId))
+            .setInputData(workDataOf(
+                AutomationWorker.KEY_AUTOMATION_ID to automationId,
+                // Which weekdays this automation is allowed to run on, 0=Mon.
+                // Empty means every day. The worker checks it, because
+                // "specific days" previously fell through to a 24-hour
+                // interval and made a video every single day.
+                AutomationWorker.KEY_DAYS to days.toIntArray(),
+            ))
             .addTag(AutomationWorker.tagFor(automationId))
             .setBackoffCriteria(
                 androidx.work.BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)

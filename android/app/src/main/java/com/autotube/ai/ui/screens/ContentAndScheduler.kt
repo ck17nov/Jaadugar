@@ -1,5 +1,6 @@
 package com.autotube.ai.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -113,6 +114,7 @@ fun SchedulerScreen(onOpenJob: (String) -> Unit) {
     val jobs by vm.jobs.collectAsStateWithLifecycle()
     val automations by vm.automations.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
+    val loaded by vm.loaded.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.refresh() }
 
     val scheduled = remember(jobs) {
@@ -164,8 +166,12 @@ fun SchedulerScreen(onOpenJob: (String) -> Unit) {
         if (automations.isEmpty()) {
             item(key = "automations-empty") {
                 Text(
-                    "None. An automation set to daily, weekly or specific days " +
-                        "will appear here with a Stop button.",
+                    if (!loaded)
+                        "Could not load automations from the backend - this is " +
+                            "not the same as having none."
+                    else
+                        "None. An automation set to daily, weekly or specific " +
+                            "days will appear here with a Stop button.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -210,7 +216,10 @@ fun SchedulerScreen(onOpenJob: (String) -> Unit) {
 @Composable
 private fun ScheduleRow(job: JobEntity, timezone: String, onClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        // onClick was passed in and never used, so every row on this tab was
+        // dead - tapping a scheduled video did nothing while the identical
+        // rows on Dashboard and Content opened the preview.
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),

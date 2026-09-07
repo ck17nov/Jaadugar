@@ -100,6 +100,13 @@ class AutoTubeRepository(
                 timezone = request.timezone,
                 madeForKids = request.madeForKids,
                 createdAt = System.currentTimeMillis(),
+                // Carried so a recurring run repeats what was actually
+                // chosen rather than the DTO defaults.
+                voiceGender = request.voiceGender,
+                captionLanguage = request.captionLanguage,
+                captionStyle = request.captionStyle,
+                publishMode = request.publishMode,
+                channelId = request.channelId,
             )
         )
         logEvent("AUTOMATION", "queued ${request.niche} x${request.count}")

@@ -289,13 +289,24 @@ class CreateViewModel(
             info("Automation queued. Watch the Dashboard for progress.")
             com.autotube.ai.workers.WorkScheduler.syncNow(app)
             if (request.frequency != "once") {
+                // The POST above already queued the FIRST run, so the
+                // recurring schedule must start at the NEXT slot.
+                //
+                // With an initial delay of zero, WorkManager fired
+                // immediately as well and every new daily automation made two
+                // videos back to back - burning a day of free LLM quota on a
+                // duplicate.
                 val intervalHours = when (request.frequency) {
-                    "daily" -> 24L
                     "weekly" -> 168L
+                    // "days" included: a daily worker that returns early when
+                    // today is not one of the chosen days. One periodic worker
+                    // per weekday would be seven schedules to keep in step.
                     else -> 24L
                 }
                 com.autotube.ai.workers.WorkScheduler.scheduleAutomation(
-                    app, it, intervalHours, initialDelayMinutes = 0,
+                    app, it, intervalHours,
+                    initialDelayMinutes = intervalHours * 60,
+                    days = request.days,
                 )
             }
         }) { repo.startAutomation(request) }
@@ -328,10 +339,22 @@ class ScheduleViewModel(
         List<com.autotube.ai.data.remote.AutomationSummaryDto>> =
         _automations.asStateFlow()
 
+    /** True once a fetch has succeeded, so "none" can be told from "unknown". */
+    private val _loaded = MutableStateFlow(false)
+    val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
+
     fun refresh() {
-        if (!store.isConfigured) return
+        if (!store.isConfigured) {
+            error("Set the backend URL and API key in Settings first.")
+            return
+        }
         viewModelScope.launch {
-            repo.automations().onSuccess { _automations.value = it.automations }
+            // Reporting the failure matters: without it a backend that could
+            // not be reached rendered as "None." - which reads as "you have no
+            // automations" when the truth is "we have no idea".
+            repo.automations()
+                .onSuccess { _automations.value = it.automations; _loaded.value = true }
+                .onFailure { error(it.message ?: "Could not load automations.") }
         }
     }
 

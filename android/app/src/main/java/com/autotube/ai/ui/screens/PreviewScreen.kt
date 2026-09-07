@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -69,7 +70,23 @@ fun PreviewScreen(jobId: String, onBack: () -> Unit) {
     val message by vm.message.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    // Poll while the job is still working.
+    //
+    // Nothing polled before: this screen loaded once, and a render takes
+    // fifteen minutes to an hour on the free box, so the status sat unchanged
+    // and there was no way to tell progress from a hang. The background sync
+    // is every fifteen minutes, which is not a progress indicator.
     LaunchedEffect(jobId) { vm.load(jobId) }
+    val working = detail?.status in setOf(
+        "IDEA", "RESEARCH", "SCRIPT", "VOICE", "VISUALS", "RENDERING",
+        "QUALITY_CHECK",
+    )
+    LaunchedEffect(jobId, working) {
+        while (working) {
+            kotlinx.coroutines.delay(10_000)
+            vm.load(jobId)
+        }
+    }
 
     val videoPath = detail?.media?.video
     val player = remember(videoPath) {
@@ -111,7 +128,21 @@ fun PreviewScreen(jobId: String, onBack: () -> Unit) {
         Row {
             TextButton(onClick = onBack) { Text("< Back") }
             Spacer(Modifier.weight(1f))
+            // Refresh, because nothing polls: a render takes minutes and this
+            // screen loaded once and then never changed.
+            TextButton(onClick = { vm.load(jobId) }) { Text("Refresh") }
+            Spacer(Modifier.width(4.dp))
             detail?.status?.let { StatusChip(it) }
+        }
+
+        // The failure reason, which this screen never showed.
+        //
+        // The backend records it on the job and the DTO carries it, but the
+        // only place it appeared was a truncated line on the Dashboard - so a
+        // failed job looked like a job that had simply stopped, with no way to
+        // find out why.
+        detail?.error?.takeIf { it.isNotBlank() }?.let { reason ->
+            InfoBanner(text = reason, tone = BannerTone.Error)
         }
 
         message?.let { msg ->
