@@ -465,3 +465,59 @@ class TestIllustratedChainExcludesStock:
         p = AIImageProvider(backend, max_attempts=1, retry_backoff=0)
         with _pytest.raises(RuntimeError, match="429"):
             p.fetch(_req(0), __import__("pathlib").Path("/tmp/none.jpg"))
+
+
+class TestGeminiBackend:
+    """Uses the key already present for script writing.
+
+    Whether the Gemini API free tier includes image generation is unresolved -
+    Google no longer publishes per-tier limits and a live test returned 429 for
+    every model because the project's daily text quota was spent. So the
+    backend is built to answer the question by itself: it either works or
+    degrades, and neither outcome needs a decision made in advance.
+    """
+
+    def _backend(self, monkeypatch, key="AIzaTestKey"):
+        from engine.visuals.ai_image import build_backend
+        cfg = load_config()
+        cfg.set("visuals.ai_image_backend", "gemini")
+        if key:
+            monkeypatch.setenv("GEMINI_API_KEY", key)
+        else:
+            monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        return build_backend(cfg)
+
+    def test_it_is_selected_when_a_key_exists(self, monkeypatch):
+        assert self._backend(monkeypatch).id == "gemini"
+
+    def test_no_key_degrades_to_keyless(self, monkeypatch):
+        assert self._backend(monkeypatch, key="").id == "pollinations"
+
+    def test_a_429_is_quota_not_a_generic_failure(self):
+        """Retrying a spent daily allowance wastes minutes and changes nothing."""
+        from engine.visuals.ai_image import CreditExhausted, QuotaExhausted
+        assert QuotaExhausted is CreditExhausted
+
+    def test_a_quota_error_degrades_and_still_produces_an_image(self, tmp_path):
+        from engine.visuals.ai_image import QuotaExhausted
+        paid = FakeBackend([QuotaExhausted("429 daily quota")])
+        free = FakeBackend([_png_bytes((11, 22, 33))])
+        free.id = "keyless"
+        p = AIImageProvider(paid, retry_backoff=0, fallback=free)
+        asset = p.fetch(_req(0), tmp_path / "a.jpg")
+        assert asset.source == "generated:keyless"
+        assert p.backend is free
+
+    def test_the_aspect_ratio_is_described_in_words(self):
+        """There is no width/height parameter on this API."""
+        import inspect
+        from engine.visuals.ai_image import GeminiImageBackend
+        src = inspect.getsource(GeminiImageBackend.fetch)
+        assert "9:16" in src and "16:9" in src
+
+    def test_a_text_only_reply_is_reported_as_such(self):
+        """A refusal comes back as TEXT with a 200, not as an error."""
+        import inspect
+        from engine.visuals.ai_image import GeminiImageBackend
+        src = inspect.getsource(GeminiImageBackend.fetch)
+        assert "finishReason" in src

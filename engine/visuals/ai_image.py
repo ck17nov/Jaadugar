@@ -138,6 +138,11 @@ class CreditExhausted(RuntimeError):
     """The paid quota is gone. Retrying costs time and changes nothing."""
 
 
+# Same handling, different cause: a free daily allowance that has run out
+# rather than money. Both mean "stop asking this backend today".
+QuotaExhausted = CreditExhausted
+
+
 class HuggingFaceBackend:
     """Runs a model that actually draws what you ask for.
 
@@ -214,6 +219,80 @@ class HuggingFaceBackend:
         return buf.getvalue()
 
 
+class GeminiImageBackend:
+    """Google's own image models, on the key this project already has.
+
+    Worth trying before paying anyone: GEMINI_API_KEY is already configured
+    for script writing, and the same key lists image models
+    (gemini-3.1-flash-image, gemini-2.5-flash-image, nano-banana-pro and
+    friends). If they are usable on the free tier, illustrated video costs
+    nothing and needs no new account.
+
+    Whether they ARE usable free is genuinely unresolved. Google stopped
+    publishing per-tier limits - the rate-limit page now says to look in AI
+    Studio - and the quota IDs that come back on a 429 are named "-FreeTier",
+    which is suggestive but not proof. Testing it was inconclusive because the
+    project's daily text quota was already spent on script generation, so
+    everything returned 429 regardless of model.
+
+    So this is written to find out by itself: put it first in the chain and it
+    either works or raises QuotaExhausted, which degrades to the keyless
+    backend the same way a Hugging Face 402 does. No decision needed in
+    advance, and nothing to undo if the answer is no.
+    """
+
+    id = "gemini"
+    label = "Google Gemini image models"
+    ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/"
+
+    def __init__(self, model: str, key: str, timeout: int = 180):
+        self.model = model
+        self.key = key
+        self.timeout = timeout
+
+    def available(self) -> bool:
+        return bool(self.key and self.model)
+
+    def fetch(self, prompt: str, *, width: int, height: int, seed: int) -> bytes:
+        import base64
+        # No width/height parameter exists: the model is told the shape in
+        # words and returns its own size, which condition_image then
+        # cover-crops to the frame.
+        shape = ("vertical 9:16 portrait composition" if height > width
+                 else "horizontal 16:9 widescreen composition")
+        body = {
+            "contents": [{"parts": [{"text": f"{prompt}. {shape}."}]}],
+            # Seed is not exposed either; variety comes from the prompt, and
+            # the provider's duplicate check still catches a repeat.
+            "generationConfig": {"candidateCount": 1},
+        }
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(self.ENDPOINT + self.model + ":generateContent",
+                               params={"key": self.key}, json=body)
+        if resp.status_code == 429:
+            raise QuotaExhausted(
+                "gemini: image quota exhausted (429). The Gemini API free tier "
+                "may not include image generation at all - set "
+                "visuals.ai_image_backend to pollinations or huggingface.")
+        resp.raise_for_status()
+        payload = resp.json()
+        candidates = payload.get("candidates") or []
+        if not candidates:
+            raise RuntimeError(
+                f"gemini: no candidate returned ({str(payload)[:200]})")
+        for part in candidates[0].get("content", {}).get("parts", []):
+            blob = part.get("inlineData") or part.get("inline_data")
+            if blob and blob.get("data"):
+                return base64.b64decode(blob["data"])
+        # A refusal comes back as TEXT rather than an error, so say which.
+        reason = candidates[0].get("finishReason", "")
+        text = " ".join(p.get("text", "") for p in
+                        candidates[0].get("content", {}).get("parts", []))
+        raise RuntimeError(
+            f"gemini: reply contained no image (finishReason={reason}) "
+            f"{text[:160]}")
+
+
 def build_backend(cfg) -> object:
     """Pick a backend from config, falling back to the keyless one.
 
@@ -221,6 +300,16 @@ def build_backend(cfg) -> object:
     generation, not stop the job.
     """
     wanted = str(cfg.get("visuals.ai_image_backend", "pollinations")).lower()
+    if wanted == "gemini":
+        backend = GeminiImageBackend(
+            model=str(cfg.get("visuals.gemini_image_model",
+                              "gemini-3.1-flash-image")),
+            key=cfg.secret("GEMINI_API_KEY"))
+        if backend.available():
+            log_event("VISUAL", "using Gemini image generation",
+                      backend=backend.id, model=backend.model)
+            return backend
+        log_event("VISUAL", "no GEMINI_API_KEY, using keyless generation")
     if wanted == "huggingface":
         backend = HuggingFaceBackend(
             model=str(cfg.get("visuals.ai_image_model",

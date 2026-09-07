@@ -184,7 +184,21 @@ visuals:
   #                   pay-as-you-go credit - so it is off by default, and a
   #                   402 mid-job degrades to keyless rather than wrecking the
   #                   render.
+  #   gemini        - uses GEMINI_API_KEY, which this project already has for
+  #                   script writing. The same key lists image models
+  #                   (gemini-3.1-flash-image, nano-banana-pro and others), so
+  #                   if they are usable on the free tier then illustrated
+  #                   video costs nothing and needs no new account.
+  #
+  #                   UNRESOLVED whether they are. Google stopped publishing
+  #                   per-tier limits, and testing was inconclusive because the
+  #                   project's daily text quota was already spent on scripts,
+  #                   so every model returned 429 regardless. Set this to
+  #                   `gemini` to find out: a 429 degrades to pollinations for
+  #                   the rest of the job rather than failing it, so trying
+  #                   costs nothing and needs no decision in advance.
   ai_image_backend: pollinations
+  gemini_image_model: gemini-3.1-flash-image
   # Used by the huggingface backend. Ignored by pollinations.
   ai_image_model: black-forest-labs/FLUX.1-schnell
   pollinations_model: sana
