@@ -140,41 +140,6 @@ class TokenStore:
         self.path.unlink(missing_ok=True)
 
 
-class YouTubeAuth:
-    def __init__(self, cfg: Config):
-        self.cfg = cfg
-        self.client_id = cfg.secret("YOUTUBE_CLIENT_ID")
-        self.client_secret = cfg.secret("YOUTUBE_CLIENT_SECRET")
-        self.store = TokenStore(cfg.workspace / "secrets" / "youtube_token.json")
-
-    @property
-    def configured(self) -> bool:
-        """True if a DESKTOP flow can be started here (needs id + secret)."""
-        return bool(self.client_id and self.client_secret)
-
-    @property
-    def authorized(self) -> bool:
-        """True if we hold a refresh token AND a client that can refresh it.
-
-        Two shapes are valid, and the distinction matters:
-
-        * Desktop flow (`autotube auth login`) - a confidential client, so the
-          stored token is refreshed with YOUTUBE_CLIENT_ID + SECRET from .env.
-        * Phone flow (AppAuth on Android) - a PUBLIC client using PKCE, which
-          has no secret at all. Its refresh token is bound to the Android
-          client ID, so it can only be refreshed with THAT id and no secret.
-
-        Refreshing an Android-issued token with the desktop client's
-        credentials fails with `unauthorized_client`, which is why the issuing
-        client id is stored alongside the token rather than assumed.
-        """
-        if not self.store.exists():
-            return False
-        data = self.store.read()
-        if not data.get("refresh_token"):
-            return False
-        return bool(data.get("client_id") or self.configured)
-
 def _public_client_credentials_class():
     """A Credentials subclass that can refresh WITHOUT a client secret.
 
@@ -244,6 +209,41 @@ def _public_client_credentials_class():
 
     return PublicClientCredentials
 
+
+class YouTubeAuth:
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        self.client_id = cfg.secret("YOUTUBE_CLIENT_ID")
+        self.client_secret = cfg.secret("YOUTUBE_CLIENT_SECRET")
+        self.store = TokenStore(cfg.workspace / "secrets" / "youtube_token.json")
+
+    @property
+    def configured(self) -> bool:
+        """True if a DESKTOP flow can be started here (needs id + secret)."""
+        return bool(self.client_id and self.client_secret)
+
+    @property
+    def authorized(self) -> bool:
+        """True if we hold a refresh token AND a client that can refresh it.
+
+        Two shapes are valid, and the distinction matters:
+
+        * Desktop flow (`autotube auth login`) - a confidential client, so the
+          stored token is refreshed with YOUTUBE_CLIENT_ID + SECRET from .env.
+        * Phone flow (AppAuth on Android) - a PUBLIC client using PKCE, which
+          has no secret at all. Its refresh token is bound to the Android
+          client ID, so it can only be refreshed with THAT id and no secret.
+
+        Refreshing an Android-issued token with the desktop client's
+        credentials fails with `unauthorized_client`, which is why the issuing
+        client id is stored alongside the token rather than assumed.
+        """
+        if not self.store.exists():
+            return False
+        data = self.store.read()
+        if not data.get("refresh_token"):
+            return False
+        return bool(data.get("client_id") or self.configured)
 
     # ------------------------------------------------------------------
     def _client_config(self) -> dict[str, Any]:
