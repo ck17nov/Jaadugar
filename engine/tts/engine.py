@@ -16,6 +16,31 @@ from .base import SceneAudio, VoiceSpec, WordMark
 from .providers import build_providers, resolve_voice, trim_trailing_silence
 
 
+
+def _lookup(table: dict, language: str) -> str:
+    """Exact match first, then the base language.
+
+    "en-IN" should find an Indian English voice if one is mapped, and fall
+    back to "en" rather than to nothing.
+    """
+    if not table or not language:
+        return ""
+    if language in table:
+        return str(table[language] or "")
+    base = language.split("-")[0]
+    return str(table.get(base, "") or "")
+
+
+def _scale_rate(rate: str, factor: float) -> str:
+    """Scale an edge-tts rate string such as "+8%" by a factor."""
+    try:
+        current = float(str(rate).strip().rstrip("%"))
+    except ValueError:
+        current = 0.0
+    scaled = (100.0 + current) * factor - 100.0
+    return f"{scaled:+.0f}%"
+
+
 class VoiceEngine:
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -25,13 +50,50 @@ class VoiceEngine:
     # ------------------------------------------------------------------
     def voice_spec(self, language: str, style: str = "energetic",
                    gender: str | None = None) -> VoiceSpec:
-        voice_map = self.cfg.get("tts.voice_map", {}) or {}
+        """Resolve a concrete voice for this language and gender.
+
+        `gender` used to be recorded on the spec and then ignored, because the
+        voice id came from a single female-only map - so asking for a male
+        narrator produced the same female voice.
+
+        `child` is only partly real: Microsoft ships a child voice for US
+        English and for nothing else. Rather than name an id that does not
+        exist and fail at synthesis, the other languages get the female voice
+        pitched up and slowed slightly, which is child-friendly rather than a
+        child. That is a deliberate, documented approximation.
+        """
+        wanted = (gender or self.cfg.get("tts.voice_gender", "female")).lower()
+        voices = self.cfg.get("tts.voices", {}) or {}
+        female = voices.get("female") or self.cfg.get("tts.voice_map", {}) or {}
+        table = voices.get(wanted) or {}
+
+        voice_id = _lookup(table, language)
+        pitch = str(self.cfg.get("tts.pitch", "+0Hz"))
+        rate = str(self.cfg.get("tts.rate", "+0%"))
+
+        if not voice_id and wanted == "child":
+            # No child voice for this language: approximate one.
+            voice_id = _lookup(female, language)
+            pitch = str(self.cfg.get("tts.child_pitch", "+18Hz"))
+            rate = _scale_rate(rate, float(
+                self.cfg.get("tts.child_rate_scale", 0.94)))
+            log_event("TTS", "no child voice for this language, approximating",
+                      language=language, voice=voice_id or "provider default",
+                      pitch=pitch)
+        if not voice_id:
+            # Fall back to the female table so an unmapped language still gets
+            # the right LANGUAGE, which matters far more than the gender.
+            voice_id = _lookup(female, language)
+            if voice_id and wanted != "female":
+                log_event("TTS", "no voice for this gender, using the default",
+                          language=language, wanted=wanted, voice=voice_id)
+
         return VoiceSpec(
             language=language,
-            voice_id=voice_map.get(language, ""),
-            gender=gender or self.cfg.get("tts.voice_gender", "female"),
-            rate=self.cfg.get("tts.rate", "+0%"),
-            pitch=self.cfg.get("tts.pitch", "+0Hz"),
+            voice_id=voice_id,
+            gender=wanted,
+            rate=rate,
+            pitch=pitch,
             style=style,
         )
 

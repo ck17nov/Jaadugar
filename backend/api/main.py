@@ -34,6 +34,7 @@ from engine.core.logging import log_event, setup_logging          # noqa: E402
 from engine.core.models import AutomationRequest, JobStatus       # noqa: E402
 from engine.core.niche import build_profile, is_kids_niche        # noqa: E402
 from engine.core.util import have_ffmpeg                          # noqa: E402
+from engine.pipeline import JobCancelled                          # noqa: E402
 
 CFG = load_config()
 setup_logging(jsonl=CFG.workspace / "logs" / "api.jsonl")
@@ -106,6 +107,7 @@ class AutomationBody(BaseModel):
     video_format: Literal["SHORT", "LONGFORM"] = "SHORT"
     duration_seconds: int = Field(default=45, ge=8, le=3600)
     style: str = Field(default="fast-paced, curiosity-driven", max_length=200)
+    voice_gender: Literal["female", "male", "child"] = "female"
     count: int = Field(default=1, ge=1, le=10)
     mode: Literal["AUTO", "APPROVAL"] = "APPROVAL"
     frequency: Literal["once", "daily", "weekly", "days"] = "once"
@@ -176,9 +178,46 @@ class Worker:
         self.queue: queue.Queue[AutomationRequest] = queue.Queue()
         self.thread: threading.Thread | None = None
         self.current: str | None = None
+        self.current_automation: str | None = None
         self.pipeline = None
         self._lock = threading.Lock()
         self.history: deque[dict[str, Any]] = deque(maxlen=50)
+        # Cancellation is cooperative: the pipeline checks these at every stage
+        # boundary. There is no safe way to interrupt an ffmpeg encode
+        # mid-frame, so "stop" means "stop at the next seam".
+        self.cancelled_jobs: set[str] = set()
+        self.cancelled_automations: set[str] = set()
+
+    def _is_cancelled(self, job) -> bool:
+        return (job.job_id in self.cancelled_jobs
+                or job.automation_id in self.cancelled_automations)
+
+    def cancel_job(self, job_id: str) -> None:
+        self.cancelled_jobs.add(job_id)
+
+    def cancel_automation(self, automation_id: str) -> int:
+        """Stop a recurring automation: its queued runs and any running job.
+
+        Returns how many queued runs were dropped. Draining is done by
+        rebuilding the queue rather than by peeking, because queue.Queue has no
+        remove() and reaching into its internals would race the worker thread.
+        """
+        self.cancelled_automations.add(automation_id)
+        dropped = 0
+        kept: list[AutomationRequest] = []
+        while True:
+            try:
+                item = self.queue.get_nowait()
+            except queue.Empty:
+                break
+            if item.id == automation_id:
+                dropped += 1
+            else:
+                kept.append(item)
+            self.queue.task_done()
+        for item in kept:
+            self.queue.put(item)
+        return dropped
 
     def _ensure_pipeline(self):
         if self.pipeline is None:
@@ -205,7 +244,17 @@ class Worker:
             except queue.Empty:
                 continue
             pipeline = self._ensure_pipeline()
+            pipeline.cancel_check = self._is_cancelled
+            # Recorded BEFORE the run, not after. It used to be assigned from
+            # the result, so `current` only ever named a job that had already
+            # finished - useless for reporting what is running and for
+            # cancelling it.
+            self.current_automation = request.id
             for _ in range(max(1, request.count)):
+                if request.id in self.cancelled_automations:
+                    log_event("WORKER", "remaining runs cancelled",
+                              automation=request.id)
+                    break
                 try:
                     result = pipeline.run(request)
                     self.current = result.job.job_id
@@ -214,11 +263,16 @@ class Worker:
                         "status": result.job.status,
                         "quality": (result.quality.score if result.quality else 0),
                         "at": time.time()})
+                except JobCancelled as exc:
+                    log_event("WORKER", "job cancelled", job=str(exc)[:60])
+                    self.history.append({"job_id": str(exc), "status": "CANCELLED",
+                                         "at": time.time()})
                 except Exception as exc:
                     log_event("WORKER", "job failed", error=str(exc)[:300])
                     self.history.append({"job_id": None, "status": "FAILED",
                                          "error": str(exc)[:300], "at": time.time()})
             self.current = None
+            self.current_automation = None
             self.queue.task_done()
 
     @property
@@ -289,6 +343,40 @@ def niche_preview(niche: str = Query(min_length=2, max_length=120),
     return {"profile": profile.to_dict(),
             "kids_niche_detected": is_kids_niche(niche),
             "requires_kids_confirmation": is_kids_niche(niche)}
+
+
+@app.post("/jobs/{job_id}/cancel", dependencies=[Depends(require_api_key)])
+def cancel_job(job_id: str) -> dict[str, Any]:
+    """Stop a job that is queued or rendering.
+
+    Cancellation is cooperative and takes effect at the next stage boundary -
+    an ffmpeg encode cannot be interrupted mid-frame safely, so a job that is
+    three seconds into a render will finish that render and stop before the
+    next stage. Marked CANCELLED rather than FAILED so it is not retried and
+    does not look like a fault.
+    """
+    db = _db()
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"error": "job_not_found"})
+    if JobStatus(job.status).terminal:
+        return {"cancelled": False, "status": job.status,
+                "note": "job already finished"}
+    WORKER.cancel_job(job_id)
+    log_event("API", "cancel requested", job=job_id, status=job.status)
+    return {"cancelled": True, "status": job.status,
+            "note": "stops at the next stage boundary"}
+
+
+@app.delete("/automations/{automation_id}",
+            dependencies=[Depends(require_api_key)])
+def cancel_automation(automation_id: str) -> dict[str, Any]:
+    """Stop a recurring automation: queued runs and the one in progress."""
+    dropped = WORKER.cancel_automation(automation_id)
+    log_event("API", "automation cancelled", automation=automation_id,
+              dropped=dropped)
+    return {"cancelled": True, "dropped_from_queue": dropped,
+            "note": "a run already in progress stops at the next stage"}
 
 
 @app.post("/automations", dependencies=[Depends(require_api_key)],
@@ -511,13 +599,37 @@ def quota() -> dict[str, Any]:
 def youtube_status() -> dict[str, Any]:
     from engine.youtube.auth import YouTubeAuth
     auth = YouTubeAuth(CFG)
-    out: dict[str, Any] = {"configured": auth.configured,
-                           "authorized": auth.authorized, "channels": []}
+
+    # Where the OAuth client came from, rather than a bare "configured" flag.
+    #
+    # `configured` only ever meant "YOUTUBE_CLIENT_ID/SECRET are set in .env",
+    # so connecting from the phone - which is the supported path and needs no
+    # desktop client at all - showed up in the app as "Backend OAuth client:
+    # missing on backend" in red. That reads as a fault when it is the normal,
+    # correct state.
+    stored = auth.store.read() if auth.store.exists() else {}
+    if stored.get("client_id"):
+        source = "device"
+    elif auth.configured:
+        source = "env"
+    else:
+        source = "none"
+
+    out: dict[str, Any] = {
+        "configured": auth.configured,
+        "authorized": auth.authorized,
+        "client_source": source,
+        "channels": [],
+    }
     if auth.authorized:
         try:
             out["channels"] = auth.channels()
         except Exception as exc:
             out["error"] = str(exc)[:240]
+            # `authorized` is true whenever a token exists, but a token that
+            # cannot be refreshed is not a working connection. Say so, instead
+            # of showing "Authorised: yes" beside a refresh error.
+            out["authorized"] = False
     return out
 
 

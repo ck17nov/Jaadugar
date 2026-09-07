@@ -1,6 +1,7 @@
 package com.autotube.ai.data.remote
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -19,6 +20,14 @@ interface ApiService {
         @Query("style") style: String = "",
         @Query("duration") duration: Int = 45,
     ): NichePreviewDto
+
+    @POST("jobs/{jobId}/cancel")
+    suspend fun cancelJob(@Path("jobId") jobId: String): CancelAckDto
+
+    @DELETE("automations/{automationId}")
+    suspend fun cancelAutomation(
+        @Path("automationId") automationId: String,
+    ): CancelAckDto
 
     @POST("automations")
     suspend fun createAutomation(@Body body: AutomationRequestDto): AutomationAcceptedDto

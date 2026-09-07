@@ -101,8 +101,12 @@ content:
 
 tts:
   provider_order: [edge, piper, gtts]
-  voice_gender: female
-  # edge-tts voice ids. en-IN-NeerjaNeural = Indian English female.
+  voice_gender: female            # female | male | child
+  # edge-tts voice ids, per gender. Every id below was read from
+  # edge_tts.list_voices() rather than guessed.
+  #
+  # `voice_map` is kept as the female map for backwards compatibility with
+  # existing deployments; `voices` is what the code reads.
   voice_map:
     en: en-US-AriaNeural
     en-IN: en-IN-NeerjaNeural
@@ -110,6 +114,40 @@ tts:
     ta: ta-IN-PallaviNeural
     te: te-IN-ShrutiNeural
     es: es-ES-ElviraNeural
+  voices:
+    female:
+      en: en-US-AriaNeural
+      en-IN: en-IN-NeerjaNeural
+      hi: hi-IN-SwaraNeural
+      ta: ta-IN-PallaviNeural
+      te: te-IN-ShrutiNeural
+      bn: bn-IN-TanishaaNeural
+      mr: mr-IN-AarohiNeural
+      gu: gu-IN-DhwaniNeural
+      es: es-ES-ElviraNeural
+    male:
+      en: en-US-AndrewNeural
+      en-IN: en-IN-PrabhatNeural
+      hi: hi-IN-MadhurNeural
+      ta: ta-IN-ValluvarNeural
+      te: te-IN-MohanNeural
+      bn: bn-IN-BashkarNeural
+      mr: mr-IN-ManoharNeural
+      gu: gu-IN-NiranjanNeural
+    # A genuine child voice exists ONLY for US English - en-US-AnaNeural, the
+    # one Microsoft tags "Cute". There is no child voice for Hindi, Tamil,
+    # Telugu, Bengali, Marathi or Gujarati, and inventing an id would just
+    # fail at synthesis time. For those languages `child` falls back to the
+    # female voice with the pitch raised and the pace slowed, which reads as
+    # child-FRIENDLY rather than as a child - see tts.child_pitch below.
+    child:
+      en: en-US-AnaNeural
+      en-US: en-US-AnaNeural
+  # Applied only when gender=child and no real child voice exists for the
+  # language. Modest on purpose: pitched up hard, a neural voice turns into a
+  # chipmunk and stops being intelligible to the age group it is aimed at.
+  child_pitch: "+18Hz"
+  child_rate_scale: 0.94
   rate: "+8%"
   # Bounds for the automatic duration re-fit. The old limits allowed +42% and a
   # real run shipped at +35%, which sounds rushed. Beyond these the script is
@@ -233,8 +271,21 @@ captions:
   shadow: 3
   # Shorts-safe margins (fraction of height) - avoids YouTube UI overlays.
   safe_top: 0.12
-  safe_bottom: 0.22
+  # 0.16, not 0.22.
+  #
+  # 0.22 put the caption a fifth of the way up a 9:16 frame, well inside the
+  # picture. Lower is better, but not below ~0.15: YouTube's Shorts furniture -
+  # title, handle, action buttons - occupies the bottom of the frame and would
+  # cover the text. There is a test enforcing that floor; the real fix for
+  # captions covering too much area was making them fit on one line, not
+  # pushing them further down.
+  safe_bottom: 0.16
+  # Side margin as a fraction of width, per side. Was hard-coded at 0.075,
+  # which discarded 15% of the frame and forced captions onto a second line.
+  margin_fraction: 0.045
   max_words_on_screen: 3
+  # An upper bound only. The real limit is computed from the font size and
+  # frame width so a caption can never wrap - see CaptionEngine._chars_per_line.
   max_chars_on_screen: 20
   uppercase: true
 

@@ -57,6 +57,14 @@ class PipelineError(RuntimeError):
         self.stage = stage
 
 
+class JobCancelled(RuntimeError):
+    """Raised when the user asks for a job to stop.
+
+    Deliberately NOT a PipelineError: the retry wrapper treats those as
+    transient and would dutifully restart the stage the user just cancelled.
+    """
+
+
 @dataclass
 class PipelineResult:
     job: VideoJob
@@ -97,16 +105,32 @@ class Pipeline:
         self.uploader = YouTubeUploader(self.cfg, self.auth, self.quota)
         self.learner = StrategyLearner(self.cfg, self.db)
         self._motion_cycle: list[str] | None = None
+        # Set by the worker. Consulted at every stage boundary so a cancel
+        # takes effect within one stage rather than at the end of the render:
+        # there is no safe way to interrupt an ffmpeg encode mid-frame, so
+        # "stop" means "stop at the next seam".
+        self.cancel_check: Callable[[VideoJob], bool] | None = None
 
     # ==================================================================
     # Job lifecycle helpers
     # ==================================================================
     def _advance(self, job: VideoJob, status: JobStatus, note: str = "") -> None:
+        self._raise_if_cancelled(job)
         job.status = status.value
         job.updated_at = time.time()
         if note:
             job.logs.append(f"{time.strftime('%H:%M:%S')} {status.value}: {note}")
         self.db.save_job(job)
+
+    def _raise_if_cancelled(self, job: VideoJob) -> None:
+        if self.cancel_check is None or not self.cancel_check(job):
+            return
+        job.status = JobStatus.CANCELLED.value
+        job.updated_at = time.time()
+        job.logs.append(f"{time.strftime('%H:%M:%S')} CANCELLED: stopped by user")
+        self.db.save_job(job)
+        log_event("PIPELINE", "job cancelled", job=job.job_id)
+        raise JobCancelled(job.job_id)
 
     def _job_dir(self, job: VideoJob, request: AutomationRequest) -> Path:
         stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(job.created_at))
@@ -122,6 +146,8 @@ class Pipeline:
         for attempt in range(1, attempts + 1):
             try:
                 return fn()
+            except JobCancelled:
+                raise
             except Exception as exc:
                 last = exc
                 job.retry_count += 1
@@ -280,7 +306,9 @@ class Pipeline:
         # delivering, not the niche profile's guess. The guess ran ~20% fast,
         # which is how a "45 second" request became a 53-second recording that
         # then had to be sped up by 28% to fit.
-        spec = self.voice_engine.voice_spec(request.language, "energetic")
+        spec = self.voice_engine.voice_spec(
+            request.language, "energetic",
+            gender=request.voice_gender)
         measured = self.calibrated_words_per_second(
             request.language, spec, profile.words_per_second)
         if abs(measured - profile.words_per_second) > 0.05:
@@ -370,7 +398,9 @@ class Pipeline:
         self._advance(job, JobStatus.VOICE, f"lang={request.language}")
         job_dir = Path(job.dir)
         scenes = script.scene_objects()
-        spec = self.voice_engine.voice_spec(request.language, script.voice_style)
+        spec = self.voice_engine.voice_spec(
+            request.language, script.voice_style,
+            gender=request.voice_gender)
 
         def synthesize(rate: str | None = None):
             if rate is not None:

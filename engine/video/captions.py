@@ -150,6 +150,12 @@ class CaptionEngine:
         landscape = width > height
         max_words = self.max_words + (2 if landscape else 0)
         max_chars = int(self.max_chars * 1.6) if landscape else self.max_chars
+        # Cap by what actually FITS on one line at this font size and frame
+        # width. A configured character count knows nothing about either, so a
+        # caption that was legal by the config wrapped onto a second line on
+        # the phone - which doubled the area the text covered and pushed it up
+        # into the picture. One line is a layout guarantee, not a preference.
+        max_chars = min(max_chars, self._chars_per_line(width, height))
         groups = group_words(words, max_words=max_words, max_chars=max_chars)
 
         style = style_override or self.style
@@ -169,7 +175,7 @@ class CaptionEngine:
         size = self._scaled_font_size(width, height)
         # MarginV is measured from the bottom for bottom-aligned text.
         margin_v = int(height * self.safe_bottom)
-        margin_h = int(width * 0.075)
+        margin_h = int(width * self.margin_fraction)
 
         header = [
             "[Script Info]",
@@ -204,6 +210,30 @@ class CaptionEngine:
             events = self._karaoke_events(groups)
 
         return "\n".join(header + events) + "\n"
+
+    # Average glyph advance as a fraction of font size. Anton and the other
+    # display faces used here are condensed, so this is narrower than a normal
+    # sans. Measured against rendered output rather than guessed: at 92px on a
+    # 1080-wide frame roughly 22 characters fit inside the safe margins.
+    GLYPH_RATIO = 0.46
+
+    def _chars_per_line(self, width: int, height: int) -> int:
+        """How many characters fit on ONE line inside the side margins."""
+        size = self._scaled_font_size(width, height)
+        usable = width * (1.0 - 2 * self.margin_fraction)
+        spacing = 1.2                       # matches the Spacing in the style
+        per_char = size * self.GLYPH_RATIO + spacing
+        return max(8, int(usable / per_char))
+
+    @property
+    def margin_fraction(self) -> float:
+        """Side margin as a fraction of width.
+
+        Was 0.075 a side, which threw away 15% of the frame and forced an
+        early wrap. Captions now use nearly the full width, which is what
+        keeps them on one line.
+        """
+        return float(self.cfg.get("captions.margin_fraction", 0.045))
 
     def _scaled_font_size(self, width: int, height: int) -> int:
         """Font size configured for 1080x1920; scale to the actual frame."""

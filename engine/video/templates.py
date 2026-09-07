@@ -40,7 +40,7 @@ class StyleTemplate:
     caption_style: str = "karaoke"         # karaoke | block | none
     highlight_color: str = "&H0000E5FF"    # ASS BGR
     outline: int = 7
-    safe_bottom: float = 0.22
+    safe_bottom: float = 0.16          # clears the Shorts action bar
 
     # --- motion / transitions ---
     transition: str = "fade"               # fade | smoothleft | slideup | auto
@@ -63,6 +63,11 @@ class StyleTemplate:
     # every four seconds, and a template asking for photography while the
     # pipeline draws produces the soft airbrushed look people call AI slop.
     prefer_ai: bool = False
+    # Draw a flashcard - a letter or word on a card - instead of a full-frame
+    # picture. Right for teaching the alphabet, where the letter IS the
+    # content; wrong for a story, where it puts a small picture in the middle
+    # of an empty frame with a word underneath that nobody asked for.
+    flashcards: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -162,15 +167,35 @@ TEMPLATES: dict[str, StyleTemplate] = {
         scene_seconds=4.2, visual_frequency=0.8, words_per_second=2.0,
         font_scale=0.90, uppercase=False,
         caption_style="block",                  # never flash single words at kids
-        # safe_bottom was 0.26, which put the caption 26% up from the bottom
-        # of a 1920-tall frame - straight through the word label the kids
-        # animation draws at 0.62. The two were designed separately and
-        # overlapped on screen: "me ghoom kar" printed across "CLOUD". 0.17
-        # sits clear of the label and still above YouTube's Shorts overlay.
-        highlight_color="&H0080E0FF", outline=6, safe_bottom=0.17,
+        highlight_color="&H0080E0FF", outline=6, safe_bottom=0.16,
         transition="fade", transition_duration=0.65,
         motion_cycle=["zoom_in", "pan_right", "zoom_out", "pan_left"],
         contrast=1.02, saturation=1.06,
+        # A bedtime story is a PICTURE BOOK, not a set of flashcards.
+        #
+        # It used to get the flashcard treatment, which produced a small
+        # image floating in an empty frame with a single word printed under
+        # it - and the word came from the narration, so a story about sea
+        # otters showed a stock photograph of a drifting CAR captioned
+        # "DRIFT". Full-frame illustration instead, and the word label only
+        # survives in KIDS_LEARNING where the letter is the point.
+        prefer_ai=True,
+        visual_style_suffix=("gentle children's storybook illustration, "
+                             "soft rounded shapes, warm friendly colours, "
+                             "hand-drawn picture book art, nothing scary"),
+        music_mood="playful",
+    ),
+    "KIDS_LEARNING": StyleTemplate(
+        name="KIDS_LEARNING",
+        description="Alphabet and counting. Flashcards, because the letter is the point.",
+        scene_seconds=4.0, visual_frequency=0.8, words_per_second=1.9,
+        font_scale=0.90, uppercase=False,
+        caption_style="block",
+        highlight_color="&H0080E0FF", outline=6, safe_bottom=0.16,
+        transition="fade", transition_duration=0.65,
+        motion_cycle=["zoom_in", "zoom_out", "zoom_in", "zoom_out"],
+        contrast=1.02, saturation=1.06,
+        flashcards=True,
         visual_style_suffix=("bright friendly cartoon illustration, rounded "
                              "shapes, soft primary colours, nothing scary"),
         music_mood="playful",
@@ -215,13 +240,19 @@ _HINTS: dict[str, tuple[str, ...]] = {
     "STORYTELLING": ("story", "storytelling", "narrative", "tale", "reddit",
                      "confession", "horror", "scary", "creepypasta"),
     "TECH_NEWS": ("tech", "technology", "ai", "gadget", "software", "startup",
-                  "programming", "coding", "news"),
+                  "news", "laptop", "pc", "youtube", "tools"),
     "SCIENCE_EXPLAINER": ("science", "space", "physics", "biology", "astronomy",
                           "cosmos", "quantum", "explainer", "explained"),
     "MOTIVATIONAL": ("motivation", "motivational", "discipline", "mindset",
                      "success", "inspire", "productivity"),
     "EDUCATIONAL": ("education", "learn", "learning", "tutorial", "how to",
-                    "guide", "study", "history", "finance", "health"),
+                    "guide", "study", "history", "finance", "health",
+                    # The programming and database niches belong here rather
+                    # than with TECH_NEWS: a SQL walkthrough is a lesson, and
+                    # wants EDUCATIONAL's slower pacing and one-idea-per-frame
+                    # captions, not a news template's hard cuts.
+                    "sql", "database", "databases", "programming", "coding",
+                    "developer", "code", "course", "courses", "explained"),
 }
 
 # Tie-break order, so selection never depends on dict iteration.
@@ -243,6 +274,19 @@ def select_template(niche: str, style: str = "", *,
             return template
 
     if made_for_kids:
+        # Teaching letters or numbers is a different job from telling a story,
+        # and it wants different visuals: a flashcard where the character IS
+        # the content, against a full-frame illustration where the picture is.
+        learning = ("alphabet", "letter", "letters", "abc", "number",
+                    "numbers", "counting", "count", "phonics", "spelling",
+                    "shapes", "colours", "colors", "word", "words",
+                    "sentence", "sentences", "speaking")
+        # Rhymes and poems are deliberately NOT here. They are performances
+        # with illustrated scenes, not drills - a flashcard showing one word
+        # at a time is the wrong shape for a nursery rhyme.
+        haystack = f"{niche} {style}".lower()
+        if any(hint in haystack for hint in learning):
+            return TEMPLATES["KIDS_LEARNING"]
         return TEMPLATES["KIDS_STORY"]
 
     haystack = f"{niche} {style}".lower()
@@ -313,12 +357,14 @@ def caption_overrides(template: StyleTemplate,
 def visual_overrides(template: StyleTemplate) -> dict[str, Any]:
     """Visual-source settings for this template.
 
-    Only returns prefer_ai when the template asks for it, so a template that
-    does not care leaves whatever the deployment configured alone.
+    Always states whether flashcards apply, because that is a decision only
+    the template can make correctly - the visual engine sees `made_for_kids`
+    but not whether the video teaches the alphabet or tells a story.
     """
-    if not template.prefer_ai:
-        return {}
-    return {"visuals.prefer_ai": True}
+    out: dict[str, Any] = {"visuals.kids_animation": template.flashcards}
+    if template.prefer_ai:
+        out["visuals.prefer_ai"] = True
+    return out
 
 
 def video_overrides(template: StyleTemplate) -> dict[str, Any]:

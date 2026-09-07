@@ -9,6 +9,7 @@ import com.autotube.ai.data.local.ResearchEntity
 import com.autotube.ai.data.prefs.SecureStore
 import com.autotube.ai.data.remote.ApiClient
 import com.autotube.ai.data.remote.AutomationRequestDto
+import com.autotube.ai.data.remote.CancelAckDto
 import com.autotube.ai.data.remote.HealthDto
 import com.autotube.ai.data.remote.JobDetailDto
 import com.autotube.ai.data.remote.NichePreviewDto
@@ -142,6 +143,24 @@ class AutoTubeRepository(
         api.service().reject(jobId, RejectBodyDto(reason))
         logEvent("APPROVAL", "rejected $jobId", jobId)
         Unit
+    }
+
+    /**
+     * Stop a job. Cancellation is cooperative on the backend, so this returns
+     * as soon as the request is recorded, not when the job actually stops -
+     * the note in the reply says so.
+     */
+    suspend fun cancelJob(jobId: String): Result<CancelAckDto> = call {
+        val ack = api.service().cancelJob(jobId)
+        logEvent("CANCEL", "cancel requested for $jobId", jobId)
+        ack
+    }
+
+    suspend fun cancelAutomation(automationId: String): Result<CancelAckDto> = call {
+        val ack = api.service().cancelAutomation(automationId)
+        db.automations().delete(automationId)
+        logEvent("CANCEL", "automation $automationId cancelled")
+        ack
     }
 
     suspend fun research(niche: String, videoFormat: String): Result<ResearchDto> =

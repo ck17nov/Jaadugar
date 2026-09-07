@@ -3,6 +3,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -471,3 +473,59 @@ class TestNicheProfiles:
         finance = build_profile("crypto investing")
         assert finance.is_sensitive is True
         assert finance.disclaimers
+
+class TestCaptionsFitOneLine:
+    """Captions wrapped to two lines on the phone, doubling the area covered.
+
+    A configured character count knows nothing about the font size or the frame
+    width, so a caption that was legal by config still wrapped once rendered.
+    The limit is now derived from geometry.
+    """
+
+    def test_the_character_limit_comes_from_the_frame(self, cfg):
+        from engine.video.captions import CaptionEngine
+        engine = CaptionEngine(cfg)
+        narrow = engine._chars_per_line(1080, 1920)
+        wide = engine._chars_per_line(1920, 1080)
+        assert 8 <= narrow <= 40
+        assert wide > narrow, "a 16:9 frame must fit more characters"
+
+    def test_a_smaller_font_fits_more_characters(self, cfg):
+        from engine.video.captions import CaptionEngine
+        cfg.set("captions.font_size", 60)
+        small = CaptionEngine(cfg)._chars_per_line(1080, 1920)
+        cfg.set("captions.font_size", 140)
+        large = CaptionEngine(cfg)._chars_per_line(1080, 1920)
+        assert small > large
+
+    def test_groups_never_exceed_what_fits(self, cfg, tmp_path):
+        from engine.video.captions import CaptionEngine
+        engine = CaptionEngine(cfg)
+        limit = engine._chars_per_line(1080, 1920)
+        long_line = [(i * 0.3, i * 0.3 + 0.25, w) for i, w in enumerate(
+            "extraordinarily complicated sesquipedalian vocabulary "
+            "demonstrates the wrapping problem".split())]
+        clips = [(0.0, make_clip(0, long_line, 6.0))]
+        ass_path, _, _ = engine.build(
+            clips, tmp_path / "c.ass", tmp_path / "c.srt", 1080, 1920)
+        for line in ass_path.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("Dialogue:"):
+                continue
+            text = line.split(",", 9)[-1]
+            visible = re.sub(r"\{[^}]*\}", "", text)
+            assert len(visible) <= limit + 2, f"{visible!r} exceeds {limit}"
+
+    def test_side_margins_use_most_of_the_width(self, cfg):
+        """0.075 a side threw away 15% of the frame and forced a wrap."""
+        from engine.video.captions import CaptionEngine
+        assert CaptionEngine(cfg).margin_fraction <= 0.05
+
+    def test_no_explicit_line_break_is_emitted(self, cfg, tmp_path):
+        from engine.video.captions import CaptionEngine
+        clips = [(0.0, make_clip(0, [(0.1, 0.4, "one"), (0.5, 0.9, "two")], 1.2))]
+        ass_path, _, _ = CaptionEngine(cfg).build(
+            clips, tmp_path / "c.ass", tmp_path / "c.srt", 1080, 1920)
+        body = ass_path.read_text(encoding="utf-8")
+        # ASS uses a literal backslash-N for a hard line break. There must not
+        # be one: two lines of caption is the thing being prevented.
+        assert "\\N" not in body

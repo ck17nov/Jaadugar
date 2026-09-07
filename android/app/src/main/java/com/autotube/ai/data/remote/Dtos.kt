@@ -36,6 +36,7 @@ data class AutomationRequestDto(
     @SerialName("video_format") val videoFormat: String = "SHORT",
     @SerialName("duration_seconds") val durationSeconds: Int = 45,
     val style: String = "fast-paced, curiosity-driven",
+    @SerialName("voice_gender") val voiceGender: String = "female",
     val count: Int = 1,
     val mode: String = "APPROVAL",
     val frequency: String = "once",
@@ -249,6 +250,8 @@ data class YouTubeChannelDto(
 data class YouTubeStatusDto(
     val configured: Boolean = false,
     val authorized: Boolean = false,
+    /** "device" (from the phone), "env" (desktop client) or "none". */
+    @SerialName("client_source") val clientSource: String = "none",
     val channels: List<YouTubeChannelDto> = emptyList(),
     val error: String = "",
 )
@@ -272,4 +275,12 @@ data class SimpleAckDto(
     val authorized: Boolean = false,
     @SerialName("job_id") val jobId: String = "",
     val status: String = "",
+)
+
+@Serializable
+data class CancelAckDto(
+    val cancelled: Boolean = false,
+    val status: String = "",
+    @SerialName("dropped_from_queue") val droppedFromQueue: Int = 0,
+    val note: String = "",
 )

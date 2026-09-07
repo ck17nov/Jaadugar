@@ -390,9 +390,12 @@ class TestTemplateRequestsIllustration:
         from engine.video.templates import TEMPLATES
         assert TEMPLATES["STORYTELLING"].scene_seconds >= 5.5
 
-    def test_overrides_are_empty_when_a_template_does_not_care(self):
+    def test_a_non_illustrated_template_does_not_request_generation(self):
+        """It must also switch flashcards OFF rather than leave them ambient."""
         from engine.video.templates import TEMPLATES, visual_overrides
-        assert visual_overrides(TEMPLATES["FAST_FACTS"]) == {}
+        out = visual_overrides(TEMPLATES["FAST_FACTS"])
+        assert "visuals.prefer_ai" not in out
+        assert out["visuals.kids_animation"] is False
 
     def test_the_override_actually_reorders_the_provider_chain(self):
         from engine.core.config import load_config

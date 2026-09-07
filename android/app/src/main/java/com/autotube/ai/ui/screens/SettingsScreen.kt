@@ -267,16 +267,34 @@ fun SettingsScreen() {
         youtube?.let { yt ->
             Card(shape = RoundedCornerShape(12.dp)) {
                 Column(Modifier.padding(12.dp)) {
+                    // Reports WHERE the OAuth client came from.
+                    //
+                    // This used to show "missing on backend" in red whenever
+                    // .env had no desktop client - which is the normal state
+                    // when you connect from the phone, the supported path. It
+                    // read as an error for a correct setup.
                     ServiceLine(
-                        "Backend OAuth client",
-                        yt.configured,
-                        if (yt.configured) "configured" else "missing on backend",
+                        "YouTube connection",
+                        yt.clientSource != "none",
+                        when (yt.clientSource) {
+                            "device" -> "connected from this phone"
+                            "env" -> "using the backend's own OAuth client"
+                            else -> "not connected - tap Connect YouTube"
+                        },
                     )
                     ServiceLine(
-                        "Authorised",
+                        "Can upload",
                         yt.authorized,
-                        if (yt.authorized) "yes" else "not connected",
+                        if (yt.authorized) "yes"
+                        else "no - reconnect YouTube",
                     )
+                    if (yt.channels.isEmpty() && yt.authorized) {
+                        Text(
+                            "Connected, but no channel came back yet. Tap Refresh.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     yt.channels.forEach { channel ->
                         Spacer(Modifier.height(6.dp))
                         Text(channel.title, style = MaterialTheme.typography.bodyMedium)

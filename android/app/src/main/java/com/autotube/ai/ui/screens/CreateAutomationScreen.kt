@@ -50,19 +50,50 @@ import kotlinx.coroutines.delay
 // Common niches. "Other…" in the dropdown opens a free-text field, so this
 // does not need to be exhaustive - it only needs to cover the usual cases
 // without making the user type.
+// The six areas this channel publishes in, and nothing else.
+//
+// A long tail of niches was worse than useless: it made the dropdown a
+// scrolling list, and every extra option is a topic whose template, pacing and
+// visual style nobody has tuned. These are grouped so related topics sit
+// together in the list.
 val NICHE_OPTIONS = listOf(
-    "science", "space", "technology", "AI", "history", "interesting facts",
-    "psychology", "finance basics", "productivity", "programming",
-    "nature", "animals", "geography", "health myths", "food science",
-    "ancient engineering", "true stories", "kids bedtime stories",
-    "kids alphabet learning", "kids numbers and counting",
+    // Kids
+    "kids bedtime stories",
+    "kids moral stories",
+    "kids rhymes and poems",
+    "kids alphabet learning",
+    "kids numbers and counting",
+    "kids words and spelling",
+    "kids sentences and speaking",
+    "kids toys and play",
+    "kids shapes and colours",
+    // Finance
+    "personal finance",
+    "finance news",
+    // Tech
+    "youtube tips and growth",
+    "pc and laptop tech",
+    // AI
+    "AI explained",
+    "AI news",
+    "AI tools and courses",
+    // Science
+    "science facts",
+    "science experiments",
+    // IT / programming
+    "sql and databases",
+    "programming and coding",
+    "developer tools",
 )
 
 // Niches that are child-directed by definition. Picking one of these sets the
 // Made for Kids flag without prompting: being asked to confirm on every
 // keystroke, for a niche literally named "kids", is noise rather than consent.
 val KIDS_NICHES = setOf(
-    "kids bedtime stories", "kids alphabet learning", "kids numbers and counting",
+    "kids bedtime stories", "kids moral stories", "kids rhymes and poems",
+    "kids alphabet learning", "kids numbers and counting",
+    "kids words and spelling", "kids sentences and speaking",
+    "kids toys and play", "kids shapes and colours",
 )
 
 // Four languages, not twelve.
@@ -76,6 +107,12 @@ val LANGUAGES = listOf(
     "en-IN" to "Indian English",
     "en" to "English",
     "hi-Latn" to "Hinglish",
+)
+
+val VOICES = listOf(
+    "female" to "Female",
+    "male" to "Male",
+    "child" to "Child (English only; approximated elsewhere)",
 )
 
 val STYLES = listOf(
@@ -136,6 +173,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     // used to be the same setting, so a daily automation could not put each
     // video up straight away.
     var publishMode by rememberSaveable { mutableStateOf("scheduled") }
+    var voiceGender by rememberSaveable { mutableStateOf("female") }
 
     // A niche whose name says "kids" needs no confirmation dialog.
     val nicheIsKids = niche.trim().lowercase() in KIDS_NICHES
@@ -254,6 +292,23 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
             options = AUDIENCES,
             onValueChange = { audience = it },
         )
+
+        LabeledDropdown(
+            label = "Narrator voice",
+            value = voiceGender,
+            options = VOICES.map { it.first },
+            display = { key -> VOICES.firstOrNull { it.first == key }?.second ?: key },
+            onValueChange = { voiceGender = it },
+        )
+        if (voiceGender == "child" && !language.startsWith("en")) {
+            Text(
+                "A real child voice exists only for English. For other " +
+                    "languages this is the female voice pitched up and slowed " +
+                    "slightly - child-friendly rather than an actual child.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
 
         LabeledDropdown(
             label = "Language",
@@ -472,6 +527,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                         videoFormat = if (isShort) "SHORT" else "LONGFORM",
                         durationSeconds = lengthSeconds,
                         style = style,
+                        voiceGender = voiceGender,
                         count = count,
                         mode = if (autoMode) "AUTO" else "APPROVAL",
                         frequency = frequency,

@@ -245,7 +245,11 @@ fun DashboardScreen(
             }
         } else {
             items(jobs.take(20), key = { "recent-${it.jobId}" }) { job ->
-                JobRow(job = job, onClick = { onOpenJob(job.jobId) })
+                JobRow(
+                    job = job,
+                    onClick = { onOpenJob(job.jobId) },
+                    onCancel = { vm.cancelJob(job.jobId) },
+                )
             }
         }
 
@@ -311,8 +315,15 @@ private fun ApprovalCard(
     }
 }
 
+/** Statuses a job can still be stopped from. */
+private val STOPPABLE = setOf(
+    "IDEA", "RESEARCH", "SCRIPT", "VOICE", "VISUALS", "RENDERING",
+    "QUALITY_CHECK", "AWAITING_APPROVAL", "READY", "SCHEDULED",
+)
+
 @Composable
-fun JobRow(job: JobEntity, onClick: () -> Unit) {
+fun JobRow(job: JobEntity, onClick: () -> Unit,
+           onCancel: (() -> Unit)? = null) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
@@ -355,6 +366,14 @@ fun JobRow(job: JobEntity, onClick: () -> Unit) {
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+            // Only offered while the job can actually still be stopped.
+            // Rendering takes minutes on a small box, and until now there was
+            // no way to abandon a run you had changed your mind about.
+            if (onCancel != null && job.status in STOPPABLE) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onCancel) { Text("Stop") }
+                }
             }
         }
     }

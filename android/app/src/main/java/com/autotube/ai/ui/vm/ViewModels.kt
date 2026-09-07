@@ -8,7 +8,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import com.autotube.ai.AutoTubeApp
-import com.autotube.ai.data.local.AnalyticsEntity
 import com.autotube.ai.data.local.JobEntity
 import com.autotube.ai.data.prefs.SecureStore
 import com.autotube.ai.data.remote.AutomationRequestDto
@@ -52,8 +51,6 @@ class AppViewModelFactory(private val app: AutoTubeApp) : ViewModelProvider.Fact
                 CreateViewModel(repo, store, app) as T
             modelClass.isAssignableFrom(JobViewModel::class.java) ->
                 JobViewModel(repo, store) as T
-            modelClass.isAssignableFrom(AnalyticsViewModel::class.java) ->
-                AnalyticsViewModel(repo) as T
             modelClass.isAssignableFrom(SettingsViewModel::class.java) ->
                 SettingsViewModel(repo, store, app) as T
             else -> throw IllegalArgumentException("Unknown ViewModel $modelClass")
@@ -152,6 +149,20 @@ class DashboardViewModel(
             repo.quota().onSuccess { _quota.value = it }
         }
     }
+
+    /**
+     * Stop a job that is queued or rendering.
+     *
+     * The backend cancels cooperatively, so the message says "stopping"
+     * rather than "stopped": an encode in progress finishes before the job
+     * gives up, and claiming otherwise would be a lie the user can see
+     * through by watching the dashboard.
+     */
+    fun cancelJob(jobId: String) = runTask<com.autotube.ai.data.remote.CancelAckDto>({
+        info(if (it.cancelled) "Stopping - it will halt at the next stage."
+             else "Already finished; nothing to stop.")
+        refresh()
+    }) { repo.cancelJob(jobId) }
 
     fun approve(jobId: String) = runTask<Unit>({
         // Do not promise an upload the backend cannot perform.
@@ -274,33 +285,6 @@ class JobViewModel(
 
     fun mediaUrl(path: String) = repo.mediaUrl(path)
     fun apiKeyHeader() = repo.apiKeyHeader()
-}
-
-// --------------------------------------------------------------------------
-class AnalyticsViewModel(
-    private val repo: AutoTubeRepository,
-) : BaseViewModel() {
-
-    val rows: StateFlow<List<AnalyticsEntity>> = repo.observeAnalytics()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val totalViews: StateFlow<Long?> = repo.totalViews()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    val avgRetention: StateFlow<Double?> = repo.averageRetention()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    val totalSubs: StateFlow<Long?> = repo.totalSubscribers()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    private val _hints = MutableStateFlow("")
-    val hints: StateFlow<String> = _hints.asStateFlow()
-
-    fun refresh(collect: Boolean = false) {
-        runTask<Int>({ info(if (collect) "Collected from YouTube." else "Refreshed.") }) {
-            repo.refreshAnalytics(collect)
-        }
-    }
 }
 
 // --------------------------------------------------------------------------

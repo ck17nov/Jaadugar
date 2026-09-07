@@ -27,10 +27,14 @@ class JobStatus(str, Enum):
     ANALYZING = "ANALYZING"
     FAILED = "FAILED"
     REJECTED = "REJECTED"
+    # Stopped on purpose. Distinct from FAILED, which means something broke:
+    # a cancelled job should not be retried and is not evidence of a fault.
+    CANCELLED = "CANCELLED"
 
     @property
     def terminal(self) -> bool:
-        return self in {JobStatus.PUBLISHED, JobStatus.FAILED, JobStatus.REJECTED}
+        return self in {JobStatus.PUBLISHED, JobStatus.FAILED,
+                        JobStatus.REJECTED, JobStatus.CANCELLED}
 
 
 ORDERED_STATUSES = [
@@ -91,6 +95,9 @@ class AutomationRequest(JsonMixin):
     video_format: str = VideoFormat.SHORT.value
     duration_seconds: int = 45
     style: str = "fast-paced, curiosity-driven"
+    # female | male | child. "child" is a real voice for English only; for
+    # every other language it is the female voice pitched up and slowed.
+    voice_gender: str = "female"
     count: int = 1
     mode: str = Mode.APPROVAL.value
     # scheduling

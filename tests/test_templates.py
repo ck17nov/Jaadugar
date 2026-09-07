@@ -66,7 +66,14 @@ class TestTemplateSelection:
         ("top 10 mysteries", "", "MYSTERY"),
         ("unsolved mysteries", "", "MYSTERY"),
         ("AI news", "", "TECH_NEWS"),
-        ("programming tutorials", "", "TECH_NEWS"),
+        # EDUCATIONAL, not TECH_NEWS. A programming tutorial is a lesson: it
+        # wants the slower pacing and one-idea-per-frame captions, not a news
+        # template's hard cuts. Changed deliberately when the niche list was
+        # narrowed to the six areas this channel actually publishes.
+        ("programming tutorials", "", "EDUCATIONAL"),
+        ("sql and databases", "", "EDUCATIONAL"),
+        ("personal finance", "", "EDUCATIONAL"),
+        ("pc and laptop tech", "", "TECH_NEWS"),
         ("true horror stories", "", "STORYTELLING"),
         ("reddit stories", "", "STORYTELLING"),
         ("motivation", "", "MOTIVATIONAL"),

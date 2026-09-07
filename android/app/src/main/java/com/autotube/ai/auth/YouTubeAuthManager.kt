@@ -68,16 +68,24 @@ class YouTubeAuthManager(context: Context, private val store: SecureStore) {
             Uri.parse(redirectUri),
         )
             .setScopes(SCOPES)
-            // select_account as well as consent.
+            // Ask for the chooser ONLY when we cannot name the account.
             //
             // With consent alone, Chrome silently uses whichever Google
-            // account is its default. On a phone signed into a personal
-            // account and the channel's account, that is a coin flip, and the
-            // user has no way to correct it from inside the flow. Asking for
-            // select_account always shows the chooser.
+            // account is its default, which on a phone signed into a personal
+            // account and the channel's account is a coin flip. But forcing
+            // select_account every time makes reconnecting a full trawl
+            // through the account list even when the right account is already
+            // known - so once the channel's address is filled in, login_hint
+            // does the job and the extra step is dropped.
+            //
+            // consent itself cannot be dropped: Google only returns a refresh
+            // token when it is present, and without one scheduled uploads stop
+            // working within the hour.
             .setPromptValues(
-                AuthorizationRequest.Prompt.SELECT_ACCOUNT,
-                AuthorizationRequest.Prompt.CONSENT,
+                *(if (store.youtubeAccountEmail.isBlank())
+                    arrayOf(AuthorizationRequest.Prompt.SELECT_ACCOUNT,
+                            AuthorizationRequest.Prompt.CONSENT)
+                  else arrayOf(AuthorizationRequest.Prompt.CONSENT))
             )
             .setAdditionalParameters(extraParams())
             .build()
