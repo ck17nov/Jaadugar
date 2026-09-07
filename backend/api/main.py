@@ -112,6 +112,10 @@ class AutomationBody(BaseModel):
     caption_language: str = Field(default="", max_length=12)
     caption_style: Literal["", "karaoke", "block", "none"] = ""
     channel_id: str = Field(default="", max_length=64)
+    # 0 = use the backend's configured minimum. The Settings slider showed a
+    # number and explained that the backend refuses to upload below it, while
+    # the value was written only to device preferences and read by nothing.
+    min_quality_score: int = Field(default=0, ge=0, le=100)
     count: int = Field(default=1, ge=1, le=10)
     mode: Literal["AUTO", "APPROVAL"] = "APPROVAL"
     frequency: Literal["once", "daily", "weekly", "days"] = "once"
@@ -632,14 +636,36 @@ def get_job_file(job_id: str, kind: str):
 @app.post("/jobs/{job_id}/approve", dependencies=[Depends(require_api_key)])
 def approve_job(job_id: str, background: BackgroundTasks) -> dict[str, Any]:
     """Approve a job awaiting review; upload/schedule runs in the background."""
-    from engine.pipeline import Pipeline, PipelineError
+    from engine.pipeline import Pipeline
 
     def do_approve() -> None:
+        """Approve and upload, recording any failure ON THE JOB.
+
+        The endpoint has already answered {"accepted": true} by the time this
+        runs, so a failure here used to go only to the server log: job.error
+        was never set and the status never advanced, which left the card
+        sitting in "Waiting for your approval" for ever with nothing on the
+        phone to explain it. Approving again produced the same silence.
+
+        Catches bare Exception on purpose. A background task that dies with an
+        unexpected error is exactly the case that needs to reach the user -
+        narrowing this to PipelineError is how an ffmpeg or Google API
+        exception disappeared.
+        """
         pipe = Pipeline(CFG)
         try:
             pipe.approve(job_id)
-        except PipelineError as exc:
-            log_event("API", "approval failed", job=job_id, error=str(exc)[:200])
+        except Exception as exc:                      # noqa: BLE001
+            log_event("API", "approval failed", job=job_id,
+                      error=str(exc)[:200])
+            try:
+                failed = pipe.db.get_job(job_id)
+                if failed is not None:
+                    failed.error = f"approval/upload failed: {str(exc)[:400]}"
+                    pipe._advance(failed, JobStatus.FAILED, failed.error)
+            except Exception as inner:                # noqa: BLE001
+                log_event("API", "could not record the approval failure",
+                          job=job_id, error=str(inner)[:160])
         finally:
             pipe.close()
 

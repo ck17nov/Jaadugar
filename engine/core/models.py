@@ -111,6 +111,8 @@ class AutomationRequest(JsonMixin):
     # Settings, and failing that the default channel. A YouTube token is bound
     # to one channel, so this selects WHICH stored authorisation to use.
     channel_id: str = ""
+    # 0 means "use the backend's configured minimum".
+    min_quality_score: int = 0
     count: int = 1
     mode: str = Mode.APPROVAL.value
     # scheduling

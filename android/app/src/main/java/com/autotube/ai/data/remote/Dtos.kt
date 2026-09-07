@@ -39,6 +39,7 @@ data class AutomationRequestDto(
     @SerialName("voice_gender") val voiceGender: String = "female",
     @SerialName("caption_language") val captionLanguage: String = "",
     @SerialName("caption_style") val captionStyle: String = "",
+    @SerialName("channel_id") val channelId: String = "",
     val count: Int = 1,
     val mode: String = "APPROVAL",
     val frequency: String = "once",
@@ -324,3 +325,21 @@ data class ClearAckDto(
     @SerialName("freed_mb") val freedMb: Double = 0.0,
     @SerialName("job_ids") val jobIds: List<String> = emptyList(),
 )
+
+@Serializable
+data class YouTubeAccountDto(
+    @SerialName("channel_id") val channelId: String = "",
+    val title: String = "",
+    @SerialName("added_at") val addedAt: Double = 0.0,
+    val niches: List<String> = emptyList(),
+    @SerialName("is_default") val isDefault: Boolean = false,
+)
+
+@Serializable
+data class YouTubeAccountListDto(
+    val accounts: List<YouTubeAccountDto> = emptyList(),
+    val default: String = "",
+)
+
+@Serializable
+data class NicheMapBodyDto(val niches: List<String> = emptyList())

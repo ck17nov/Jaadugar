@@ -21,6 +21,21 @@ interface ApiService {
         @Query("duration") duration: Int = 45,
     ): NichePreviewDto
 
+    @GET("youtube/accounts")
+    suspend fun youtubeAccounts(): YouTubeAccountListDto
+
+    @POST("youtube/accounts/{channelId}/default")
+    suspend fun setDefaultAccount(@Path("channelId") channelId: String): Unit
+
+    @POST("youtube/accounts/{channelId}/niches")
+    suspend fun setAccountNiches(
+        @Path("channelId") channelId: String,
+        @Body body: NicheMapBodyDto,
+    ): Unit
+
+    @DELETE("youtube/accounts/{channelId}")
+    suspend fun removeAccount(@Path("channelId") channelId: String): Unit
+
     @GET("automations")
     suspend fun automations(
         @Query("include_cancelled") includeCancelled: Boolean = false,

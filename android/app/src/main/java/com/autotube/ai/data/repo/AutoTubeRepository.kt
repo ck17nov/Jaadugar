@@ -12,6 +12,8 @@ import com.autotube.ai.data.remote.AutomationRequestDto
 import com.autotube.ai.data.remote.AutomationListDto
 import com.autotube.ai.data.remote.ClearAckDto
 import com.autotube.ai.data.remote.ClearRequestDto
+import com.autotube.ai.data.remote.NicheMapBodyDto
+import com.autotube.ai.data.remote.YouTubeAccountListDto
 import com.autotube.ai.data.remote.CancelAckDto
 import com.autotube.ai.data.remote.HealthDto
 import com.autotube.ai.data.remote.JobDetailDto
@@ -147,6 +149,27 @@ class AutoTubeRepository(
         logEvent("APPROVAL", "rejected $jobId", jobId)
         Unit
     }
+
+    /**
+     * Every brand channel the backend can publish to.
+     *
+     * One entry per authorisation: a YouTube token is bound to a single
+     * channel, chosen in Google's own chooser during consent, so posting to
+     * several brand channels under one Google account means connecting each
+     * one - not one token with a channel parameter.
+     */
+    suspend fun youtubeAccounts(): Result<YouTubeAccountListDto> =
+        call { api.service().youtubeAccounts() }
+
+    suspend fun setDefaultAccount(channelId: String): Result<Unit> =
+        call { api.service().setDefaultAccount(channelId) }
+
+    suspend fun setAccountNiches(channelId: String,
+                                 niches: List<String>): Result<Unit> =
+        call { api.service().setAccountNiches(channelId, NicheMapBodyDto(niches)) }
+
+    suspend fun removeAccount(channelId: String): Result<Unit> =
+        call { api.service().removeAccount(channelId) }
 
     /** Every automation the backend knows about, running or scheduled. */
     suspend fun automations(): Result<AutomationListDto> =

@@ -631,17 +631,24 @@ class Pipeline:
         # synthesiser and describe the words the VOICE says, so translated text
         # has no per-word timing. One block per scene, on the span the scene
         # actually occupies.
+        # Captions off: no burn-in, but the render still has to happen.
+        #
+        # This block used to `return` here, which exited stage_render - whose
+        # contract is to return the finished video Path - so choosing "no
+        # captions" produced no video at all. It sets ass_path to None and
+        # falls through instead; finalize() already treats None as "do not
+        # burn subtitles".
+        ass_path: Path | None = None
+        srt_path = job_dir / "captions.srt"
+        groups = 0
         if caption_style == "none":
-            # Skip the stage entirely rather than burning an empty subtitle
-            # file: libass on an events-less ASS is a wasted filter pass on
-            # every frame, and the SRT is still written below for YouTube.
             log_event("CAPTION", "captions off for this video",
                       reason="requested" if requested_style else "configured")
-            srt_only = job_dir / "captions.srt"
-            srt_only.write_text(self.caption_engine.srt_only(offsets),
+            # The SRT is still written and uploaded, so viewers can turn
+            # captions on and the video is still indexed on its words.
+            srt_path.write_text(self.caption_engine.srt_only(offsets),
                                 encoding="utf-8")
-            job.subtitle_path = str(srt_only)
-            return None, srt_only, 0
+            job.subtitle_path = str(srt_path)
 
         caption_language = self._caption_language(request)
         # Translate here rather than at the script stage: the blocks are timed
@@ -655,16 +662,18 @@ class Pipeline:
             for scene in script.scene_objects()
             if getattr(scene, "caption_text", "").strip()
         ]
-        if caption_language and translated:
-            ass_path, srt_path, groups = self.caption_engine.build_translated(
-                translated, job_dir / "captions.ass",
-                job_dir / "captions.srt", w, h, language=caption_language)
-        else:
-            ass_path, srt_path, groups = self.caption_engine.build(
-                offsets, job_dir / "captions.ass", job_dir / "captions.srt",
-                w, h, style_override=caption_style,
-                language=request.language)
-        job.subtitle_path = str(srt_path)
+        if caption_style != "none":
+            if caption_language and translated:
+                ass_path, srt_path, groups =                     self.caption_engine.build_translated(
+                        translated, job_dir / "captions.ass",
+                        job_dir / "captions.srt", w, h,
+                        language=caption_language)
+            else:
+                ass_path, srt_path, groups = self.caption_engine.build(
+                    offsets, job_dir / "captions.ass",
+                    job_dir / "captions.srt", w, h,
+                    style_override=caption_style, language=request.language)
+            job.subtitle_path = str(srt_path)
 
         # ---- music + sfx ------------------------------------------------
         # Both are switchable. A synthesised bed is a taste call, not a
@@ -775,11 +784,28 @@ class Pipeline:
         safe_write_json(job_dir / "factcheck_report.json", fact.to_dict())
 
         # ---- quality gate -----------------------------------------------
-        quality = self.quality_gate.evaluate(
-            video=video, metadata=meta, script=script, profile=profile,
-            subtitle=Path(job.subtitle_path) if job.subtitle_path else None,
-            thumbnail=thumbnail, target_duration=float(request.duration_seconds),
-            video_format=request.video_format, originality=orig, factcheck=fact)
+        # A per-run minimum, when one was asked for.
+        #
+        # The Settings slider displayed a threshold and explained that the
+        # backend refuses to upload below it, while the number went only to
+        # device preferences and was read by nothing at all. Applied here so
+        # the sentence is true. Restored afterwards because the gate is shared
+        # across runs on this Pipeline instance.
+        requested_minimum = int(getattr(request, "min_quality_score", 0) or 0)
+        previous_minimum = self.quality_gate.minimum
+        if requested_minimum:
+            self.quality_gate.minimum = float(requested_minimum)
+        try:
+            quality = self.quality_gate.evaluate(
+                video=video, metadata=meta, script=script, profile=profile,
+                subtitle=(Path(job.subtitle_path) if job.subtitle_path
+                          else None),
+                thumbnail=thumbnail,
+                target_duration=float(request.duration_seconds),
+                video_format=request.video_format, originality=orig,
+                factcheck=fact)
+        finally:
+            self.quality_gate.minimum = previous_minimum
 
         safe_write_json(job_dir / "metadata.json", meta.to_dict())
         safe_write_json(job_dir / "quality_report.json", quality.to_dict())

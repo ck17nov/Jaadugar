@@ -640,6 +640,24 @@ class TestCaptionsOff:
         src = inspect.getsource(Pipeline)
         assert 'if caption_style == "none"' in src
 
+    def test_switching_captions_off_still_renders_the_video(self):
+        """The first version of this returned early from stage_render.
+
+        stage_render's contract is to return the finished video Path, so an
+        early return meant choosing "no captions" produced NO VIDEO. Caught by
+        an audit, not by me. The check is that the captions-off branch does
+        not return, and that stage_render has exactly one exit.
+        """
+        import inspect
+        import textwrap
+        from engine.pipeline import Pipeline
+        src = textwrap.dedent(inspect.getsource(Pipeline.stage_render))
+        lines = [line.strip() for line in src.splitlines()]
+        returns = [line for line in lines if line.startswith("return ")]
+        # One return, and it is the video path - not a tuple.
+        assert len(returns) == 1, returns
+        assert "," not in returns[0], returns[0]
+
     def test_the_composer_already_tolerates_no_subtitles(self):
         import inspect
         from engine.video.compose import VideoComposer
