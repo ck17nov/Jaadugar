@@ -35,3 +35,6 @@ assets/fonts/impact.ttf
 assets/fonts/seguibl.ttf
 assets/fonts/DejaVuSans-Bold.ttf
 assets/fonts/LiberationSans-Bold.ttf
+
+# Kotlin compiler scratch output (build noise)
+android/.kotlin/
