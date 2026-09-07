@@ -125,7 +125,33 @@ def probe_json(path: str | Path) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 # Text helpers
 # --------------------------------------------------------------------------
-_WORD = re.compile(r"[A-Za-z0-9']+")
+# Word tokenising has to work in every language the app offers, and \w is not
+# enough on its own.
+#
+# The original ASCII class [A-Za-z0-9'] returned ZERO words for every Indic
+# script, which silently destroyed non-English video: the model writes a
+# correct Hindi script -> the word-floor check counts 0 -> "script under the
+# word floor, re-asking" -> the retry counts 0 too -> the pipeline falls back
+# to the structural TEMPLATE, which only speaks English. So asking for Hindi
+# produced an English video built from boilerplate, and nothing in the logs
+# named language as the cause.
+#
+# Switching to [\w']+ fixed the zero but introduced the opposite error: Python's
+# \w does not match Unicode combining marks, so Devanagari and Tamil words
+# split at every vowel sign and the count came out roughly three times too
+# high - which would have skewed the duration budget just as badly in the other
+# direction.
+#
+# So: split on whitespace, then strip punctuation from the ends. One token per
+# spoken word, in any script, which is what the word budget and the measured
+# speech rate both assume. The danda and double danda are included because they
+# end sentences in Devanagari the way a full stop does in English.
+_PUNCT = (
+    "".join(chr(i) for i in range(0x20, 0x7F)
+            if not chr(i).isalnum() and chr(i) != "'")
+    + "‘’“”–—…"   # curly quotes, dashes
+    + "।॥"                                     # danda, double danda
+)
 STOPWORDS = {
     "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "for", "with",
     "is", "are", "was", "were", "be", "been", "it", "its", "this", "that", "these",
@@ -140,7 +166,9 @@ STOPWORDS = {
 
 
 def words(text: str) -> list[str]:
-    return _WORD.findall((text or "").lower())
+    return [token for token in
+            (raw.strip(_PUNCT) for raw in (text or "").lower().split())
+            if token]
 
 
 def keywords(text: str, limit: int = 12, min_len: int = 3) -> list[str]:

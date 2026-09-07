@@ -551,6 +551,10 @@ Predominant scene role: {role_hint}.
 VISUALS: for each scene give a `visual_prompt` describing ONE image - a literal,
 photographable subject, camera framing and lighting. No text, no words, no logos
 in the image. Also give 2-4 `visual_keywords` (plain nouns).
+Write `visual_prompt` and `visual_keywords` in ENGLISH even when the narration
+is in another language - they are sent to an image generator and a stock photo
+search, both of which understand English far better than anything else, and a
+Hindi or Tamil prompt returns a worse picture.
 
 Return this exact JSON shape and nothing else:
 {{
@@ -633,6 +637,10 @@ STRUCTURE:
 VISUALS: for each scene give a `visual_prompt` describing ONE image - a literal,
 photographable subject, camera framing and lighting. No text, no words, no logos
 in the image. Also give 2-4 `visual_keywords` (plain nouns) for stock search.
+Write `visual_prompt` and `visual_keywords` in ENGLISH even when the narration
+is in another language - they are sent to an image generator and a stock photo
+search, both of which understand English far better than anything else, and a
+Hindi or Tamil prompt returns a worse picture.
 
 ON-SCREEN TEXT: `on_screen_text` is optional, max 4 words, only where a number
 or name deserves emphasis. Leave it empty otherwise - spoken captions already
