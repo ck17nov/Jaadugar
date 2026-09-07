@@ -110,6 +110,7 @@ class AutomationBody(BaseModel):
     style: str = Field(default="fast-paced, curiosity-driven", max_length=200)
     voice_gender: Literal["female", "male", "child"] = "female"
     caption_language: str = Field(default="", max_length=12)
+    caption_style: Literal["", "karaoke", "block", "none"] = ""
     count: int = Field(default=1, ge=1, le=10)
     mode: Literal["AUTO", "APPROVAL"] = "APPROVAL"
     frequency: Literal["once", "daily", "weekly", "days"] = "once"

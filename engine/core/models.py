@@ -102,6 +102,11 @@ class AutomationRequest(JsonMixin):
     # language to reach people who will not watch in the other one - a
     # Hindi-narrated video with English captions, or the reverse.
     caption_language: str = ""
+    # "" follows the style template. "none" burns no captions at all, which is
+    # what the narration-only reference videos do: a full-frame illustration
+    # with nothing over it reads as calmer and more finished, and YouTube's own
+    # subtitle track still carries the SRT for anyone who wants it.
+    caption_style: str = ""
     count: int = 1
     mode: str = Mode.APPROVAL.value
     # scheduling

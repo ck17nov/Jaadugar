@@ -109,6 +109,15 @@ val LANGUAGES = listOf(
     "hi-Latn" to "Hinglish",
 )
 
+// How captions are burned in. "none" leaves the picture clean, which is what
+// the narration-only reference videos do - the SRT still goes to YouTube.
+val CAPTION_STYLES = listOf(
+    "" to "Default for this style",
+    "karaoke" to "Word by word (karaoke)",
+    "block" to "Whole phrase",
+    "none" to "None - clean picture",
+)
+
 // Subtitle language. The blank first entry follows the narration, which is
 // the default; anything else is translated per scene.
 val CAPTION_LANGUAGES = listOf(
@@ -195,6 +204,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     var publishMode by rememberSaveable { mutableStateOf("scheduled") }
     var voiceGender by rememberSaveable { mutableStateOf("female") }
     var captionLanguage by rememberSaveable { mutableStateOf("") }
+    var captionStyle by rememberSaveable { mutableStateOf("") }
 
     // Made for Kids follows the NICHE and the AGE BAND, and is cleared when
     // neither applies.
@@ -346,6 +356,25 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                     "slightly - child-friendly rather than an actual child.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        LabeledDropdown(
+            label = "Captions",
+            value = captionStyle,
+            options = CAPTION_STYLES.map { it.first },
+            display = { key ->
+                CAPTION_STYLES.firstOrNull { it.first == key }?.second ?: key
+            },
+            onValueChange = { captionStyle = it },
+        )
+        if (captionStyle == "none") {
+            Text(
+                "No text burned into the picture. A subtitle track is still " +
+                    "uploaded to YouTube, so viewers can turn captions on and " +
+                    "the video is still indexed on its words.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
@@ -607,6 +636,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                         style = style,
                         voiceGender = voiceGender,
                         captionLanguage = captionLanguage,
+                        captionStyle = captionStyle,
                         count = count,
                         mode = if (autoMode) "AUTO" else "APPROVAL",
                         frequency = frequency,

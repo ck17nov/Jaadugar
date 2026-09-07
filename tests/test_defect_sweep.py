@@ -605,3 +605,60 @@ class TestCaptionLanguage:
         from backend.api.main import AutomationBody
         body = AutomationBody(niche="science", caption_language="hi")
         assert body.caption_language == "hi"
+
+# ==========================================================================
+class TestCaptionsOff:
+    """The narration-only look: a full-frame illustration with nothing over it.
+
+    Both reference videos the owner shared do this - one has no burned
+    captions at all - and it reads as calmer and more finished than text over
+    every frame.
+    """
+
+    def test_the_request_carries_the_choice(self):
+        assert AutomationRequest().caption_style == ""
+        assert AutomationRequest(caption_style="none").caption_style == "none"
+
+    def test_the_api_rejects_an_unknown_style(self):
+        from pydantic import ValidationError
+        from backend.api.main import AutomationBody
+        assert AutomationBody(niche="science",
+                              caption_style="none").caption_style == "none"
+        with pytest.raises(ValidationError):
+            AutomationBody(niche="science", caption_style="rainbow")
+
+    def test_an_srt_is_still_written(self):
+        """The frame stays clean; YouTube still gets a real subtitle track."""
+        import inspect
+        from engine.video.captions import CaptionEngine
+        assert "srt_only" in inspect.getsource(CaptionEngine)
+
+    def test_the_burn_in_is_skipped_rather_than_given_an_empty_file(self):
+        """libass on an events-less ASS is a wasted pass over every frame."""
+        import inspect
+        from engine.pipeline import Pipeline
+        src = inspect.getsource(Pipeline)
+        assert 'if caption_style == "none"' in src
+
+    def test_the_composer_already_tolerates_no_subtitles(self):
+        import inspect
+        from engine.video.compose import VideoComposer
+        src = inspect.getsource(VideoComposer.finalize)
+        assert "if ass_file is not None and ass_file.exists():" in src
+
+    def test_srt_only_produces_real_cues(self, tmp_path):
+        from engine.tts.base import SceneAudio, WordMark
+        from engine.video.captions import CaptionEngine
+        clip = SceneAudio(scene_index=0, path=tmp_path / "a.wav",
+                          duration=2.0, text="hello world", provider="edge",
+                          words=[WordMark(0.0, 0.4, "hello"),
+                                 WordMark(0.5, 0.4, "world")])
+        text = CaptionEngine(load_config()).srt_only([(0.0, clip)])
+        assert "hello" in text and "-->" in text
+
+    def test_srt_only_is_empty_when_there_are_no_words(self, tmp_path):
+        from engine.tts.base import SceneAudio
+        from engine.video.captions import CaptionEngine
+        clip = SceneAudio(scene_index=0, path=tmp_path / "a.wav",
+                          duration=1.0, text="", provider="gtts", words=[])
+        assert CaptionEngine(load_config()).srt_only([(0.0, clip)]) == ""

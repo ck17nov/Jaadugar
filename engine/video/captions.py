@@ -139,6 +139,21 @@ class CaptionEngine:
         self.uppercase = bool(cfg.get("captions.uppercase", True))
 
     # ------------------------------------------------------------------
+    def srt_only(self, clips: list[tuple[float, SceneAudio]]) -> str:
+        """The SRT track without burning anything into the picture.
+
+        Used when captions are switched off for a video. YouTube still gets a
+        real subtitle file - so viewers who want subtitles have them and the
+        video is still indexed on its words - while the frame stays clean,
+        which is what the narration-only reference videos do.
+        """
+        words = absolute_words(clips)
+        if not words:
+            return ""
+        groups = group_words(words, max_words=self.max_words + 2,
+                             max_chars=int(self.max_chars * 1.6))
+        return self._render_srt(groups)
+
     def build_translated(self, spans: list[tuple[float, float, str]],
                          out_ass: Path, out_srt: Path,
                          width: int, height: int, *,

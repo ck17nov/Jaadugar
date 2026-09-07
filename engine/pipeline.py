@@ -617,15 +617,32 @@ class Pipeline:
         scenes = script.scene_objects()
 
         # ---- captions ---------------------------------------------------
-        caption_style = (profile.caption_style
-                         if self.cfg.get("captions.style") == "karaoke"
-                         else str(self.cfg.get("captions.style")))
+        # A per-video choice beats a global default here: the same channel
+        # wants karaoke on a Short and nothing at all on a long-form narration
+        # piece, which is what the reference videos do.
+        requested_style = (getattr(request, "caption_style", "") or "").strip()
+        caption_style = requested_style or (
+            profile.caption_style
+            if self.cfg.get("captions.style") == "karaoke"
+            else str(self.cfg.get("captions.style")))
         # Captions in a DIFFERENT language from the narration, when asked for.
         #
         # Word-level karaoke is impossible here: the timings come from the
         # synthesiser and describe the words the VOICE says, so translated text
         # has no per-word timing. One block per scene, on the span the scene
         # actually occupies.
+        if caption_style == "none":
+            # Skip the stage entirely rather than burning an empty subtitle
+            # file: libass on an events-less ASS is a wasted filter pass on
+            # every frame, and the SRT is still written below for YouTube.
+            log_event("CAPTION", "captions off for this video",
+                      reason="requested" if requested_style else "configured")
+            srt_only = job_dir / "captions.srt"
+            srt_only.write_text(self.caption_engine.srt_only(offsets),
+                                encoding="utf-8")
+            job.subtitle_path = str(srt_only)
+            return None, srt_only, 0
+
         caption_language = self._caption_language(request)
         # Translate here rather than at the script stage: the blocks are timed
         # to scene spans, and scene.start/duration are only filled in once the
