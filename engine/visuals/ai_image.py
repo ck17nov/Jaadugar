@@ -258,13 +258,22 @@ class GeminiImageBackend:
         # No width/height parameter exists: the model is told the shape in
         # words and returns its own size, which condition_image then
         # cover-crops to the frame.
+        aspect = "9:16" if height > width else "16:9"
         shape = ("vertical 9:16 portrait composition" if height > width
                  else "horizontal 16:9 widescreen composition")
         body = {
             "contents": [{"parts": [{"text": f"{prompt}. {shape}."}]}],
-            # Seed is not exposed either; variety comes from the prompt, and
-            # the provider's duplicate check still catches a repeat.
-            "generationConfig": {"candidateCount": 1},
+            "generationConfig": {
+                "candidateCount": 1,
+                # Ask for the aspect ratio as a PARAMETER, not only in prose.
+                #
+                # Prose alone got a square image, which the cover-crop then
+                # trimmed to 9:16 - keeping about a third of the frame and
+                # magnifying whatever survived. That is the "looks stretched
+                # and the face is blurry" complaint: the renderer was correct
+                # and the source was the wrong shape.
+                "imageConfig": {"aspectRatio": aspect},
+            },
         }
         with httpx.Client(timeout=self.timeout) as client:
             resp = client.post(self.ENDPOINT + self.model + ":generateContent",
@@ -293,6 +302,101 @@ class GeminiImageBackend:
             f"{text[:160]}")
 
 
+class CloudflareBackend:
+    """Workers AI: a real free daily allowance, and FLUX.
+
+    The reason to prefer this over the other free options: Cloudflare gives
+    every account 10,000 neurons a day at no cost and no card, and the catalogue
+    includes FLUX.1 schnell - the model that actually draws clean cel-shaded
+    illustration rather than the painterly blur the keyless endpoint produces.
+    At roughly 230 images a day that is about 28 Shorts, or two thirds of a
+    thirty-minute video.
+
+    Two API details that decide the code:
+
+      * flux-1-schnell answers with JSON - {"result": {"image": "<base64>"}} -
+        NOT raw image bytes, unlike the stable-diffusion models on the same
+        endpoint. Both shapes are handled, because the model is configurable
+        and getting this wrong looks like a corrupt download.
+
+      * It has no width or height parameter and returns a SQUARE image. That
+        matters: a square cover-cropped into 9:16 keeps a third of the frame
+        and magnifies whatever survives, which is exactly the "stretched, and
+        the face is blurry" complaint. `stable-diffusion-xl-base-1.0` on the
+        same account does accept width and height, so the model is a config
+        key rather than a constant.
+    """
+
+    id = "cloudflare"
+    label = "Cloudflare Workers AI"
+    BASE = "https://api.cloudflare.com/client/v4/accounts/"
+
+    # Models that honour width/height. Everything else returns a square.
+    SIZED_MODELS = ("stable-diffusion-xl-base-1.0", "stable-diffusion-xl-lightning",
+                    "dreamshaper-8-lcm", "stable-diffusion-v1-5")
+
+    def __init__(self, account_id: str, token: str,
+                 model: str = "@cf/black-forest-labs/flux-1-schnell",
+                 steps: int = 6, timeout: int = 120):
+        self.account_id = account_id
+        self.token = token
+        self.model = model
+        # flux-1-schnell is a distilled model: 4 is the documented default and
+        # 8 the ceiling. 6 buys a little detail for a little more of the daily
+        # allowance, since neurons are charged per step.
+        self.steps = max(1, min(8, int(steps)))
+        self.timeout = timeout
+
+    def available(self) -> bool:
+        return bool(self.account_id and self.token and self.model)
+
+    @property
+    def supports_size(self) -> bool:
+        return any(name in self.model for name in self.SIZED_MODELS)
+
+    def fetch(self, prompt: str, *, width: int, height: int, seed: int) -> bytes:
+        import base64
+        body: dict = {"prompt": prompt, "steps": self.steps}
+        if self.supports_size:
+            # These models cap at 1024 per side and want multiples of 8.
+            body["width"] = min(1024, width - width % 8)
+            body["height"] = min(1024, height - height % 8)
+            body["seed"] = seed
+        url = f"{self.BASE}{self.account_id}/ai/run/{self.model}"
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(url, json=body, headers={
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json"})
+
+        if resp.status_code in (429, 402):
+            raise QuotaExhausted(
+                f"cloudflare: daily neuron allowance exhausted "
+                f"({resp.status_code}). It resets at 00:00 UTC.")
+        if resp.status_code == 401:
+            raise RuntimeError(
+                "cloudflare: token rejected (401). The API token needs the "
+                "Workers AI permission and must belong to this account id.")
+        resp.raise_for_status()
+
+        content_type = resp.headers.get("content-type", "")
+        if "image" in content_type:
+            return resp.content              # stable-diffusion style
+        payload = resp.json()
+        if not payload.get("success", True):
+            errors = payload.get("errors") or []
+            text = "; ".join(str(e.get("message", e)) for e in errors)
+            # Cloudflare reports an exhausted allowance in the BODY with a 200
+            # in some cases, so the message has to be inspected too.
+            if "neuron" in text.lower() or "quota" in text.lower():
+                raise QuotaExhausted(f"cloudflare: {text[:200]}")
+            raise RuntimeError(f"cloudflare: {text[:220]}")
+        image = (payload.get("result") or {}).get("image")
+        if not image:
+            raise RuntimeError(
+                f"cloudflare: no image in the reply ({str(payload)[:200]})")
+        return base64.b64decode(image)
+
+
 def build_backend(cfg) -> object:
     """Pick a backend from config, falling back to the keyless one.
 
@@ -300,6 +404,21 @@ def build_backend(cfg) -> object:
     generation, not stop the job.
     """
     wanted = str(cfg.get("visuals.ai_image_backend", "pollinations")).lower()
+    if wanted == "cloudflare":
+        backend = CloudflareBackend(
+            account_id=cfg.secret("CLOUDFLARE_ACCOUNT_ID"),
+            token=cfg.secret("CLOUDFLARE_API_TOKEN"),
+            model=str(cfg.get("visuals.cloudflare_model",
+                              "@cf/black-forest-labs/flux-1-schnell")),
+            steps=int(cfg.get("visuals.cloudflare_steps", 6)))
+        if backend.available():
+            log_event("VISUAL", "using Cloudflare Workers AI",
+                      backend=backend.id, model=backend.model,
+                      sized=backend.supports_size)
+            return backend
+        log_event("VISUAL", "Cloudflare credentials missing, using keyless "
+                  "generation",
+                  need="CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN")
     if wanted == "gemini":
         backend = GeminiImageBackend(
             model=str(cfg.get("visuals.gemini_image_model",

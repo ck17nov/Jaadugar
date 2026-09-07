@@ -133,10 +133,24 @@ class MetadataGenerator:
                 out += [str(t).strip() for t in (data.get("titles") or [])
                         if str(t).strip()]
             except Exception as exc:
-                log_event("METADATA", "LLM titles unavailable, using structural",
+                log_event("METADATA", "LLM titles unavailable", 
                           error=str(exc)[:140])
 
-        out += self._structural_titles(script, idea)
+        # Structural titles are ENGLISH-ONLY, so they must never be attached to
+        # a video in another language. A Hindi Short titled "How Account
+        # Changes Kids" is worse than a plain one: it is wrong AND in the wrong
+        # language, and YouTube shows the title before anything else.
+        language = (getattr(script, "language", "") or "en").lower()
+        if out or language.startswith("en"):
+            out += self._structural_titles(script, idea)
+        else:
+            log_event("METADATA", "no model title for a non-English video",
+                      language=language,
+                      note="structural titles are English-only; using the "
+                           "script's own hook instead")
+            hook = (getattr(script, "hook", "") or "").strip()
+            if hook:
+                out.append(hook[:100])
 
         # De-duplicate case-insensitively, keep order, cap at 10.
         seen: set[str] = set()

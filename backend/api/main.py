@@ -12,6 +12,7 @@ responsive and survive being backgrounded by Android.
 """
 from __future__ import annotations
 
+import json
 import queue
 import secrets
 import threading
@@ -189,13 +190,37 @@ class Worker:
         self.cancelled_automations: set[str] = set()
 
     def _is_cancelled(self, job) -> bool:
-        return (job.job_id in self.cancelled_jobs
-                or job.automation_id in self.cancelled_automations)
+        if job.job_id in self.cancelled_jobs:
+            return True
+        if job.automation_id in self.cancelled_automations:
+            return True
+        # Also ask the DATABASE, because the sets above are in-memory and a
+        # service restart emptied them - which quietly resurrected automations
+        # the user had stopped. Checked last so the common case stays free of
+        # a query per stage boundary.
+        try:
+            return not self._automation_enabled(job.automation_id)
+        except Exception:
+            return False
+
+    def _automation_enabled(self, automation_id: str) -> bool:
+        """True when this automation is unknown or still enabled.
+
+        Unknown counts as enabled: a one-off run submitted before automations
+        were persisted has no row, and refusing to run it would be a
+        regression rather than a cancellation.
+        """
+        if not automation_id:
+            return True
+        row = _db().get_automation(automation_id)
+        if row is None:
+            return True
+        return bool(row.get("enabled", 1))
 
     def cancel_job(self, job_id: str) -> None:
         self.cancelled_jobs.add(job_id)
 
-    def cancel_automation(self, automation_id: str) -> int:
+    def cancel_automation(self, automation_id: str) -> int:  # noqa: D401
         """Stop a recurring automation: its queued runs and any running job.
 
         Returns how many queued runs were dropped. Draining is done by
@@ -203,6 +228,14 @@ class Worker:
         remove() and reaching into its internals would race the worker thread.
         """
         self.cancelled_automations.add(automation_id)
+        # Persisted as well as remembered: the in-memory set does not survive
+        # a restart, and a "stopped" daily automation that comes back tomorrow
+        # is the exact failure this endpoint exists to prevent.
+        try:
+            _db().cancel_automation(automation_id)
+        except Exception as exc:
+            log_event("WORKER", "could not persist the cancellation",
+                      automation=automation_id, error=str(exc)[:160])
         dropped = 0
         kept: list[AutomationRequest] = []
         while True:
@@ -234,6 +267,13 @@ class Worker:
             self.thread.start()
 
     def submit(self, request: AutomationRequest) -> None:
+        # Recorded before queueing so it can be listed and cancelled even if
+        # the process dies before the run starts.
+        try:
+            _db().save_automation(request)
+        except Exception as exc:
+            log_event("WORKER", "could not persist the automation",
+                      error=str(exc)[:160])
         self.queue.put(request)
         self.start()
 
@@ -345,6 +385,74 @@ def niche_preview(niche: str = Query(min_length=2, max_length=120),
             "requires_kids_confirmation": is_kids_niche(niche)}
 
 
+class ClearBody(BaseModel):
+    """What to clear from the dashboard."""
+    job_ids: list[str] = Field(default_factory=list, max_length=500)
+    # 0 = clear everything eligible now. 7 = only what is older than a week.
+    older_than_days: float = Field(default=0.0, ge=0.0, le=3650.0)
+    # Also delete the media on disk. On by default: clearing the list while
+    # leaving 57 MB per job on the server is the worst of both.
+    free_disk: bool = True
+
+
+@app.post("/jobs/clear", dependencies=[Depends(require_api_key)])
+def clear_jobs(body: ClearBody) -> dict[str, Any]:
+    """Remove finished jobs from the list, and their media from disk.
+
+    Jobs still in flight or waiting for approval are never cleared, whatever
+    is asked: tidying up history should not silently abandon a render that is
+    halfway through, or throw away a video the user is about to review.
+    """
+    db = _db()
+    cutoff = (time.time() - body.older_than_days * 86400.0
+              if body.older_than_days else None)
+    removed = db.delete_jobs(job_ids=body.job_ids or None,
+                             keep_active=True, older_than=cutoff)
+    freed = 0
+    if body.free_disk:
+        from engine.core.storage import reclaim_job
+        for job in removed:
+            if job.dir:
+                freed += reclaim_job(Path(job.dir), job.job_id).freed_bytes
+    log_event("API", "jobs cleared", count=len(removed),
+              freed=f"{freed / (1024 * 1024):.1f}MB",
+              older_than_days=body.older_than_days)
+    return {"cleared": len(removed),
+            "freed_mb": round(freed / (1024 * 1024), 1),
+            "job_ids": [j.job_id for j in removed]}
+
+
+@app.post("/jobs/{job_id}/reclaim", dependencies=[Depends(require_api_key)])
+def reclaim_one(job_id: str) -> dict[str, Any]:
+    """Free one job's media without removing it from the list."""
+    db = _db()
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"error": "job_not_found"})
+    from engine.core.storage import NEVER_RECLAIM, reclaim_job
+    if job.status in NEVER_RECLAIM:
+        raise HTTPException(status_code=409, detail={
+            "error": "awaiting_approval",
+            "message": ("This video is waiting for your approval - deleting it "
+                        "would leave nothing to review. Approve or reject it "
+                        "first.")})
+    if not job.dir:
+        return {"freed_mb": 0.0, "removed": []}
+    return reclaim_job(Path(job.dir), job_id).to_dict()
+
+
+@app.post("/maintenance/reclaim", dependencies=[Depends(require_api_key)])
+def reclaim_sweep(older_than_days: float = Query(7.0, ge=0.0, le=3650.0)
+                  ) -> dict[str, Any]:
+    """Age-based sweep across every job. Idempotent."""
+    results = WORKER._ensure_pipeline().sweep_storage(after_days=older_than_days)
+    freed = sum(r.get("freed_bytes", 0) for r in results)
+    return {"jobs": len(results),
+            "freed_mb": round(freed / (1024 * 1024), 1),
+            "older_than_days": older_than_days,
+            "detail": results}
+
+
 @app.post("/jobs/{job_id}/cancel", dependencies=[Depends(require_api_key)])
 def cancel_job(job_id: str) -> dict[str, Any]:
     """Stop a job that is queued or rendering.
@@ -366,6 +474,45 @@ def cancel_job(job_id: str) -> dict[str, Any]:
     log_event("API", "cancel requested", job=job_id, status=job.status)
     return {"cancelled": True, "status": job.status,
             "note": "stops at the next stage boundary"}
+
+
+@app.get("/automations", dependencies=[Depends(require_api_key)])
+def list_automations(include_cancelled: bool = False,
+                     limit: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
+    """Every recurring automation, so the app can show what is scheduled.
+
+    Until now the only record of an automation was a row in the phone's own
+    database, which meant there was nowhere to see what had been scheduled and
+    no way to cancel it authoritatively.
+    """
+    db = _db()
+    out = []
+    for row in db.list_automations(include_cancelled=include_cancelled,
+                                  limit=limit):
+        payload = {}
+        try:
+            payload = json.loads(row.get("payload") or "{}")
+        except ValueError:
+            payload = {}
+        automation_id = row["id"]
+        out.append({
+            "id": automation_id,
+            "niche": row.get("niche", ""),
+            "frequency": row.get("frequency", "once"),
+            "upload_time": row.get("upload_time", ""),
+            "days": [int(d) for d in str(row.get("days") or "").split(",") if d],
+            "timezone": row.get("timezone", ""),
+            "enabled": bool(row.get("enabled", 1)),
+            "created_at": row.get("created_at", 0.0),
+            "cancelled_at": row.get("cancelled_at", 0.0),
+            "video_format": payload.get("video_format", ""),
+            "language": payload.get("language", ""),
+            "made_for_kids": bool(payload.get("made_for_kids", False)),
+            "videos_made": db.count_jobs_for_automation(automation_id),
+            "running": automation_id == WORKER.current_automation,
+        })
+    return {"automations": out, "queue_depth": WORKER.depth,
+            "running": WORKER.current_automation or ""}
 
 
 @app.delete("/automations/{automation_id}",

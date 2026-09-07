@@ -395,11 +395,27 @@ class Pipeline:
 
     def stage_voice(self, job: VideoJob, request: AutomationRequest, profile,
                     script: Script) -> tuple[Path, float, list]:
-        self._advance(job, JobStatus.VOICE, f"lang={request.language}")
+        # Pick the voice from the language the SCRIPT is actually written in,
+        # not from the language that was requested.
+        #
+        # They can disagree: when the LLM is rate limited the English
+        # structural template writes the script, and a Hindi voice reading
+        # English prose is grotesque - it spelled "smartest" as "smart-a-s-t",
+        # read "2024" in Hindi digits, and pronounced "Kids-Invents" letter by
+        # letter. Fixing the fallback is the real cure; this makes the
+        # mismatch inaudible either way.
+        from .tts.engine import language_for_text
+        spoken = "\n".join(s.narration for s in script.scene_objects())
+        voice_language = language_for_text(spoken, request.language)
+        if voice_language != request.language:
+            log_event("VOICE", "script language differs from the request, "
+                      "voicing what was actually written",
+                      requested=request.language, using=voice_language)
+        self._advance(job, JobStatus.VOICE, f"lang={voice_language}")
         job_dir = Path(job.dir)
         scenes = script.scene_objects()
         spec = self.voice_engine.voice_spec(
-            request.language, script.voice_style,
+            voice_language, script.voice_style,
             gender=request.voice_gender)
 
         def synthesize(rate: str | None = None):
@@ -429,7 +445,7 @@ class Pipeline:
         # and more scenes again - a feedback loop that walked the stored rate
         # from 2.43 down to 1.84 wps over a handful of runs.
         speech_seconds = sum(c.duration for c in clips) or total
-        self._record_speech_rate(request.language, spec, script, speech_seconds)
+        self._record_speech_rate(voice_language, spec, script, speech_seconds)
 
         # ---- duration re-fit -------------------------------------------
         target = float(request.duration_seconds)
@@ -768,11 +784,14 @@ class Pipeline:
             job.scheduled_for = meta.publish_at
             self._advance(job, JobStatus.SCHEDULED, meta.publish_at)
             self.db.save_published(job)
+            # The file is on YouTube now; the local copy is 19 MB of nothing.
+            self.reclaim(job)
         else:
             job.youtube_video_id = result.video_id
             job.published_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             self._advance(job, JobStatus.PUBLISHED, result.url)
             self.db.save_published(job)
+            self.reclaim(job)
         return result.to_dict()
 
     # ==================================================================
@@ -901,7 +920,40 @@ class Pipeline:
         if job is None:
             raise PipelineError("reject", f"unknown job {job_id}")
         self._advance(job, JobStatus.REJECTED, reason or "rejected by user")
+        self.reclaim(job)
         return job
+
+    # ==================================================================
+    # Disk
+    # ==================================================================
+    def reclaim(self, job: VideoJob) -> dict[str, Any]:
+        """Delete a finished job's regenerable media.
+
+        Called the moment a job reaches a state where the video is either on
+        YouTube or will never be published. Roughly 52 MB of the 57 MB a
+        45-second Short occupies is regenerable - the intermediate audio stems
+        alone are 26 MB - and nothing used to delete any of it.
+
+        Reports are always kept: they are kilobytes and they are the record of
+        what was made and why.
+        """
+        if not bool(self.cfg.get("storage.reclaim_after_finish", True)):
+            return {}
+        if not job.dir:
+            return {}
+        from .core.storage import may_reclaim, reclaim_job
+        if not may_reclaim(job.status):
+            return {}
+        return reclaim_job(Path(job.dir), job.job_id).to_dict()
+
+    def sweep_storage(self, *, after_days: float | None = None) -> list[dict]:
+        """Age-based reclaim across every job. Safe to call repeatedly."""
+        from .core.storage import sweep
+        days = (float(self.cfg.get("storage.reclaim_after_days", 7.0))
+                if after_days is None else float(after_days))
+        results = sweep(self.workspace, self.db.list_jobs(limit=1000),
+                        after_days=days)
+        return [r.to_dict() for r in results]
 
     def collect_analytics(self, *, days: int = 28) -> dict[str, Any]:
         collector = AnalyticsCollector(self.cfg, self.auth, self.db)

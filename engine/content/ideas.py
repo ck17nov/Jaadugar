@@ -51,8 +51,27 @@ class IdeaGenerator:
             ideas = self._generate_llm(niche, profile, gaps, clusters, count,
                                        research_context, strategy_hints)
         except LLMError as exc:
+            # Refuse the structural builder for a real run, for the same reason
+            # the script stage refuses its template.
+            #
+            # This is the hole that actually produced the reported bad title. A
+            # structural IDEA for "personal finance" picked the topic "kids"
+            # out of the research, and the title generated from it was "How
+            # Account Changes Kids". Gating only the script left the idea
+            # boilerplate in place, so the video was still about the wrong
+            # thing with a nonsense name.
+            if not (bool(self.cfg.get("content.allow_template_script", False))
+                    or self.cfg.dry_run):
+                raise LLMError(
+                    "no LLM was available to choose a topic, and the "
+                    "structural idea builder picks a subject out of research "
+                    "keywords - which is how a personal-finance request became "
+                    "a video about kids titled \"How Account Changes Kids\". "
+                    "Nothing was rendered. Check the provider keys and daily "
+                    f"quotas, then retry. ({str(exc)[:120]})") from exc
             log_event("IDEA", "LLM unavailable, using structural builder",
-                      error=str(exc)[:180])
+                      error=str(exc)[:180],
+                      reason="dry run" if self.cfg.dry_run else "configured")
             ideas = build_structural_ideas(niche, profile, gaps, clusters, count)
 
         ideas = self._enforce_originality(ideas, videos, niche)

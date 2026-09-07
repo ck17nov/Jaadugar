@@ -147,6 +147,28 @@ CREATE TABLE IF NOT EXISTS schedules (
 );
 CREATE INDEX IF NOT EXISTS ix_schedules_state ON schedules(state, publish_at);
 
+-- Recurring automations.
+--
+-- These used to exist only in Room on the phone, with the server keeping the
+-- request in an in-memory queue.Two consequences, both of which the user hit:
+-- cancelling an automation was forgotten on the next service restart, so it
+-- resumed; and there was nowhere to LIST what had been scheduled, because the
+-- only server-side trace was the automation_id column on jobs already made.
+CREATE TABLE IF NOT EXISTS automations (
+    id           TEXT PRIMARY KEY,
+    niche        TEXT NOT NULL,
+    frequency    TEXT NOT NULL DEFAULT 'once',
+    days         TEXT DEFAULT '',
+    upload_time  TEXT DEFAULT '',
+    timezone     TEXT NOT NULL DEFAULT 'Asia/Kolkata',
+    enabled      INTEGER DEFAULT 1,
+    created_at   REAL NOT NULL,
+    updated_at   REAL NOT NULL,
+    cancelled_at REAL DEFAULT 0,
+    payload      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_automations_enabled ON automations(enabled, created_at);
+
 CREATE TABLE IF NOT EXISTS service_configs (
     name        TEXT PRIMARY KEY,
     enabled     INTEGER DEFAULT 1,
@@ -236,6 +258,98 @@ class Database:
     def get_job(self, job_id: str) -> VideoJob | None:
         row = self.query_one("SELECT payload FROM video_jobs WHERE job_id=?", (job_id,))
         return VideoJob.from_dict(json.loads(row["payload"])) if row else None
+
+    # ---- automations -------------------------------------------------
+    def save_automation(self, request: Any) -> None:
+        """Persist a recurring automation so cancelling it survives a restart."""
+        now = time.time()
+        existing = self.get_automation(request.id)
+        created = existing.get("created_at", now) if existing else now
+        self.execute(
+            "INSERT INTO automations(id,niche,frequency,days,upload_time,"
+            "timezone,enabled,created_at,updated_at,cancelled_at,payload) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "niche=excluded.niche, frequency=excluded.frequency, "
+            "days=excluded.days, upload_time=excluded.upload_time, "
+            "timezone=excluded.timezone, updated_at=excluded.updated_at, "
+            "payload=excluded.payload",
+            (request.id, request.niche, request.frequency,
+             ",".join(str(d) for d in (request.days or [])),
+             request.upload_time or "", request.timezone or "", 1,
+             created, now, 0,
+             json.dumps(request.to_dict(), ensure_ascii=False)),
+        )
+
+    def get_automation(self, automation_id: str) -> dict[str, Any] | None:
+        row = self.query_one(
+            "SELECT * FROM automations WHERE id=?", (automation_id,))
+        return dict(row) if row else None
+
+    def list_automations(self, *, include_cancelled: bool = False,
+                         limit: int = 200) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM automations"
+        if not include_cancelled:
+            sql += " WHERE enabled=1"
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        return [dict(r) for r in self.query(sql, (limit,))]
+
+    def cancel_automation(self, automation_id: str) -> bool:
+        """Mark it cancelled. Returns False if it was not known.
+
+        Persisted deliberately: the worker's in-memory cancelled set was lost
+        on restart, which quietly resurrected automations the user had stopped.
+        """
+        if self.get_automation(automation_id) is None:
+            return False
+        self.execute(
+            "UPDATE automations SET enabled=0, cancelled_at=?, updated_at=? "
+            "WHERE id=?", (time.time(), time.time(), automation_id))
+        return True
+
+    def cancelled_automation_ids(self) -> set[str]:
+        return {r["id"] for r in
+                self.query("SELECT id FROM automations WHERE enabled=0")}
+
+    def count_jobs_for_automation(self, automation_id: str) -> int:
+        row = self.query_one(
+            "SELECT COUNT(*) AS n FROM video_jobs WHERE automation_id=?",
+            (automation_id,))
+        return int(row["n"]) if row else 0
+
+    def delete_jobs(self, *, job_ids: list[str] | None = None,
+                    keep_active: bool = True,
+                    older_than: float | None = None) -> list[VideoJob]:
+        """Remove job ROWS and return the jobs that were removed.
+
+        Returns them so the caller can delete the matching directories - the
+        database row and the 57 MB on disk are two halves of one job, and
+        clearing the list without freeing the disk would be the worst of both.
+
+        `keep_active` protects anything still in flight or waiting for the
+        user: clearing the dashboard should tidy up history, not silently
+        abandon a render that is halfway through.
+        """
+        active = (JobStatus.IDEA.value, JobStatus.RESEARCH.value,
+                  JobStatus.SCRIPT.value, JobStatus.VOICE.value,
+                  JobStatus.VISUALS.value, JobStatus.RENDERING.value,
+                  JobStatus.QUALITY_CHECK.value,
+                  JobStatus.AWAITING_APPROVAL.value)
+        doomed: list[VideoJob] = []
+        for job in self.list_jobs(limit=5000):
+            if job_ids is not None and job.job_id not in job_ids:
+                continue
+            if keep_active and job.status in active:
+                continue
+            if older_than is not None and (job.updated_at or 0) > older_than:
+                continue
+            doomed.append(job)
+        if not doomed:
+            return []
+        with self._lock:
+            self._conn.executemany("DELETE FROM video_jobs WHERE job_id = ?",
+                                   [(j.job_id,) for j in doomed])
+            self._conn.commit()
+        return doomed
 
     def list_jobs(self, status: str | None = None, limit: int = 100) -> list[VideoJob]:
         if status:

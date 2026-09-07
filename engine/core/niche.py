@@ -6,6 +6,7 @@ plus the closest family match.  This means the user can type ANY niche.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -316,8 +317,15 @@ def build_profile(niche: str, *, audience: str = "18-35", style: str = "",
         profile.scene_seconds = min(profile.scene_seconds, 2.8)
 
     # Kids overrides win over everything.
+    #
+    # The AGE BAND counts as well as the niche and the explicit flag. YouTube's
+    # Made-for-Kids question is about who the video is for, so selecting an
+    # under-13 audience makes it child-directed whatever the toggle says - and
+    # the toggle used to be sticky in the app, which is how a finance video for
+    # 25-44 ended up being made for children.
     kids_family = fam == "kids"
-    if made_for_kids or kids_family:
+    kids_audience = audience_is_children(audience)
+    if made_for_kids or kids_family or kids_audience:
         kid_spec = _FAMILIES["kids"]
         profile.made_for_kids = True
         profile.audience = kid_spec["audience"]
@@ -354,6 +362,45 @@ def _search_modifiers(family: str, profile: NicheProfile) -> list[str]:
     }
     mods = per_family.get(family, base)
     return mods if not profile.made_for_kids else ["for kids", "learning", "story"]
+
+
+# Age bands that make content child-directed under YouTube's own rules.
+#
+# YouTube's "Made for Kids" question is about the AUDIENCE, not the topic: if
+# the intended viewers are children, the setting is required regardless of what
+# the video is about. So the age band is authoritative and the toggle cannot
+# contradict it.
+#
+# This exists because the flag was previously sticky in the app - picking a kids
+# niche switched it on and switching to "personal finance" left it on, which
+# turned a finance video into a child-directed one and made the research engine
+# search "personal finance for kids".
+CHILD_AUDIENCE_BANDS = {"2-4", "5-7", "8-12", "0-2", "3-5", "6-8", "9-12"}
+
+
+def audience_is_children(audience: str) -> bool:
+    """True when the selected age band is under 13.
+
+    Parses the band rather than matching a fixed list where possible, so a
+    band this code has not seen before still resolves correctly: any range
+    whose UPPER bound is 12 or below is a children's audience.
+    """
+    text = (audience or "").strip().lower()
+    if not text:
+        return False
+    if text in CHILD_AUDIENCE_BANDS:
+        return True
+    if text in ("all ages", "everyone", "general"):
+        # Deliberately NOT child-directed. "All ages" means a general audience;
+        # treating it as children would force the kids safety profile - and
+        # disable comments and personalised ads - on ordinary content.
+        return False
+    numbers = [int(n) for n in re.findall(r"\d+", text)]
+    if not numbers:
+        return False
+    if text.endswith("+"):
+        return max(numbers) <= 12
+    return max(numbers) <= 12
 
 
 def is_kids_niche(niche: str) -> bool:

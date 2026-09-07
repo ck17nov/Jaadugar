@@ -6,6 +6,8 @@ real narration length rather than an estimate.
 """
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 from ..core.config import Config
@@ -39,6 +41,120 @@ def _scale_rate(rate: str, factor: float) -> str:
         current = 0.0
     scaled = (100.0 + current) * factor - 100.0
     return f"{scaled:+.0f}%"
+
+
+
+# Which writing system a piece of text is actually in, by counting characters.
+#
+# Needed because the requested LANGUAGE and the language of the text handed to
+# the synthesiser can disagree, and when they do the result is grotesque: a
+# Hindi neural voice reading English prose spelled "smartest" as
+# "smart-a-s-t", read "2024" in Hindi digits mid-sentence, and pronounced
+# "Kids-Invents" letter by letter. That happened because the LLM was rate
+# limited, the English structural template produced the script, and the voice
+# was still chosen from the requested language.
+#
+# Fixing the template is the real cure; this is the guard that stops the
+# mismatch reaching the listener either way.
+_SCRIPT_RANGES = (
+    ("deva", 0x0900, 0x097F),
+    ("beng", 0x0980, 0x09FF),
+    ("gujr", 0x0A80, 0x0AFF),
+    ("taml", 0x0B80, 0x0BFF),
+    ("telu", 0x0C00, 0x0C7F),
+    ("knda", 0x0C80, 0x0CFF),
+    ("mlym", 0x0D00, 0x0D7F),
+    ("arab", 0x0600, 0x06FF),
+)
+
+# Language to use when the text turns out to be in a script we can name. Only
+# languages this project offers a voice for.
+_SCRIPT_LANGUAGE = {
+    "deva": "hi", "beng": "bn", "gujr": "gu", "taml": "ta", "telu": "te",
+    # Detected but not offered in the app. Mapped anyway so text that arrives
+    # in one of these gets a voice for the right LANGUAGE rather than falling
+    # through to an English one that would spell it out.
+    "knda": "kn", "mlym": "ml", "arab": "ar",
+}
+
+
+
+# Text tidying that only matters once it is spoken aloud.
+#
+# Every case here came from a real render: "Kids-Invents" was read out letter
+# by letter, and quotation marks and ellipses make a neural voice pause in
+# places a reader would not. Deliberately conservative - the narration is the
+# product, and rewriting it to suit the synthesiser is how you end up with a
+# script nobody wrote.
+_SPEECH_FIXES = (
+    # A hyphen BETWEEN WORDS is a compound, and edge-tts spells compounds out.
+    # A hyphen between digits is a range and must stay.
+    (re.compile(r"(?<=[^\W\d_])-(?=[^\W\d_])", re.UNICODE), " "),
+    # Quotes and ellipses: keep the pause, drop the stutter.
+    (re.compile(r"[“”‘’]"), ""),
+    (re.compile(r"…"), ", "),
+    # An em or en dash reads as a comma, not as silence.
+    (re.compile(r"\s*[–—]\s*"), ", "),
+    # Collapse whitespace last.
+    (re.compile(r"\s{2,}"), " "),
+)
+
+
+def normalize_for_speech(text: str) -> str:
+    """Make text safe to hand to a speech synthesiser.
+
+    Not a rewrite: punctuation and compounds only. Numbers are left alone
+    because a neural voice reads them correctly IN ITS OWN LANGUAGE - the
+    "2024 in Hindi digits" complaint was a wrong-language VOICE, not a
+    formatting problem, and expanding digits here would break the languages
+    where the voice already gets it right.
+    """
+    out = (text or "").strip()
+    for pattern, replacement in _SPEECH_FIXES:
+        out = pattern.sub(replacement, out)
+    return out.strip()
+
+
+def detect_script(text: str) -> str:
+    """The dominant writing system of `text`: a script tag, or "latin"."""
+    counts: dict[str, int] = {}
+    latin = 0
+    for ch in text or "":
+        code = ord(ch)
+        if ch.isalpha() and code < 0x0250:
+            latin += 1
+            continue
+        for tag, lo, hi in _SCRIPT_RANGES:
+            if lo <= code <= hi:
+                counts[tag] = counts.get(tag, 0) + 1
+                break
+    if not counts:
+        return "latin" if latin else ""
+    tag, best = max(counts.items(), key=lambda kv: kv[1])
+    # Latin wins only if it clearly dominates; Indic text carries Latin
+    # numerals and the odd English noun without changing what it is.
+    return "latin" if latin > best * 2 else tag
+
+
+def language_for_text(text: str, requested: str) -> str:
+    """The language whose voice should actually speak `text`.
+
+    Returns `requested` when they agree. When they do not, the TEXT wins: the
+    listener hears the text, not the request, and a voice from the wrong
+    language mangles it.
+    """
+    from ..video.fonts import script_for_language
+    found = detect_script(text)
+    if not found:
+        return requested
+    wanted = script_for_language(requested) or "latin"
+    if found == wanted:
+        return requested
+    if found == "latin":
+        # Devanagari was asked for and Latin arrived. Speak it as Indian
+        # English rather than letting a Hindi voice spell it out.
+        return "en-IN"
+    return _SCRIPT_LANGUAGE.get(found, requested)
 
 
 class VoiceEngine:
@@ -119,11 +235,31 @@ class VoiceEngine:
         attempts = int(self.cfg.get("automation.max_retries", 3))
 
         for scene in scenes:
-            text = (scene.narration or "").strip()
+            text = normalize_for_speech(scene.narration or "")
             if not text:
                 continue
+            # Resolve the voice PER SCENE, not once for the whole script.
+            #
+            # A long-form script can be partly model-written and partly
+            # template-written, so one scene is Hindi and the next is English.
+            # Choosing the voice from the joined text picks whichever
+            # dominates and mispronounces the rest - which is how "smartest"
+            # became "smart-a-s-t".
+            use = spec
+            scene_language = language_for_text(text, spec.language)
+            if scene_language != spec.language:
+                use = self.voice_spec(scene_language, spec.style,
+                                      gender=spec.gender)
+                # Carry the rate and pitch across. The duration re-fit works by
+                # mutating spec.rate, and a freshly resolved spec would drop
+                # that correction silently.
+                use.rate, use.pitch = spec.rate, spec.pitch
+                log_event("TTS", "scene is not in the expected language, "
+                          "switching voice", scene=scene.index,
+                          expected=spec.language, found=scene_language,
+                          voice=use.voice_id or "provider default")
             target = out_dir / f"scene_{scene.index:02d}.wav"
-            audio = self._synthesize_one(text, target, spec, attempts)
+            audio = self._synthesize_one(text, target, use, attempts)
             audio.scene_index = scene.index
             audio.duration = trim_trailing_silence(audio.path)
             # Re-clamp any word mark that now sits past the trimmed end.

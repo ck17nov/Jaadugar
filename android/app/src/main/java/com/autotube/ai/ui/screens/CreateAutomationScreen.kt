@@ -131,6 +131,12 @@ val AUDIENCES = listOf(
     "2-4", "5-7", "8-12", "13-17", "18-24", "18-35", "25-44", "35+", "all ages",
 )
 
+// Under-13 bands. Selecting one makes the video child-directed under
+// YouTube's rules whatever else is chosen, so the Made for Kids switch is
+// locked on rather than merely defaulted. The backend enforces the same rule,
+// so the two can never disagree.
+val CHILD_AUDIENCES = setOf("2-4", "5-7", "8-12")
+
 val FREQUENCIES = listOf("once", "daily", "weekly", "days")
 private val WEEKDAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -175,13 +181,31 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     var publishMode by rememberSaveable { mutableStateOf("scheduled") }
     var voiceGender by rememberSaveable { mutableStateOf("female") }
 
-    // A niche whose name says "kids" needs no confirmation dialog.
+    // Made for Kids follows the NICHE and the AGE BAND, and is cleared when
+    // neither applies.
+    //
+    // It used to be set true for a kids niche and never set back, and the
+    // state is rememberSaveable - so after making a kids video, switching to
+    // "personal finance" left the flag on. That turned a finance video for
+    // 25-44 into child-directed content and made the backend research
+    // "personal finance for kids". A one-way switch is the bug.
+    //
+    // The age band is authoritative because that is what YouTube's own
+    // question asks: who is the video for. An under-13 audience is
+    // child-directed whatever else is selected, which is why the toggle below
+    // is disabled rather than merely pre-set in that case.
     val nicheIsKids = niche.trim().lowercase() in KIDS_NICHES
-    LaunchedEffect(nicheIsKids) {
-        if (nicheIsKids) {
+    val audienceIsChildren = audience in CHILD_AUDIENCES
+    val kidsRequired = nicheIsKids || audienceIsChildren
+    LaunchedEffect(nicheIsKids, audienceIsChildren) {
+        if (kidsRequired) {
             madeForKids = true
-            audience = if (audience in listOf("2-4", "5-7", "8-12")) audience else "5-7"
+            if (nicheIsKids && !audienceIsChildren) audience = "5-7"
             vm.dismissKidsPrompt()
+        } else {
+            // Leaving a kids niche for an adult one clears it.
+            madeForKids = false
+            kidsAnsweredFor = ""
         }
     }
 
@@ -503,14 +527,32 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(checked = madeForKids, onCheckedChange = { madeForKids = it })
+            Switch(
+                checked = madeForKids,
+                // Locked when the audience or niche already decides it. A
+                // switch you can turn off while the backend turns it back on
+                // is worse than no switch: it looks like the setting took
+                // effect when it did not.
+                enabled = !kidsRequired,
+                onCheckedChange = { madeForKids = it },
+            )
             Column(Modifier.padding(start = 12.dp)) {
                 Text("Made for Kids", style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "Sets YouTube's child-directed classification. Required by " +
-                        "law if the content targets children.",
+                    when {
+                        audienceIsChildren ->
+                            "Required: the audience is under 13, so YouTube " +
+                                "treats this as child-directed whatever else " +
+                                "is set."
+                        nicheIsKids ->
+                            "Required: this niche is child-directed."
+                        else ->
+                            "Sets YouTube's child-directed classification. " +
+                                "Required by law if the content targets children."
+                    },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (kidsRequired) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

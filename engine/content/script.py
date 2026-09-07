@@ -254,11 +254,62 @@ class ScriptGenerator:
 
         script = self._post_process(script, profile, target_words, min_words,
                                     duration, is_short)
+        self._refuse_boilerplate(script, language)
         log_event("SCRIPT", "script generated", provider=script.provider,
                   words=count_words(script.script), scenes=len(script.scenes),
                   target_words=target_words,
                   est_seconds=f"{script.estimated_duration:.1f}")
         return script
+
+    # ------------------------------------------------------------------
+    def _refuse_boilerplate(self, script: Script, language: str) -> None:
+        """Fail the job rather than publish a template-written script.
+
+        The deterministic builder exists so a dry run produces every artifact
+        without an API key. It is NOT publishable: it is formulaic, topic-blind
+        and English-only. A real run with every LLM rate limited shipped this
+        as a finished video -
+
+            "Kids are usually explained the same way every time."
+            "Most explanations of kids stop at the surface."
+
+        - titled "How Account Changes Kids", for a personal-finance request in
+        Hindi. Every complaint about that video traced back here: the story was
+        an essay, the title was nonsense, the description repeated the essay,
+        and because the text was English while the requested voice was Hindi
+        the narrator spelled words out letter by letter.
+
+        Failing is the honest outcome. Rate limits reset, the stage is retried
+        with backoff, and the user gets a message naming the cause instead of a
+        video they have to watch to discover is unusable.
+
+        A PARTIALLY degraded long-form script (`groq+template`) is allowed
+        through with a warning: most sections are real and one formulaic
+        section in a twenty-minute video is a blemish, not a write-off.
+        """
+        provider = (script.provider or "").strip().lower()
+        if provider != "template":
+            if "template" in provider:
+                log_event("SCRIPT", "some sections fell back to the template "
+                          "builder", provider=script.provider,
+                          note="formulaic sections; the rest is model-written")
+            return
+        allowed = bool(self.cfg.get("content.allow_template_script", False))
+        # A dry run is documented to produce every artifact without any API
+        # key (spec section 36), so the builder must still work there - the
+        # output is inspected, not published.
+        if allowed or self.cfg.dry_run:
+            log_event("SCRIPT", "keeping a template-written script",
+                      language=language,
+                      reason="dry run" if self.cfg.dry_run else "configured",
+                      note="formulaic and English-only; not for publishing")
+            return
+        raise LLMError(
+            "every LLM provider was unavailable, so the script would have been "
+            "written by the deterministic template builder - which is "
+            "formulaic, topic-blind and English-only, and not publishable. "
+            "Nothing was rendered. Check the provider keys and daily quotas "
+            "(Gemini free tier and Groq both reset daily), then retry.")
 
     # ------------------------------------------------------------------
     def _ensure_minimum_length(self, script: Script, idea: ContentIdea,
@@ -312,12 +363,26 @@ class ScriptGenerator:
                       floor=min_words)
 
         if got < min_words:
-            log_event("SCRIPT", "still under the floor, using the template "
-                                "builder for correct duration",
-                      words=got, floor=min_words,
-                      note="formulaic but the right length; recorded as template")
-            script = build_template_script(
-                idea, profile, duration, language, structure, target_words)
+            # Keep the short REAL script and say why it is short, rather than
+            # swapping in the template.
+            #
+            # Substituting here sent the run down the boilerplate path and then
+            # failed with "every LLM provider was unavailable" - which was not
+            # true and sent anyone reading the log to check their API keys. The
+            # model answered; it answered too briefly.
+            if bool(self.cfg.get("content.allow_template_script", False))                     or self.cfg.dry_run:
+                log_event("SCRIPT", "still under the floor, using the template "
+                                    "builder for correct duration",
+                          words=got, floor=min_words,
+                          note="formulaic but the right length")
+                return build_template_script(
+                    idea, profile, duration, language, structure, target_words)
+            raise LLMError(
+                f"the model returned {got} words against a {min_words}-word "
+                f"floor for a {duration}s video, and a corrective re-ask did "
+                f"not fix it. Rendering this would produce a video roughly "
+                f"{max(1, int(duration * got / max(min_words, 1)))}s long. "
+                f"Nothing was rendered - retry, or shorten the target length.")
         return script
 
     # ------------------------------------------------------------------
@@ -394,6 +459,16 @@ class ScriptGenerator:
                                     "sections deterministically",
                           section=i, of=len(sections),
                           elapsed=f"{time.monotonic() - started:.0f}s")
+                if not (language or "en").lower().startswith("en"):
+                    # _template_section writes ENGLISH. Splicing it into a
+                    # Hindi script gives a video that changes language
+                    # mid-sentence and a voice that spells the English out.
+                    # Stop here and keep what is real instead.
+                    log_event("SCRIPT", "time budget spent on a non-English "
+                                        "script; stopping rather than "
+                                        "splicing English sections",
+                              section=i, of=len(sections), language=language)
+                    break
                 all_scenes += _template_section(
                     idea, profile, heading, role_hint, scenes_each[i],
                     words_each[i], len(all_scenes))
@@ -414,6 +489,14 @@ class ScriptGenerator:
                                if isinstance(c, dict)]
             except LLMError as exc:
                 degraded += 1
+                if not (language or "en").lower().startswith("en"):
+                    # Same reason as the time-budget path above: the template
+                    # section is English and this script is not.
+                    log_event("SCRIPT", "section failed on a non-English "
+                                        "script; keeping what is real",
+                              section=i, heading=heading, language=language,
+                              error=str(exc)[:140])
+                    break
                 log_event("SCRIPT", "section fell back to template",
                           section=i, heading=heading, error=str(exc)[:140])
                 got = _template_section(

@@ -97,6 +97,17 @@ content:
   # when 25 seconds of patience would have kept the good model.
   transient_retries: 3
   retry_backoff_seconds: 25
+  # Publish a script written by the deterministic template builder?
+  #
+  # NO by default. The builder exists so a dry run can produce every artifact
+  # without an API key; it is formulaic, topic-blind and English-only. A real
+  # run with every provider rate limited shipped it as a finished video -
+  # "Kids are usually explained the same way every time", titled "How Account
+  # Changes Kids", for a personal-finance request in Hindi - and because the
+  # text was English while the voice was Hindi the narrator spelled words out
+  # letter by letter. Failing and reporting the quota is the honest outcome.
+  # Dry runs are exempt regardless of this setting.
+  allow_template_script: false
   fact_check_required_niches: [science, technology, finance, health, history, space, news]
 
 tts:
@@ -197,7 +208,22 @@ visuals:
   #                   `gemini` to find out: a 429 degrades to pollinations for
   #                   the rest of the job rather than failing it, so trying
   #                   costs nothing and needs no decision in advance.
+  #   cloudflare    - needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN,
+  #                   both free and neither needs a card. 10,000 neurons a day,
+  #                   which is roughly 230 FLUX images - about 28 Shorts, or
+  #                   two thirds of a thirty-minute video - resetting at 00:00
+  #                   UTC. This is the best free option for the illustrated
+  #                   look, because the catalogue includes FLUX.1 schnell.
+  #
+  #                   Caveat: flux-1-schnell has no width/height parameter and
+  #                   returns a SQUARE image, which a 9:16 crop then trims to a
+  #                   third of the frame. Use the sdxl model below for Shorts
+  #                   if that shows.
   ai_image_backend: pollinations
+  cloudflare_model: "@cf/black-forest-labs/flux-1-schnell"
+  # Neurons are charged per step, so this trades daily allowance for detail.
+  # 4 is the documented default for this distilled model and 8 the ceiling.
+  cloudflare_steps: 6
   gemini_image_model: gemini-3.1-flash-image
   # Used by the huggingface backend. Ignored by pollinations.
   ai_image_model: black-forest-labs/FLUX.1-schnell
@@ -329,3 +355,20 @@ automation:
   stop_after_similar_videos: 3
 
 dry_run: true                    # no upload, full artifact generation
+
+storage:
+  # Delete a job's regenerable media as soon as the video is on YouTube or
+  # will never be published.
+  #
+  # A 45-second Short occupies 57 MB, of which ~52 MB is regenerable: 19 MB of
+  # video plus 26 MB of intermediate audio stems (master, music, sfx) that only
+  # ever existed to be mixed into it. Eight jobs held 996 MB. The JSON reports
+  # are always kept - kilobytes, and they are the record of what was made.
+  #
+  # AWAITING_APPROVAL is never reclaimed automatically: the user is about to
+  # watch that video to decide on it.
+  reclaim_after_finish: true
+  # Age-based sweep, in days. Catches jobs that never reached a finished state
+  # and dry-run output, whose only copy is local - hence the delay rather than
+  # an immediate delete.
+  reclaim_after_days: 7

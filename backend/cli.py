@@ -552,7 +552,13 @@ def prune(keep_days: int = typer.Option(14, "--keep-days",
     def folder_size(path: Path) -> int:
         return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
-    MEDIA = {".mp4", ".wav", ".mp3", ".jpg", ".jpeg", ".png", ".webp"}
+    # Matches engine/core/storage.HEAVY_FILES / HEAVY_DIRS, which is now the
+    # single definition of "regenerable media". Two independent lists of what
+    # is safe to delete is one list too many.
+    from engine.core.storage import reclaim_job
+    # Only used to SIZE the candidates below; the deletion itself goes through
+    # reclaim_job so there is a single definition of what is safe to remove.
+    MEDIA = {".mp4", ".wav", ".mp3"}
     targets: list[tuple[Path, int]] = []
     for folder in folders:
         if folder in protected or folder.stat().st_mtime >= cutoff:
@@ -587,11 +593,14 @@ def prune(keep_days: int = typer.Option(14, "--keep-days",
     for folder, size in targets:
         try:
             if videos_only:
-                for f in folder.rglob("*"):
-                    if f.is_file() and f.suffix.lower() in MEDIA:
-                        f.unlink(missing_ok=True)
-            else:
-                shutil.rmtree(folder)
+                # Delegates rather than deleting by file extension. The
+                # extension sweep also removed thumbnails, which the shared
+                # policy keeps - they are half a megabyte and they are what
+                # the review screen shows. One definition of "regenerable
+                # media", in engine/core/storage.py.
+                freed += reclaim_job(folder, folder.name).freed_bytes
+                continue
+            shutil.rmtree(folder)
             freed += size
         except OSError as exc:
             console.print(f"[yellow]skipped {folder.name}: {exc}[/yellow]")

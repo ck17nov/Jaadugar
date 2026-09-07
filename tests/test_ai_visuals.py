@@ -508,11 +508,20 @@ class TestGeminiBackend:
         assert asset.source == "generated:keyless"
         assert p.backend is free
 
-    def test_the_aspect_ratio_is_described_in_words(self):
-        """There is no width/height parameter on this API."""
+    def test_the_aspect_ratio_is_sent_as_a_parameter(self):
+        """Prose alone is not enough, and my first version claimed it was.
+
+        The old docstring here asserted "there is no width/height parameter on
+        this API" and only checked that the ratio appeared in the prompt text.
+        It does have one - generationConfig.imageConfig.aspectRatio - and
+        without it the model returned a square that the cover-crop trimmed to
+        9:16, keeping a third of the frame and magnifying what was left. That
+        is what "looks stretched and the face is blurry" actually was.
+        """
         import inspect
         from engine.visuals.ai_image import GeminiImageBackend
         src = inspect.getsource(GeminiImageBackend.fetch)
+        assert "imageConfig" in src and "aspectRatio" in src
         assert "9:16" in src and "16:9" in src
 
     def test_a_text_only_reply_is_reported_as_such(self):
