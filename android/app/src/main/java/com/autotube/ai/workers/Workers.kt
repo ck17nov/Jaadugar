@@ -93,7 +93,7 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
             postNotification(
                 app,
                 title = "Automation problem",
-                body = "$failures job(s) failed. Open AutoTube AI for details.",
+                body = "$failures job(s) failed. Open Jaadugar for details.",
                 id = NOTIF_FAILURE,
             )
         }

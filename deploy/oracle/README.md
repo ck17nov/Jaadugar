@@ -1,4 +1,4 @@
-# Running AutoTube AI on Oracle Cloud Always Free
+# Running Jaadugar on Oracle Cloud Always Free
 
 Goal: stop needing your laptop switched on. The backend runs on a free Oracle
 instance, your phone talks to it over HTTPS, and you shut the laptop.

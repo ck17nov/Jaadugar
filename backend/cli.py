@@ -1,4 +1,4 @@
-"""AutoTube AI command line interface (spec section 34).
+"""Jaadugar command line interface (spec section 34).
 
     autotube doctor
     autotube auth login
@@ -47,7 +47,7 @@ from engine.core.niche import build_profile                      # noqa: E402
 from engine.core.util import have_ffmpeg, which                  # noqa: E402
 
 app = typer.Typer(add_completion=False, no_args_is_help=True,
-                  help="AutoTube AI - automated YouTube research, "
+                  help="Jaadugar - automated YouTube research, "
                        "production and publishing.")
 auth_app = typer.Typer(no_args_is_help=True, help="YouTube account (OAuth 2.0).")
 jobs_app = typer.Typer(no_args_is_help=True, help="Inspect and act on jobs.")
@@ -78,7 +78,7 @@ def _status_colour(status: str) -> str:
 def doctor() -> None:
     """Check the environment and report exactly what is missing."""
     cfg = load_config()
-    table = Table(title="AutoTube AI environment", show_lines=False)
+    table = Table(title="Jaadugar environment", show_lines=False)
     table.add_column("Component")
     table.add_column("Status")
     table.add_column("Detail")

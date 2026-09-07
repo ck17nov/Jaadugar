@@ -41,7 +41,7 @@ CFG = load_config()
 setup_logging(jsonl=CFG.workspace / "logs" / "api.jsonl")
 
 app = FastAPI(
-    title="AutoTube AI backend",
+    title="Jaadugar backend",
     version="0.1.0",
     description="Research, produce and publish original YouTube videos.",
 )

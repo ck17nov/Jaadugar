@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# AutoTube AI - provision an Oracle Cloud Always Free instance.
+# Jaadugar - provision an Oracle Cloud Always Free instance.
 #
 #   curl -fsSL <raw url>/deploy/oracle/setup.sh | bash -s -- --domain your.duckdns.org
 #

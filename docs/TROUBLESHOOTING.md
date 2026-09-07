@@ -348,7 +348,7 @@ is wrong the stream fails. Also confirm the job actually has a video
 
 ### No approval notifications
 Android 13+ requires the runtime notification permission. The app asks on first
-launch; if it was denied, enable it in Android system settings for AutoTube AI.
+launch; if it was denied, enable it in Android system settings for Jaadugar.
 
 ---
 

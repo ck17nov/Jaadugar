@@ -1,4 +1,4 @@
-# AutoTube AI
+# Jaadugar
 
 Automated YouTube research, production and publishing, driven from an Android
 app on a Samsung Galaxy M34 5G.

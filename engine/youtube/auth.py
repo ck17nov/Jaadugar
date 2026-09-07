@@ -338,7 +338,7 @@ class YouTubeAuth:
         creds = flow.run_local_server(
             port=port, prompt="consent", access_type="offline",
             authorization_prompt_message=(
-                "Open this URL to authorise AutoTube AI:\n{url}"),
+                "Open this URL to authorise Jaadugar:\n{url}"),
             success_message=("Authorised. You can close this tab and return to "
                              "the terminal."))
         self._persist(creds)

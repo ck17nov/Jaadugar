@@ -1,11 +1,11 @@
 # ============================================================
-#  AutoTube AI - master configuration
+#  Jaadugar - master configuration
 #  Env vars override these values (see .env.example).
 #  Anything secret belongs in .env / Android Keystore, NOT here.
 # ============================================================
 
 app:
-  name: AutoTube AI
+  name: Jaadugar
   # LOCAL | CLOUD | HYBRID  -> where heavy work runs
   mode: LOCAL
   workspace: ./workspace

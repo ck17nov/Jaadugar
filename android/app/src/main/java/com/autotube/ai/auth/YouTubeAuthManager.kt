@@ -143,7 +143,7 @@ class YouTubeAuthManager(context: Context, private val store: SecureStore) {
                         ?: "Token exchange failed.")
                 else -> onResult(
                     null,
-                    "Google did not return a refresh token. Remove AutoTube AI " +
+                    "Google did not return a refresh token. Remove Jaadugar " +
                         "from your Google account permissions and sign in again."
                 )
             }

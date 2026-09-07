@@ -114,7 +114,7 @@ fun DashboardScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("AutoTube AI", style = MaterialTheme.typography.displaySmall)
+                    Text("Jaadugar", style = MaterialTheme.typography.displaySmall)
                     Text(
                         "Research to publish, automatically",
                         style = MaterialTheme.typography.bodySmall,

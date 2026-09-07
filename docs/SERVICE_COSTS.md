@@ -227,7 +227,7 @@ metered trial. The common patterns are:
 1. **Local rendering — what this project does.** Images plus Ken Burns motion,
    cross-fades and burnt-in captions, composed by FFmpeg on your own machine.
    No service is involved in making the video, so there is no quota and no
-   length limit. This is why AutoTube AI can produce a 40-minute video for ₹0
+   length limit. This is why Jaadugar can produce a 40-minute video for ₹0
    while a text-to-video API would refuse past 10 seconds.
 2. **Self-hosted open-weight video models** (e.g. Mochi 1, Apache 2.0).
    Genuinely unlimited with full commercial rights — but they need a ~24 GB

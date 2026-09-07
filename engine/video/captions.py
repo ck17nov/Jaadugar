@@ -223,7 +223,7 @@ class CaptionEngine:
 
         header = [
             "[Script Info]",
-            "; AutoTube AI generated captions",
+            "; Jaadugar generated captions",
             "ScriptType: v4.00+",
             "WrapStyle: 2",
             "ScaledBorderAndShadow: yes",
