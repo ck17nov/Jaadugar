@@ -27,6 +27,9 @@ class CaptionWord:
     start: float
     end: float
     text: str
+    # Which scene this word was spoken in, so a caption can never straddle
+    # two of them. -1 means unknown, which keeps older callers working.
+    scene: int = -1
 
 
 @dataclass
@@ -72,20 +75,43 @@ def _escape(text: str) -> str:
 def absolute_words(clips: list[tuple[float, SceneAudio]]) -> list[CaptionWord]:
     """Convert per-clip relative word marks into one absolute timeline."""
     out: list[CaptionWord] = []
-    for offset, clip in clips:
+    for index, (offset, clip) in enumerate(clips):
         for w in clip.words:
             text = (w.text or "").strip()
             if not text:
                 continue
             start = offset + max(w.start, 0.0)
             end = start + max(w.duration, 0.08)
-            out.append(CaptionWord(start=start, end=end, text=text))
-    out.sort(key=lambda w: w.start)
+            out.append(CaptionWord(start=start, end=end, text=text,
+                                   scene=index))
+    out.sort(key=lambda w: (w.start, w.scene))
     # Remove overlaps so a word never starts before the previous one ends.
     for i in range(1, len(out)):
         if out[i].start < out[i - 1].end:
             out[i - 1].end = max(out[i - 1].start + 0.06, out[i].start)
     return out
+
+
+# Sentence terminators, and NOT just the English ones.
+#
+# This rule used to be `endswith((".", "!", "?", ":", ";"))`, which meant a
+# Hindi sentence never ended: Devanagari finishes a sentence with the danda
+# "।", not a full stop. So the sentence-boundary break never fired on any
+# Indic-script video and grouping fell through to the word- and
+# character-count limits, producing captions spliced out of two different
+# sentences - one read "niyam hai Arav", the last two words of one sentence
+# followed by the first word of the next.
+SENTENCE_END = (
+    ".", "!", "?", ":", ";",
+    "।", "॥",          # danda, double danda - Devanagari and kin
+    "۔", "؟",          # Urdu full stop, Arabic question mark
+    "。", "！", "？",   # CJK full stop, bang, question mark
+)
+
+# A comma is a WEAKER break: worth honouring only when the caption is already
+# long enough to be worth ending, otherwise every clause becomes its own
+# two-word flash.
+CLAUSE_END = (",", "،", "、", "，")
 
 
 def group_words(words: list[CaptionWord], max_words: int = 4,
@@ -110,16 +136,61 @@ def group_words(words: list[CaptionWord], max_words: int = 4,
         prospective_chars = sum(len(x.text) + 1 for x in current) + len(w.text)
         gap = (w.start - current[-1].end) if current else 0.0
         span = (w.end - current[0].start) if current else 0.0
-        if current and (len(current) >= max_words
+        # A caption may never contain words from two scenes. The picture
+        # changes at that boundary, so text carried across it describes an
+        # image that is no longer on screen.
+        crossed_scene = bool(current) and w.scene != current[-1].scene             and w.scene >= 0 and current[-1].scene >= 0
+        if current and (crossed_scene
+                        or len(current) >= max_words
                         or prospective_chars > max_chars
                         or gap > max_gap
                         or span > max_span):
             flush()
         current.append(w)
-        if w.text.rstrip().endswith((".", "!", "?", ":", ";")):
+        stripped = w.text.rstrip()
+        if stripped.endswith(SENTENCE_END):
+            flush()
+        elif stripped.endswith(CLAUSE_END) and len(current) >= max(2, max_words - 1):
             flush()
     flush()
-    return groups
+    return _merge_orphans(groups, max_words=max_words, max_chars=max_chars,
+                          max_gap=max_gap, max_span=max_span)
+
+
+def _merge_orphans(groups: list[CaptionGroup], *, max_words: int,
+                   max_chars: int, max_gap: float,
+                   max_span: float) -> list[CaptionGroup]:
+    """Fold a one-word caption back into the phrase it belongs to.
+
+    Adding the sentence-terminator break created these: the word limit ends a
+    caption, then the very next word carries the full stop and flushes
+    immediately, leaving the closing word of a sentence alone on screen for a
+    third of a second. A Hindi story showed "kya yah niyam sach mein niyam"
+    and then just "hai." by itself.
+
+    Every condition here is a guard against undoing a break that was made for
+    a REASON. In particular the gap and span checks: a first version of this
+    re-joined two words either side of a 2.3-second pause, silently reversing
+    the long-pause rule above. Cosmetic tidying must not override timing.
+    """
+    out: list[CaptionGroup] = []
+    for group in groups:
+        prev = out[-1] if out else None
+        if (prev is not None
+                and len(group.words) == 1
+                and len(prev.words) < max_words + 1
+                # same scene: the picture must not have changed
+                and group.words[0].scene == prev.words[-1].scene
+                # still fits on one line
+                and sum(len(w.text) + 1 for w in prev.words)
+                + len(group.words[0].text) <= max_chars
+                # and the break was NOT a deliberate timing break
+                and (group.words[0].start - prev.words[-1].end) <= max_gap
+                and (group.words[0].end - prev.words[0].start) <= max_span):
+            prev.words.append(group.words[0])
+            continue
+        out.append(group)
+    return out
 
 
 class CaptionEngine:

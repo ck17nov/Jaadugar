@@ -187,6 +187,19 @@ def _language_line(language: str) -> str:
                  f"voice and printed on screen as subtitles, and Latin-letter "
                  f"transliteration is mispronounced and unreadable for native "
                  f"speakers.")
+        # Digits and clock times, because they leak.
+        #
+        # A Hindi bedtime story came back with the hook "kya 8 pm ki sone ki
+        # niyam sach mein niyam hai?" - Devanagari with a Latin "8 pm" sitting
+        # in the middle. Two problems: the TTS voice has to guess at a
+        # foreign-script fragment mid-sentence, and the per-scene language
+        # guard measures which script dominates a line, so enough of these
+        # would flip a scene to the wrong voice entirely.
+        line += (f" Write numbers, times and dates as WORDS in the language "
+                 f"itself rather than as digits or Latin abbreviations - not "
+                 f"\"8 pm\" but the {script}-script words for eight o'clock "
+                 f"at night. This is narration to be read aloud, so anything "
+                 f"a speaker would say in words should be written in words.")
     return line
 
 

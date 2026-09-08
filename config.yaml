@@ -266,9 +266,12 @@ visuals:
   character_bible: true
   # Concurrency is what trips free-tier rate limits; 2 is the sweet spot.
   parallel: 2
-  # ...and 1 for AI generation, which is limited by simultaneous requests
-  # rather than by how many you make. At 2, one of every pair was refused.
-  ai_parallel: 1
+  # ...and for AI generation, ask the backend. "auto" means the backend's
+  # own measured limit: 1 for the keyless endpoint, which refuses the second
+  # of any two simultaneous requests, and 4 for Cloudflare, which served four
+  # concurrent 768x1344 requests with zero refusals in half the wall time.
+  # Put a number here to pin it.
+  ai_parallel: auto
   transient_retries: 3
   retry_backoff_seconds: 5
   # Drop a provider for the rest of the job once it has failed this many

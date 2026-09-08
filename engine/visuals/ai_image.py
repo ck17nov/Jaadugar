@@ -188,6 +188,10 @@ class PollinationsBackend:
 
     id = "pollinations"
     label = "Pollinations (keyless)"
+    # One at a time, measured: at two simultaneous requests this endpoint
+    # served one image and refused the other, and on a 71-scene job it
+    # refused about half of everything sent.
+    max_parallel = 1
     # Fraction of the frame height to discard before conditioning, to remove
     # the watermark this endpoint applies whatever you ask for. Small: the
     # stamp sits in the last ~2% of the frame.
@@ -252,6 +256,10 @@ class HuggingFaceBackend:
     """
 
     id = "huggingface"
+    # Untested at concurrency, and its free credit runs out after ~7 images
+    # anyway, so there is nothing to gain by pushing it.
+    max_parallel = 2
+
     label = "Hugging Face Inference Providers"
 
     def __init__(self, model: str, token: str, timeout: int = 180):
@@ -322,6 +330,10 @@ class GeminiImageBackend:
     """
 
     id = "gemini"
+    # Free-tier image quota is 0, so this never runs unattended; no reason
+    # to risk a rate limit on the paid path either.
+    max_parallel = 1
+
     label = "Google Gemini image models"
     ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/"
 
@@ -419,6 +431,13 @@ class CloudflareBackend:
 
     id = "cloudflare"
     label = "Cloudflare Workers AI"
+    # Four at a time, measured: four simultaneous 768x1344 requests at 20
+    # steps ALL returned 200, in 35.5s of wall time against roughly 76s for
+    # the same four run one after another. Individual requests slow from ~19s
+    # to ~35s as capacity is shared, so throughput doubles rather than
+    # quadruples - but nothing is refused, which is the difference between a
+    # real serverless API and the keyless endpoint that refuses half.
+    max_parallel = 4
     BASE = "https://api.cloudflare.com/client/v4/accounts/"
 
     # Models that honour width/height. Everything else returns a square.
@@ -650,6 +669,17 @@ class AIImageProvider:
         self.retry_backoff = retry_backoff
         self._seen: dict[int, int] = {}      # hash -> scene that produced it
         self._lock = threading.Lock()
+
+    @property
+    def max_parallel(self) -> int:
+        """How many images this backend will serve at once.
+
+        A property of the BACKEND, not of the deployment: the keyless endpoint
+        refuses the second of any two simultaneous requests, while Cloudflare
+        serves four without complaint. Hard-coding one number for both meant
+        the good backend ran at the bad backend's speed.
+        """
+        return max(1, int(getattr(self.backend, "max_parallel", 1)))
 
     @property
     def model(self) -> str:

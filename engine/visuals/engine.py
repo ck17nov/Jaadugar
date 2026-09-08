@@ -116,7 +116,19 @@ class VisualEngine:
             # simultaneous requests to the free endpoint get one image and one
             # refusal, so the AI path runs narrower than the stock path.
             if self.providers and self.providers[0].name == "ai_image":
-                parallel = int(self.cfg.get("visuals.ai_parallel", 1))
+                # "auto" asks the BACKEND how much concurrency it tolerates.
+                #
+                # This was a flat 1, chosen because the keyless endpoint
+                # refuses the second of any two simultaneous requests. That
+                # made Cloudflare - which serves four at once, measured -
+                # generate a 145-image long-form video strictly one image at
+                # a time, roughly 46 minutes of pure waiting. A number in
+                # config still wins, for pinning it down by hand.
+                want = str(self.cfg.get("visuals.ai_parallel", "auto")).strip()
+                if want.isdigit() and int(want) > 0:
+                    parallel = int(want)
+                else:
+                    parallel = int(getattr(self.providers[0], "max_parallel", 1))
 
         # Rate limiting is a property of the PROVIDER, not of a scene. Retrying
         # a 429 per scene, three times each with exponential backoff, is

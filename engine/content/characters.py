@@ -48,8 +48,17 @@ Rules:
 - Each description is ONE short clause under {max_chars} characters, covering
   only what an illustrator must repeat: approximate age, hair, clothing,
   distinguishing feature. No personality, no backstory, no scene detail.
-- Use the name the narration uses. If a character is unnamed but recurring,
-  give a plain descriptive label such as "the grandmother".
+- Write the NAME and the DESCRIPTION in ENGLISH, in Latin letters, even when
+  the narration is in Hindi, Tamil or another script. Transliterate the name:
+  a narration saying "आरव" gives name "Arav". Both fields are pasted straight
+  into an image-generator prompt written in English, and a name in another
+  script cannot be matched against the scene text or drawn from.
+- If a character is unnamed but recurring, give a plain descriptive label such
+  as "the grandmother".
+- A vague description is a FAILURE, because it is repeated into every frame
+  and is the only thing keeping the character recognisable between shots.
+  "a child, blue blanket" is not usable - it does not say how old, what hair,
+  what clothes, or what makes this child this child. Name all four.
 - If the story has no recurring characters at all (an explainer, a list, a
   documentary), return an empty list. Do not invent people.
 
