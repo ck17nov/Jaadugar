@@ -19,6 +19,7 @@ import com.autotube.ai.data.remote.YouTubeAccountDto
 import com.autotube.ai.data.remote.YouTubeAccountListDto
 import com.autotube.ai.data.remote.YouTubeStatusDto
 import com.autotube.ai.data.repo.AutoTubeRepository
+import com.autotube.ai.data.repo.isKidsConfirmation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -78,6 +79,9 @@ open class BaseViewModel : ViewModel() {
 
     protected fun <T> runTask(
         onSuccess: (T) -> Unit = {},
+        // Runs BEFORE the error banner is set, so a caller can react to WHICH
+        // failure happened rather than only to the sentence describing it.
+        onFailure: (Throwable) -> Unit = {},
         block: suspend () -> Result<T>,
     ) {
         viewModelScope.launch {
@@ -99,7 +103,10 @@ open class BaseViewModel : ViewModel() {
                     if (_message.value?.isError == true) _message.value = null
                     onSuccess(it)
                 },
-                onFailure = { error(it.message ?: "Something went wrong") },
+                onFailure = {
+                    onFailure(it)
+                    error(it.message ?: "Something went wrong")
+                },
             )
         }
     }
@@ -287,6 +294,11 @@ class CreateViewModel(
         }
     }
 
+    /** Raises [kidsBlocked] when a failed start was the child-directed gate. */
+    private fun noteStartFailure(error: Throwable) {
+        if (error.isKidsConfirmation()) _kidsBlocked.value = true
+    }
+
     fun previewNiche(niche: String, audience: String, style: String, duration: Int) {
         if (niche.length < 2) return
         runTask<NichePreviewDto>({
@@ -297,12 +309,29 @@ class CreateViewModel(
 
     fun dismissKidsPrompt() { _kidsPrompt.value = false }
 
+    /**
+     * The backend REFUSED the run for want of a Made-for-Kids answer.
+     *
+     * Different from [kidsPrompt], which is advisory - the backend thinks this
+     * niche looks child-directed and would like an answer. This one is a
+     * refusal, and it needs its own flag because the advisory prompt is asked
+     * once per niche: answering "No, general audience" marked the niche
+     * answered, START then failed with a 409 forever, and the only thing on
+     * screen was "Confirmation required (see the message on screen)" with no
+     * message anywhere. A dead end with no way out but reinstalling.
+     */
+    private val _kidsBlocked = MutableStateFlow(false)
+    val kidsBlocked: StateFlow<Boolean> = _kidsBlocked.asStateFlow()
+
+    fun dismissKidsBlocked() { _kidsBlocked.value = false }
+
     fun start(request: AutomationRequestDto) {
         if (!store.isConfigured) {
             error("Set the backend URL and API key in Settings first.")
             return
         }
-        runTask<String>({
+        _kidsBlocked.value = false
+        runTask<String>(onFailure = ::noteStartFailure, onSuccess = {
             _started.value = true
             info("Automation queued. Watch the Dashboard for progress.")
             com.autotube.ai.workers.WorkScheduler.syncNow(app)

@@ -26,6 +26,11 @@ import com.autotube.ai.data.remote.YouTubeStatusDto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import retrofit2.HttpException
 import java.io.IOException
 import java.util.UUID
@@ -165,6 +170,32 @@ class AutoTubeRepository(
      * several brand channels under one Google account means connecting each
      * one - not one token with a channel parameter.
      */
+    /**
+     * The `error` slug and the human message from a FastAPI error body.
+     *
+     * Read ONCE and returned together, because an OkHttp error body is a
+     * one-shot stream: parsing it here and again in a separate "was this the
+     * kids gate" helper left the second caller with an empty string.
+     *
+     * Shape is {"detail": {"error": "...", "message": "..."}} for the checks
+     * this backend raises and {"detail": "..."} for FastAPI's own. Returns
+     * nulls rather than throwing - failing to parse an error must not replace
+     * the error.
+     */
+    private fun errorDetail(e: HttpException): Pair<String?, String?> =
+        runCatching {
+            val body = e.response()?.errorBody()?.string().orEmpty()
+            if (body.isBlank()) return null to null
+            when (val detail = Json.parseToJsonElement(body).jsonObject["detail"]) {
+                is JsonPrimitive -> null to detail.content
+                is JsonObject -> (
+                    detail["error"]?.jsonPrimitive?.content to
+                        detail["message"]?.jsonPrimitive?.content
+                    )
+                else -> null to null
+            }
+        }.getOrDefault(null to null)
+
     suspend fun youtubeAccounts(): Result<YouTubeAccountListDto> =
         call { api.service().youtubeAccounts() }
 
@@ -338,14 +369,21 @@ class AutoTubeRepository(
             try {
                 Result.success(block())
             } catch (e: HttpException) {
-                val message = when (e.code()) {
+                // The backend's own words first.
+                //
+                // Every code below had a hard-coded sentence, and 409 said
+                // "see the message on screen" while nothing was on screen:
+                // the dialog that would have carried it was already dismissed.
+                // FastAPI puts the useful text in detail.message, so read it.
+                val (slug, detail) = errorDetail(e)
+                val message = detail?.takeIf { it.isNotBlank() } ?: when (e.code()) {
                     401 -> "Backend rejected the API key. Check Settings."
-                    409 -> "Confirmation required (see the message on screen)."
+                    409 -> "The backend needs something confirmed first."
                     429 -> "Backend rate limit reached. Try again shortly."
                     503 -> "Backend is not ready (missing ffmpeg or API keys)."
                     else -> "Backend error ${e.code()}."
                 }
-                Result.failure(RepositoryException(message, e))
+                Result.failure(RepositoryException(message, e, slug))
             } catch (e: IOException) {
                 Result.failure(
                     RepositoryException(
@@ -365,5 +403,18 @@ class AutoTubeRepository(
         }
 }
 
-class RepositoryException(message: String, cause: Throwable? = null) :
-    Exception(message, cause)
+/**
+ * @param errorSlug the backend's machine-readable `detail.error`, when it sent
+ *   one. Carried here because the HTTP error body it came from can only be
+ *   read once, and a caller that needs to branch on WHICH check failed - the
+ *   child-directed gate, say - cannot go back for it.
+ */
+class RepositoryException(
+    message: String,
+    cause: Throwable? = null,
+    val errorSlug: String? = null,
+) : Exception(message, cause)
+
+/** True when a failure is the child-directed confirmation gate. */
+fun Throwable.isKidsConfirmation(): Boolean =
+    (this as? RepositoryException)?.errorSlug == "kids_confirmation_required"

@@ -170,6 +170,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     val preview by vm.preview.collectAsStateWithLifecycle()
     val forcePrivate by vm.forcePrivate.collectAsStateWithLifecycle()
     val kidsPrompt by vm.kidsPrompt.collectAsStateWithLifecycle()
+    val kidsBlocked by vm.kidsBlocked.collectAsStateWithLifecycle()
     val started by vm.started.collectAsStateWithLifecycle()
     val channels by vm.channels.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -707,34 +708,64 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     // changes, and the prompt was re-armed from its result each time, so the
     // dialog reappeared constantly. A consent dialog you have to dismiss
     // repeatedly stops being consent and becomes an obstacle.
-    val askKids = kidsPrompt && !madeForKids && !nicheIsKids &&
-        kidsAnsweredFor != niche.trim().lowercase()
+    // kidsBlocked overrides the once-per-niche rule, because it is not the
+    // advisory prompt: the backend has REFUSED the run. Suppressing it here
+    // was a dead end - "No, general audience" marked the niche answered, the
+    // backend kept returning 409, and the only thing on screen was
+    // "Confirmation required (see the message on screen)" with no message
+    // anywhere and no way to change the answer.
+    val askKids = kidsBlocked || (
+        kidsPrompt && !madeForKids && !nicheIsKids &&
+            kidsAnsweredFor != niche.trim().lowercase()
+        )
     if (askKids) {
+        val answered = {
+            kidsAnsweredFor = niche.trim().lowercase()
+            vm.dismissKidsPrompt()
+            vm.dismissKidsBlocked()
+        }
         AlertDialog(
-            onDismissRequest = { vm.dismissKidsPrompt() },
-            title = { Text("Is this content for children?") },
+            onDismissRequest = {
+                vm.dismissKidsPrompt()
+                vm.dismissKidsBlocked()
+            },
+            title = {
+                Text(
+                    if (kidsBlocked) "This topic needs a Made-for-Kids answer"
+                    else "Is this content for children?"
+                )
+            },
             text = {
                 Text(
-                    "This niche looks child-directed. YouTube requires an accurate " +
-                        "\"Made for Kids\" classification, and getting it wrong has " +
-                        "legal consequences.\n\nTurning this on also enables a stricter " +
-                        "safety profile: no scary or unsafe content, simpler language, " +
-                        "and no commercial prompts."
+                    if (kidsBlocked) {
+                        "The backend will not run this topic as general " +
+                            "audience: it classifies it as child-directed, " +
+                            "and YouTube requires the \"Made for Kids\" " +
+                            "setting to match the real audience.\n\n" +
+                            "Either turn it on, or change the topic to " +
+                            "something not aimed at children."
+                    } else {
+                        "This niche looks child-directed. YouTube requires an " +
+                            "accurate \"Made for Kids\" classification, and " +
+                            "getting it wrong has legal consequences.\n\n" +
+                            "Turning this on also enables a stricter safety " +
+                            "profile: no scary or unsafe content, simpler " +
+                            "language, and no commercial prompts."
+                    }
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     madeForKids = true
-                    kidsAnsweredFor = niche.trim().lowercase()
-                    vm.dismissKidsPrompt()
+                    answered()
                 }) { Text("Yes, made for kids") }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    kidsAnsweredFor = niche.trim().lowercase()
-                    vm.dismissKidsPrompt()
-                }) {
-                    Text("No, general audience")
+                TextButton(onClick = answered) {
+                    Text(
+                        if (kidsBlocked) "Let me change the topic"
+                        else "No, general audience"
+                    )
                 }
             },
         )
