@@ -285,7 +285,15 @@ fun LabeledDropdown(
     var customText by rememberSaveable(label) { mutableStateOf(if (isOther) value else "") }
     val shown = when {
         isOther -> otherLabel
-        value.isBlank() -> ""
+        // Blank is only "nothing selected" when blank is not itself a choice.
+        //
+        // Several dropdowns use "" as a real, meaningful option - "Default for
+        // this style" for caption style, "Follow the narration" for caption
+        // language, "Automatic" for the publishing channel. This branch was
+        // unconditional, so all of them rendered an EMPTY closed field while
+        // the open menu showed the label correctly: the selected value was
+        // right and invisible.
+        value.isBlank() && "" !in options -> ""
         else -> display(value)
     }
 

@@ -43,7 +43,18 @@ class YouTubeAuthManager(context: Context, private val store: SecureStore) {
      * refresh token; without both, Google returns only a short-lived access
      * token and unattended scheduled uploads would stop working within an hour.
      */
-    fun authorizationIntent(): Intent {
+    /**
+     * @param addChannel force Google's account-and-channel chooser.
+     *
+     * This is what makes "Add channel" work. A YouTube token is bound to ONE
+     * channel, chosen in Google's chooser during consent, so a second brand
+     * channel needs a second authorisation. With `login_hint` set and only
+     * `prompt=consent`, Google can skip the chooser and silently re-issue a
+     * token for the SAME channel - so "Add channel" would appear to succeed
+     * and add nothing. Adding `select_account` and dropping the hint forces
+     * the picker, which is the only place the brand channel can be chosen.
+     */
+    fun authorizationIntent(addChannel: Boolean = false): Intent {
         val clientId = store.oauthClientId.trim()
         require(clientId.isNotBlank()) {
             "Set the Android OAuth client ID in Settings first."
@@ -82,12 +93,12 @@ class YouTubeAuthManager(context: Context, private val store: SecureStore) {
             // token when it is present, and without one scheduled uploads stop
             // working within the hour.
             .setPromptValues(
-                *(if (store.youtubeAccountEmail.isBlank())
+                *(if (addChannel || store.youtubeAccountEmail.isBlank())
                     arrayOf(AuthorizationRequest.Prompt.SELECT_ACCOUNT,
                             AuthorizationRequest.Prompt.CONSENT)
                   else arrayOf(AuthorizationRequest.Prompt.CONSENT))
             )
-            .setAdditionalParameters(extraParams())
+            .setAdditionalParameters(extraParams(addChannel))
             .build()
         return authService.getAuthorizationRequestIntent(request)
     }
@@ -100,16 +111,21 @@ class YouTubeAuthManager(context: Context, private val store: SecureStore) {
      * `login_hint` pre-selects the account, so the chooser opens on the right
      * one instead of the browser's default.
      */
-    private fun extraParams(): Map<String, String> {
+    private fun extraParams(addChannel: Boolean = false): Map<String, String> {
         val params = mutableMapOf("access_type" to "offline")
-        store.youtubeAccountEmail.trim().takeIf { it.isNotBlank() }?.let {
-            params["login_hint"] = it
+        // The hint is dropped when adding a channel: it is the thing that
+        // lets Google skip the chooser, and the chooser is the whole point.
+        if (!addChannel) {
+            store.youtubeAccountEmail.trim().takeIf { it.isNotBlank() }?.let {
+                params["login_hint"] = it
+            }
         }
         return params
     }
 
-    fun launch(launcher: ActivityResultLauncher<Intent>) {
-        launcher.launch(authorizationIntent())
+    fun launch(launcher: ActivityResultLauncher<Intent>,
+               addChannel: Boolean = false) {
+        launcher.launch(authorizationIntent(addChannel))
     }
 
     /**

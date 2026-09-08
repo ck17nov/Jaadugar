@@ -171,6 +171,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     val forcePrivate by vm.forcePrivate.collectAsStateWithLifecycle()
     val kidsPrompt by vm.kidsPrompt.collectAsStateWithLifecycle()
     val started by vm.started.collectAsStateWithLifecycle()
+    val channels by vm.channels.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
 
@@ -195,6 +196,10 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     var count by rememberSaveable { mutableIntStateOf(1) }
     var autoMode by rememberSaveable { mutableStateOf(vm.store.autoApprove) }
     var madeForKids by rememberSaveable { mutableStateOf(false) }
+    // Blank means "let the backend decide from the niche map, then the
+    // default channel" - which is the behaviour people set the mapping up
+    // for, so it stays the default rather than pre-selecting a channel.
+    var channelId by rememberSaveable { mutableStateOf("") }
     // Remembers which niche the kids question was already answered for, so it
     // is asked once per niche rather than on every preview refresh.
     var kidsAnsweredFor by rememberSaveable { mutableStateOf("") }
@@ -474,6 +479,43 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
             onValueChange = { style = it },
         )
 
+        // ---- which channel ----------------------------------------------
+        //
+        // Hidden entirely when only one channel is connected: a dropdown with
+        // one entry is a question with one answer.
+        if (channels.size > 1) {
+            val byNiche = channels.firstOrNull {
+                it.niches.any { n -> n.equals(niche.trim(), ignoreCase = true) }
+            }
+            LabeledDropdown(
+                label = "Publish to",
+                value = channelId,
+                options = listOf("") + channels.map { it.channelId },
+                display = { id ->
+                    if (id.isBlank()) {
+                        "Automatic" + (byNiche?.let { " - ${it.title}" } ?: "")
+                    } else {
+                        channels.firstOrNull { it.channelId == id }?.title
+                            ?.ifBlank { id } ?: id
+                    }
+                },
+                onValueChange = { channelId = it },
+            )
+            Text(
+                if (channelId.isBlank() && byNiche != null) {
+                    "This niche is mapped to ${byNiche.title}."
+                } else if (channelId.isBlank()) {
+                    "No channel is mapped to this niche, so the default " +
+                        "channel will be used. Map niches to channels in " +
+                        "Settings."
+                } else {
+                    "Overrides the niche mapping for this automation."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         // ---- schedule ---------------------------------------------------
         LabeledDropdown(
             label = "Upload frequency",
@@ -637,6 +679,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                         voiceGender = voiceGender,
                         captionLanguage = captionLanguage,
                         captionStyle = captionStyle,
+                        channelId = channelId,
                         count = count,
                         mode = if (autoMode) "AUTO" else "APPROVAL",
                         frequency = frequency,

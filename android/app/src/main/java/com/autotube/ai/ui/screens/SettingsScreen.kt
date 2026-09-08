@@ -13,9 +13,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -41,6 +46,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.autotube.ai.auth.YouTubeAuthManager
+import com.autotube.ai.data.remote.YouTubeAccountDto
 import com.autotube.ai.ui.components.BannerTone
 import com.autotube.ai.ui.components.InfoBanner
 import com.autotube.ai.ui.components.LoadingRow
@@ -59,6 +65,8 @@ fun SettingsScreen() {
     val store = vm.store
     val health by vm.health.collectAsStateWithLifecycle()
     val youtube by vm.youtube.collectAsStateWithLifecycle()
+    val accounts by vm.accounts.collectAsStateWithLifecycle()
+    val defaultChannel by vm.defaultChannel.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -130,6 +138,7 @@ fun SettingsScreen() {
         if (store.isConfigured) {
             vm.testConnection()
             vm.refreshYouTube()
+            vm.refreshAccounts()
         }
     }
 
@@ -386,6 +395,63 @@ fun SettingsScreen() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        // ---- brand channels ---------------------------------------------
+        SectionTitle("Publishing channels")
+        Text(
+            "One entry per channel you have connected. A YouTube sign-in can " +
+                "only act as the single channel you pick in Google's chooser, " +
+                "so each brand channel under your account is added separately. " +
+                "Give a channel some niches and videos in those niches publish " +
+                "there automatically.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        if (accounts.isEmpty()) {
+            Text(
+                "No channels connected yet. Tap Connect YouTube above.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        accounts.forEach { account ->
+            ChannelCard(
+                account = account,
+                isDefault = account.channelId == defaultChannel,
+                takenElsewhere = accounts
+                    .filter { it.channelId != account.channelId }
+                    .flatMap { it.niches }
+                    .toSet(),
+                onMakeDefault = { vm.makeDefault(account.channelId) },
+                onToggleNiche = { niche ->
+                    val next = if (niche in account.niches) {
+                        account.niches - niche
+                    } else {
+                        account.niches + niche
+                    }
+                    vm.assignNiches(account.channelId, next)
+                },
+                onForget = { vm.forgetChannel(account.channelId) },
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    // Forces Google's chooser - see YouTubeAuthManager. Without
+                    // it Google can silently re-issue a token for the channel
+                    // already connected, and "Add channel" adds nothing.
+                    runCatching { authManager.launch(authLauncher, addChannel = true) }
+                        .onFailure {
+                            vm.reportAuthError(it.message ?: "Cannot start sign-in")
+                        }
+                },
+                enabled = oauthClientId.isNotBlank() && !busy,
+            ) { Text("Add channel") }
+            OutlinedButton(onClick = { vm.refreshAccounts() }) { Text("Reload") }
+        }
+
         // ---- defaults ----------------------------------------------------
         SectionTitle("Defaults")
         LabeledDropdown(
@@ -512,5 +578,113 @@ private fun CopyableValue(label: String, value: String) {
         TextButton(onClick = { clipboard.setText(AnnotatedString(value)) }) {
             Text("Copy")
         }
+    }
+}
+
+/**
+ * One connected brand channel: what it is, whether it is the default, and
+ * which niches publish to it.
+ *
+ * The niche chips are the mapping the user asked for - "for kids niche I'll
+ * post under kids channel and for finance under finance channel". A niche can
+ * belong to only one channel, so a chip already claimed by another channel is
+ * shown but disabled rather than hidden: seeing WHERE it went is the useful
+ * information, and silently omitting it looks like a missing option.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChannelCard(
+    account: YouTubeAccountDto,
+    isDefault: Boolean,
+    takenElsewhere: Set<String>,
+    onMakeDefault: () -> Unit,
+    onToggleNiche: (String) -> Unit,
+    onForget: () -> Unit,
+) {
+    var confirmForget by remember { mutableStateOf(false) }
+    var showNiches by rememberSaveable(account.channelId) { mutableStateOf(false) }
+
+    Card(shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        account.title.ifBlank { "Identifying channel..." },
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Text(
+                        if (isDefault) "Default - used when a niche has no channel"
+                        else account.channelId,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (isDefault) {
+                    AssistChip(onClick = {}, label = { Text("Default") })
+                } else {
+                    TextButton(onClick = onMakeDefault) { Text("Make default") }
+                }
+            }
+
+            Text(
+                if (account.niches.isEmpty()) "No niches assigned"
+                else "Publishes: " + account.niches.joinToString(", "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { showNiches = !showNiches }) {
+                    Text(if (showNiches) "Done" else "Choose niches")
+                }
+                TextButton(onClick = { confirmForget = true }) { Text("Remove") }
+            }
+
+            if (showNiches) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    NICHE_OPTIONS.forEach { niche ->
+                        val mine = niche in account.niches
+                        FilterChip(
+                            selected = mine,
+                            enabled = mine || niche !in takenElsewhere,
+                            onClick = { onToggleNiche(niche) },
+                            label = { Text(niche, style = MaterialTheme.typography.bodySmall) },
+                        )
+                    }
+                }
+                Text(
+                    "A greyed-out niche is already assigned to another channel.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+
+    if (confirmForget) {
+        AlertDialog(
+            onDismissRequest = { confirmForget = false },
+            title = { Text("Remove this channel?") },
+            text = {
+                Text(
+                    "The app will forget its sign-in and stop publishing there. " +
+                        "Videos already published stay up, and you can add the " +
+                        "channel again at any time."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmForget = false
+                    onForget()
+                }) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmForget = false }) { Text("Cancel") }
+            },
+        )
     }
 }

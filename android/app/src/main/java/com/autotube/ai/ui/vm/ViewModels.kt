@@ -15,6 +15,8 @@ import com.autotube.ai.data.remote.HealthDto
 import com.autotube.ai.data.remote.JobDetailDto
 import com.autotube.ai.data.remote.NichePreviewDto
 import com.autotube.ai.data.remote.QuotaDto
+import com.autotube.ai.data.remote.YouTubeAccountDto
+import com.autotube.ai.data.remote.YouTubeAccountListDto
 import com.autotube.ai.data.remote.YouTubeStatusDto
 import com.autotube.ai.data.repo.AutoTubeRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -261,11 +263,27 @@ class CreateViewModel(
     private val _forcePrivate = MutableStateFlow(false)
     val forcePrivate: StateFlow<Boolean> = _forcePrivate.asStateFlow()
 
+    /**
+     * The brand channels available to publish to, for the channel selector.
+     *
+     * Empty is a legitimate state - nothing connected yet - and the selector
+     * hides itself rather than offering a list of nothing.
+     */
+    private val _channels = MutableStateFlow<List<YouTubeAccountDto>>(emptyList())
+    val channels: StateFlow<List<YouTubeAccountDto>> = _channels.asStateFlow()
+
     init {
         if (store.isConfigured) {
             viewModelScope.launch {
                 repo.health().onSuccess { _forcePrivate.value = it.forcePrivate }
             }
+            loadChannels()
+        }
+    }
+
+    fun loadChannels() {
+        viewModelScope.launch {
+            repo.youtubeAccounts().onSuccess { _channels.value = it.accounts }
         }
     }
 
@@ -416,6 +434,52 @@ class SettingsViewModel(
     private val _youtube = MutableStateFlow<YouTubeStatusDto?>(null)
     val youtube: StateFlow<YouTubeStatusDto?> = _youtube.asStateFlow()
 
+    /**
+     * The brand channels this backend can publish to - one per authorisation.
+     *
+     * Separate from [youtube], which reports the state of ONE token. A
+     * YouTube token is bound to a single channel, so a kids channel and a
+     * finance channel under the same Google account are two entries here,
+     * not one entry with two names.
+     */
+    private val _accounts = MutableStateFlow<List<YouTubeAccountDto>>(emptyList())
+    val accounts: StateFlow<List<YouTubeAccountDto>> = _accounts.asStateFlow()
+
+    private val _defaultChannel = MutableStateFlow("")
+    val defaultChannel: StateFlow<String> = _defaultChannel.asStateFlow()
+
+    fun refreshAccounts() {
+        runTask<YouTubeAccountListDto>({
+            _accounts.value = it.accounts
+            _defaultChannel.value = it.default
+        }) { repo.youtubeAccounts() }
+    }
+
+    fun makeDefault(channelId: String) {
+        runTask<Unit>({
+            info("Default channel set.")
+            refreshAccounts()
+        }) { repo.setDefaultAccount(channelId) }
+    }
+
+    /**
+     * Map niches to a channel. A niche belongs to exactly one channel, so the
+     * backend removes it from any other - which is why the whole list is
+     * refreshed afterwards rather than just this row.
+     */
+    fun assignNiches(channelId: String, niches: List<String>) {
+        runTask<Unit>({ refreshAccounts() }) {
+            repo.setAccountNiches(channelId, niches)
+        }
+    }
+
+    fun forgetChannel(channelId: String) {
+        runTask<Unit>({
+            info("Channel removed. Videos already published stay up.")
+            refreshAccounts()
+        }) { repo.removeAccount(channelId) }
+    }
+
     fun testConnection() {
         runTask<HealthDto>({
             _health.value = it
@@ -432,6 +496,10 @@ class SettingsViewModel(
             if (it) {
                 info("YouTube connected. The backend can now upload.")
                 refreshYouTube()
+                // The backend files the new token under a placeholder and then
+                // asks YouTube which channel it acts as, so the channel list
+                // only becomes correct after that round trip.
+                refreshAccounts()
             } else {
                 error("Backend did not store the token.")
             }
