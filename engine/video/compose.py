@@ -547,11 +547,25 @@ class VideoComposer:
         # A flat hour-long timeout is fine for a Short and far too tight for a
         # 40-minute video: allow 20x realtime plus a floor.
         #
-        # The 6-hour cap was itself the bug for long-form. A 2,040-second
-        # video needs roughly 12.8 hours in this pass on one core before the
-        # preset change below, and about half that after it - either way the
-        # cap fired first and killed a render that was working. 12 hours, and
-        # the multiplier does the scaling.
+        # The 6-hour cap was itself the bug for long-form: a 2,040-second
+        # video needs many hours in this pass and the cap fired first, killing
+        # a render that was working. 12 hours now, with the 20x multiplier
+        # doing the scaling below that.
+        #
+        # On the SIZE of those hours, be careful with the numbers in this
+        # file. The per-stage costs were measured on a dev laptop that was
+        # running renders and test suites at the same time, so they are upper
+        # bounds rather than estimates. Measured directly afterwards on the
+        # identical encode: the 2-core Ampere A1 box did 6 seconds of
+        # 1920x1080 through this exact filter chain in 6.97s wall - 1.16x
+        # realtime - against 39.05s on the loaded laptop. The server is about
+        # 5.6x quicker than the machine the pessimistic figures came from.
+        #
+        # So the 20x multiplier has real headroom on the deployment target.
+        # What is still not known is a REAL long-form render there end to
+        # end - synthetic test content omits decoding N clip files and the
+        # xfade chains between them, which dominated the laptop run. Time one
+        # and replace this comment with the answer.
         total = sum(lengths)
         run(cmd, timeout=int(min(43200, max(3600, total * 20))))
 
