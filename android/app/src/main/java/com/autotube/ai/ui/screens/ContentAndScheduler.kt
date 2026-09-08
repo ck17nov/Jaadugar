@@ -344,6 +344,27 @@ private fun AutomationRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // WHERE it publishes, on its own line.
+            //
+            // Two daily automations - one kids, one finance - read as
+            // identical rows without this, and the destination is the whole
+            // reason for having both.
+            if (automation.channelTitle.isNotBlank() ||
+                automation.groupLabel.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    buildString {
+                        if (automation.groupLabel.isNotBlank()) {
+                            append(automation.groupLabel)
+                            append(" -> ")
+                        }
+                        append(automation.channelTitle.ifBlank { "default channel" })
+                        if (automation.channelIsDefault) append(" (default)")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             if (automation.enabled) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onStop) { Text("Stop automation") }

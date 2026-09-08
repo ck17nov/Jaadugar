@@ -173,6 +173,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     val kidsBlocked by vm.kidsBlocked.collectAsStateWithLifecycle()
     val started by vm.started.collectAsStateWithLifecycle()
     val channels by vm.channels.collectAsStateWithLifecycle()
+    val groups by vm.groups.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
 
@@ -201,6 +202,9 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     // default channel" - which is the behaviour people set the mapping up
     // for, so it stays the default rather than pre-selecting a channel.
     var channelId by rememberSaveable { mutableStateOf("") }
+    // The channel group - the unit of channel mapping. Blank means "all
+    // topics", which is what an offline app or a fresh install shows.
+    var groupKey by rememberSaveable { mutableStateOf("") }
     // Remembers which niche the kids question was already answered for, so it
     // is asked once per niche rather than on every preview refresh.
     var kidsAnsweredFor by rememberSaveable { mutableStateOf("") }
@@ -281,10 +285,68 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
 
         // ---- niche ------------------------------------------------------
         SectionTitle("Niche")
+
+        // The GROUP comes first, and it is what picks the channel.
+        //
+        // Mapping individual topics to channels meant nine ticks for the kids
+        // channel alone, and missing one sent that topic silently to the
+        // default channel. A group is one tick, and choosing it here narrows
+        // the topic list below to that group - so "Kids" then "bedtime
+        // stories" replaces scrolling twenty-one topics looking for the nine
+        // that start with "kids".
+        val selectedGroup = groups.firstOrNull { it.key == groupKey }
+        if (groups.isNotEmpty()) {
+            LabeledDropdown(
+                label = "Channel group",
+                value = groupKey,
+                options = listOf("") + groups.map { it.key },
+                display = { key ->
+                    if (key.isBlank()) "All topics" else {
+                        groups.firstOrNull { it.key == key }?.let { g ->
+                            val target = channels.firstOrNull { ch ->
+                                ch.niches.any { it.equals(g.key, true) }
+                            }
+                            // Show where it actually publishes when a channel
+                            // is mapped, and the intended name when not.
+                            "${g.label} - ${target?.title ?: g.suggestedChannel}"
+                        } ?: key
+                    }
+                },
+                onValueChange = { picked ->
+                    groupKey = picked
+                    // Drop a topic that does not belong to the new group,
+                    // rather than leaving a mismatched pair on screen.
+                    val allowed = groups.firstOrNull { it.key == picked }?.topics
+                    if (allowed != null && niche !in allowed) {
+                        niche = allowed.firstOrNull() ?: niche
+                    }
+                },
+            )
+            selectedGroup?.let { g ->
+                val target = channels.firstOrNull { ch ->
+                    ch.niches.any { it.equals(g.key, true) }
+                }
+                Text(
+                    if (target != null) {
+                        "Publishes to ${target.title}."
+                    } else {
+                        "No channel is mapped to ${g.label} yet - it will use " +
+                            "the default channel. Map it in Settings > " +
+                            "Publishing channels."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (target != null) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         LabeledDropdown(
             label = "Topic",
+            // Narrowed to the chosen group, or everything when none is chosen
+            // or the backend has not answered yet.
             value = niche,
-            options = NICHE_OPTIONS,
+            options = selectedGroup?.topics ?: NICHE_OPTIONS,
             allowOther = true,
             otherLabel = "Other topic…",
             onValueChange = { niche = it },

@@ -493,6 +493,18 @@ def list_automations(include_cancelled: bool = False,
     no way to cancel it authoritatively.
     """
     db = _db()
+    # Resolve channel titles once rather than per row. Best-effort: a missing
+    # or broken token store must not stop the schedule from being listed.
+    titles: dict[str, str] = {}
+    try:
+        from engine.youtube.auth import YouTubeAuth
+        store = YouTubeAuth(CFG).channels_store
+        titles = {c.channel_id: (c.title or c.channel_id) for c in store.all()}
+        default_channel = store.default_id()
+    except Exception:                           # noqa: BLE001
+        default_channel = ""
+    from engine.core.groups import group_for_topic
+
     out = []
     for row in db.list_automations(include_cancelled=include_cancelled,
                                   limit=limit):
@@ -517,9 +529,47 @@ def list_automations(include_cancelled: bool = False,
             "made_for_kids": bool(payload.get("made_for_kids", False)),
             "videos_made": db.count_jobs_for_automation(automation_id),
             "running": automation_id == WORKER.current_automation,
+            # WHICH CHANNEL this posts to, resolved the same way the pipeline
+            # resolves it: an explicit id, else the topic's group mapping,
+            # else the default. Without this the Schedule tab lists two daily
+            # automations with no way to tell which is the kids one and which
+            # is the finance one - which is the whole point of having several.
+            **_automation_target(payload, row, titles, default_channel,
+                                 group_for_topic),
         })
     return {"automations": out, "queue_depth": WORKER.depth,
             "running": WORKER.current_automation or ""}
+
+
+def _automation_target(payload: dict[str, Any], row: dict[str, Any],
+                       titles: dict[str, str], default_channel: str,
+                       group_for_topic) -> dict[str, Any]:
+    """Which channel and group an automation publishes to, for display.
+
+    Mirrors Pipeline's resolution order deliberately - explicit channel id,
+    then the topic's group, then the default. If this disagreed with the
+    pipeline the app would confidently show the wrong destination.
+    """
+    niche = str(row.get("niche") or "")
+    group = group_for_topic(niche)
+    explicit = str(payload.get("channel_id") or "")
+    channel_id = explicit
+    if not channel_id:
+        try:
+            from engine.youtube.auth import YouTubeAuth
+            mapped = YouTubeAuth(CFG).channels_store.for_niche(niche)
+            channel_id = mapped.channel_id if mapped else ""
+        except Exception:                       # noqa: BLE001
+            channel_id = ""
+    resolved = channel_id or default_channel
+    return {
+        "channel_id": resolved,
+        "channel_title": titles.get(resolved, ""),
+        "channel_is_default": bool(resolved and resolved == default_channel
+                                   and not explicit),
+        "group": group.key if group else "",
+        "group_label": group.label if group else "",
+    }
 
 
 @app.delete("/automations/{automation_id}",
@@ -862,6 +912,18 @@ def set_account_niches(channel_id: str, body: NicheMapBody) -> dict[str, Any]:
     log_event("API", "channel niches set", channel=channel_id,
               niches=",".join(body.niches) or "-")
     return {"channel_id": channel_id, "niches": body.niches}
+
+
+@app.get("/niche-groups", dependencies=[Depends(require_api_key)])
+def list_niche_groups() -> dict[str, Any]:
+    """The channel groups and their topics.
+
+    Served rather than hard-coded in the app so there is ONE list. Two
+    hand-kept copies drift silently: a topic missing from the app cannot be
+    selected, and a topic missing from the backend maps to no channel.
+    """
+    from engine.core.groups import dump
+    return {"groups": dump()}
 
 
 @app.delete("/youtube/accounts/{channel_id}",

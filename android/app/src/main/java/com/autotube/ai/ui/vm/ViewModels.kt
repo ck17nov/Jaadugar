@@ -13,6 +13,8 @@ import com.autotube.ai.data.prefs.SecureStore
 import com.autotube.ai.data.remote.AutomationRequestDto
 import com.autotube.ai.data.remote.HealthDto
 import com.autotube.ai.data.remote.JobDetailDto
+import com.autotube.ai.data.remote.NicheGroupDto
+import com.autotube.ai.data.remote.NicheGroupListDto
 import com.autotube.ai.data.remote.NichePreviewDto
 import com.autotube.ai.data.remote.QuotaDto
 import com.autotube.ai.data.remote.YouTubeAccountDto
@@ -285,12 +287,30 @@ class CreateViewModel(
                 repo.health().onSuccess { _forcePrivate.value = it.forcePrivate }
             }
             loadChannels()
+            loadGroups()
         }
     }
 
     fun loadChannels() {
         viewModelScope.launch {
             repo.youtubeAccounts().onSuccess { _channels.value = it.accounts }
+        }
+    }
+
+    /**
+     * The channel groups, fetched rather than hard-coded.
+     *
+     * Empty until the backend answers, and the screen falls back to the full
+     * topic list in that case - an offline app must still be usable, and an
+     * empty group dropdown that blocks the topic dropdown would be worse than
+     * no grouping at all.
+     */
+    private val _groups = MutableStateFlow<List<NicheGroupDto>>(emptyList())
+    val groups: StateFlow<List<NicheGroupDto>> = _groups.asStateFlow()
+
+    fun loadGroups() {
+        viewModelScope.launch {
+            repo.nicheGroups().onSuccess { _groups.value = it.groups }
         }
     }
 
@@ -482,6 +502,16 @@ class SettingsViewModel(
             _accounts.value = it.accounts
             _defaultChannel.value = it.default
         }) { repo.youtubeAccounts() }
+    }
+
+    /** The channel groups, for the per-channel mapping chips. */
+    private val _groups = MutableStateFlow<List<NicheGroupDto>>(emptyList())
+    val groups: StateFlow<List<NicheGroupDto>> = _groups.asStateFlow()
+
+    fun refreshGroups() {
+        runTask<NicheGroupListDto>({ _groups.value = it.groups }) {
+            repo.nicheGroups()
+        }
     }
 
     fun makeDefault(channelId: String) {

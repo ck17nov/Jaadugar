@@ -45,7 +45,6 @@ import com.autotube.ai.ui.components.MetricTile
 import com.autotube.ai.ui.components.ScoreBar
 import com.autotube.ai.ui.components.SectionTitle
 import com.autotube.ai.ui.components.StatusChip
-import com.autotube.ai.ui.components.compactNumber
 import com.autotube.ai.ui.vm.DashboardViewModel
 import com.autotube.ai.ui.vm.appViewModel
 
@@ -96,7 +95,6 @@ fun DashboardScreen(
             },
         )
     }
-    val views by vm.totalViews.collectAsStateWithLifecycle()
     val health by vm.health.collectAsStateWithLifecycle()
     val quota by vm.quota.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -191,21 +189,6 @@ fun DashboardScreen(
                 )
             }
         }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricTile(
-                    "Views", views?.let { compactNumber(it) } ?: "--",
-                    Modifier.weight(1f), hint = "own channel",
-                )
-                // Revenue is a placeholder by design: YouTube revenue requires
-                // monetisation plus a separate reporting scope (spec section 32).
-                MetricTile(
-                    "Revenue", "--", Modifier.weight(1f),
-                    hint = "needs monetisation",
-                )
-            }
-        }
-
         // ---- backend status --------------------------------------------
         health?.let { h ->
             item {

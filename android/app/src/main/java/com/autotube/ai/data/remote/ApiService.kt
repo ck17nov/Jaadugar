@@ -27,6 +27,9 @@ interface ApiService {
     @POST("youtube/accounts/{channelId}/default")
     suspend fun setDefaultAccount(@Path("channelId") channelId: String): Unit
 
+    @GET("niche-groups")
+    suspend fun nicheGroups(): NicheGroupListDto
+
     @POST("youtube/accounts/{channelId}/niches")
     suspend fun setAccountNiches(
         @Path("channelId") channelId: String,

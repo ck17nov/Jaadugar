@@ -303,6 +303,14 @@ data class AutomationSummaryDto(
     @SerialName("made_for_kids") val madeForKids: Boolean = false,
     @SerialName("videos_made") val videosMade: Int = 0,
     val running: Boolean = false,
+    // Where this automation publishes, resolved by the backend the same way
+    // the pipeline resolves it. Without these, two daily automations are
+    // indistinguishable in the list - which defeats having several.
+    @SerialName("channel_id") val channelId: String = "",
+    @SerialName("channel_title") val channelTitle: String = "",
+    @SerialName("channel_is_default") val channelIsDefault: Boolean = false,
+    val group: String = "",
+    @SerialName("group_label") val groupLabel: String = "",
 )
 
 @Serializable
@@ -343,3 +351,23 @@ data class YouTubeAccountListDto(
 
 @Serializable
 data class NicheMapBodyDto(val niches: List<String> = emptyList())
+
+/**
+ * One brand channel's subject area: the unit of channel mapping.
+ *
+ * Served by the backend rather than hard-coded here. Two hand-kept copies of
+ * this list drift and the drift is silent - a topic missing from the app
+ * simply cannot be selected, and a topic missing from the backend maps to no
+ * channel at all.
+ */
+@Serializable
+data class NicheGroupDto(
+    val key: String = "",
+    val label: String = "",
+    @SerialName("suggested_channel") val suggestedChannel: String = "",
+    val topics: List<String> = emptyList(),
+    @SerialName("child_directed") val childDirected: Boolean = false,
+)
+
+@Serializable
+data class NicheGroupListDto(val groups: List<NicheGroupDto> = emptyList())

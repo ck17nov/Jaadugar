@@ -46,6 +46,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.autotube.ai.auth.YouTubeAuthManager
+import com.autotube.ai.data.remote.NicheGroupDto
 import com.autotube.ai.data.remote.YouTubeAccountDto
 import com.autotube.ai.ui.components.BannerTone
 import com.autotube.ai.ui.components.InfoBanner
@@ -66,6 +67,7 @@ fun SettingsScreen() {
     val health by vm.health.collectAsStateWithLifecycle()
     val youtube by vm.youtube.collectAsStateWithLifecycle()
     val accounts by vm.accounts.collectAsStateWithLifecycle()
+    val groups by vm.groups.collectAsStateWithLifecycle()
     val defaultChannel by vm.defaultChannel.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
@@ -139,6 +141,7 @@ fun SettingsScreen() {
             vm.testConnection()
             vm.refreshYouTube()
             vm.refreshAccounts()
+            vm.refreshGroups()
         }
     }
 
@@ -401,8 +404,8 @@ fun SettingsScreen() {
             "One entry per channel you have connected. A YouTube sign-in can " +
                 "only act as the single channel you pick in Google's chooser, " +
                 "so each brand channel under your account is added separately. " +
-                "Give a channel some niches and videos in those niches publish " +
-                "there automatically.",
+                "Give a channel its groups - Kids, Finance, Tech - and every " +
+                "topic in those groups publishes there automatically.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -419,6 +422,7 @@ fun SettingsScreen() {
             ChannelCard(
                 account = account,
                 isDefault = account.channelId == defaultChannel,
+                groups = groups,
                 takenElsewhere = accounts
                     .filter { it.channelId != account.channelId }
                     .flatMap { it.niches }
@@ -596,6 +600,7 @@ private fun CopyableValue(label: String, value: String) {
 private fun ChannelCard(
     account: YouTubeAccountDto,
     isDefault: Boolean,
+    groups: List<NicheGroupDto>,
     takenElsewhere: Set<String>,
     onMakeDefault: () -> Unit,
     onToggleNiche: (String) -> Unit,
@@ -630,37 +635,74 @@ private fun ChannelCard(
                 }
             }
 
+            // Read the mapping back in the user's own terms: group labels
+            // where a whole group is mapped, and bare topic names for any
+            // legacy per-topic mapping that predates groups.
+            val mappedGroups = groups.filter { g ->
+                account.niches.any { it.equals(g.key, ignoreCase = true) }
+            }
+            val loneTopics = account.niches.filter { n ->
+                groups.none { it.key.equals(n, ignoreCase = true) }
+            }
+            val summary = (mappedGroups.map { it.label } + loneTopics)
             Text(
-                if (account.niches.isEmpty()) "No niches assigned"
-                else "Publishes: " + account.niches.joinToString(", "),
+                if (summary.isEmpty()) "No groups assigned"
+                else "Publishes: " + summary.joinToString(", "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = { showNiches = !showNiches }) {
-                    Text(if (showNiches) "Done" else "Choose niches")
+                    Text(if (showNiches) "Done" else "Choose groups")
                 }
                 TextButton(onClick = { confirmForget = true }) { Text("Remove") }
             }
 
             if (showNiches) {
+                // SIX chips, not twenty-one.
+                //
+                // This listed every topic, so the kids channel needed nine
+                // ticks and missing one sent that topic silently to the
+                // default channel. One chip per group covers the group.
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    NICHE_OPTIONS.forEach { niche ->
-                        val mine = niche in account.niches
+                    groups.forEach { group ->
+                        val mine = account.niches.any {
+                            it.equals(group.key, ignoreCase = true)
+                        }
                         FilterChip(
                             selected = mine,
-                            enabled = mine || niche !in takenElsewhere,
-                            onClick = { onToggleNiche(niche) },
-                            label = { Text(niche, style = MaterialTheme.typography.bodySmall) },
+                            enabled = mine || group.key !in takenElsewhere,
+                            onClick = { onToggleNiche(group.key) },
+                            label = {
+                                Text("${group.label} (${group.topics.size})",
+                                     style = MaterialTheme.typography.bodySmall)
+                            },
                         )
                     }
                 }
                 Text(
-                    "A greyed-out niche is already assigned to another channel.",
+                    if (groups.isEmpty()) {
+                        "Groups have not loaded from the backend yet - tap " +
+                            "Reload."
+                    } else {
+                        "The number is how many topics that group covers. A " +
+                            "greyed-out group already belongs to another " +
+                            "channel."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (loneTopics.isNotEmpty()) {
+                    Text(
+                        "Also mapped individually: " +
+                            loneTopics.joinToString(", ") +
+                            ". Those still work and still take precedence " +
+                            "over their group.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

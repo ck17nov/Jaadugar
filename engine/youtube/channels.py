@@ -163,12 +163,33 @@ class ChannelStore:
         return Channel.from_dict(raw) if raw else None
 
     def for_niche(self, niche: str) -> Channel | None:
-        """The channel mapped to this niche, if one is."""
+        """The channel this topic publishes to.
+
+        Three passes, narrowest first:
+
+        1. An exact TOPIC match. This is the original behaviour and it still
+           wins, so an existing install that mapped individual topics keeps
+           working and a deliberate one-topic override still beats its group.
+        2. The topic's GROUP. Mapping "kids" to a channel now covers all nine
+           kids topics, which is the whole point of groups - the per-topic
+           mapping meant nine ticks per channel and forgetting one sent that
+           topic silently to the default channel.
+        3. Nothing. The caller falls back to the default channel.
+        """
         target = (niche or "").strip().lower()
         if not target:
             return None
-        for channel in self.all():
+        channels = self.all()
+        for channel in channels:
             if any(target == n.strip().lower() for n in (channel.niches or [])):
+                return channel
+        from ..core.groups import group_for_topic
+        found = group_for_topic(target)
+        if found is None:
+            return None
+        for channel in channels:
+            if any(found.key == n.strip().lower()
+                   for n in (channel.niches or [])):
                 return channel
         return None
 
