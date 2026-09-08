@@ -101,7 +101,16 @@ def condition_image(path: Path, width: int, height: int, *,
         img = img.resize((render_w, render_h), Image.LANCZOS)
 
         if sharpen and upscale_factor > 1.05:
-            strength = min(180, int(90 * upscale_factor))
+            # Capped at 110, not 180.
+            #
+            # A 768x1344 generated image into the 1274x2265 oversize buffer is
+            # a 1.66x magnification, and 90*1.66 = 149% unsharp haloes the ink
+            # outlines that illustrated styles are built on - then zoompan
+            # resamples every frame again on top of it. The old 180 ceiling
+            # was tuned for the keyless backend's 2.21x upscale from a
+            # heavily-compressed 576px source, where over-sharpening was
+            # covering for missing detail. There is real detail now.
+            strength = min(110, int(90 * upscale_factor))
             img = img.filter(ImageFilter.UnsharpMask(radius=1.6, percent=strength, threshold=3))
         elif sharpen:
             img = img.filter(ImageFilter.UnsharpMask(radius=1.1, percent=60, threshold=3))

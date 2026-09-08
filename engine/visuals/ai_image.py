@@ -236,6 +236,14 @@ class CreditExhausted(RuntimeError):
 QuotaExhausted = CreditExhausted
 
 
+class ModelUnavailable(RuntimeError):
+    """An account-level refusal: the same answer from every model.
+
+    Distinct from an ordinary error so the model chain does not waste a call
+    on each variant proving that a rejected token is still rejected.
+    """
+
+
 class HuggingFaceBackend:
     """Runs a model that actually draws what you ask for.
 
@@ -487,12 +495,35 @@ class CloudflareBackend:
     # asking the model for a shape it cannot draw.
     BUCKETS = ((768, 1344), (832, 1216), (1024, 1024), (1216, 832), (1344, 768))
 
+    # Tried in order when the primary model itself fails.
+    #
+    # All three unmetered models are flagged `beta: true` in the account
+    # catalogue, and that flag is exactly why they are free - so any one of
+    # them can be withdrawn or start 5xx-ing without notice. Rolling to the
+    # next SDXL variant keeps the LOOK; degrading straight to the keyless
+    # backend does not, and a video whose second half is soft airbrushed
+    # 0.59 MP frames is worse than one that is uniformly either.
+    #
+    # Lightning is second rather than first deliberately. It is faster and it
+    # obeys hard-outlined art direction better, but measured on this
+    # project's OWN template styles it renders the child in a bedtime story
+    # as a teenager and pushes the nostalgia look away from the soft-painted
+    # reference. Better as insurance than as the default.
+    DEFAULT_CHAIN = ("@cf/stabilityai/stable-diffusion-xl-base-1.0",
+                     "@cf/bytedance/stable-diffusion-xl-lightning")
+
     def __init__(self, account_id: str, token: str,
                  model: str = "@cf/stabilityai/stable-diffusion-xl-base-1.0",
-                 steps: int = 8, timeout: int = 120):
+                 steps: int = 8, timeout: int = 120,
+                 fallback_models: tuple[str, ...] | list[str] | None = None):
         self.account_id = account_id
         self.token = token
         self.model = model
+        chain = [model] + [m for m in (fallback_models
+                                       if fallback_models is not None
+                                       else self.DEFAULT_CHAIN)
+                           if m and m != model]
+        self.models = chain
         # Clamped to whatever THIS model allows: flux-1-schnell is a distilled
         # model and stops at 8, SDXL takes up to 20. Neurons are charged per
         # step (9.6 of the daily 10,000 each on flux), so the default is the
@@ -517,18 +548,46 @@ class CloudflareBackend:
     def available(self) -> bool:
         return bool(self.account_id and self.token and self.model)
 
+    @staticmethod
+    def _sized(model: str) -> bool:
+        return any(name in model for name in CloudflareBackend.SIZED_MODELS)
+
     @property
     def supports_size(self) -> bool:
-        return any(name in self.model for name in self.SIZED_MODELS)
+        return self._sized(self.model)
 
     def fetch(self, prompt: str, *, width: int, height: int, seed: int) -> bytes:
+        """Try each model in the chain until one returns an image.
+
+        Only MODEL-level failures roll forward. An exhausted allowance or a
+        rejected token is an account-level fact and would fail identically on
+        every model, so those raise immediately rather than burning the chain.
+        """
+        last: Exception | None = None
+        for index, model in enumerate(self.models):
+            try:
+                return self._fetch_one(model, prompt, width=width,
+                                       height=height, seed=seed)
+            except (QuotaExhausted, ModelUnavailable):
+                raise
+            except Exception as exc:            # noqa: BLE001 - see docstring
+                last = exc
+                if index + 1 < len(self.models):
+                    log_event("VISUAL", "cloudflare model failed, trying the "
+                              "next in the chain", failed=model,
+                              trying=self.models[index + 1],
+                              error=str(exc)[:140])
+        raise last if last else RuntimeError("cloudflare: no model configured")
+
+    def _fetch_one(self, model: str, prompt: str, *, width: int, height: int,
+                   seed: int) -> bytes:
         import base64
         body: dict = {"prompt": prompt}
-        if self._num_steps_model(self.model):
+        if self._num_steps_model(model):
             body["num_steps"] = self.steps
         else:
             body["steps"] = self.steps
-        if self.supports_size:
+        if self._sized(model):
             # Snap to a trained bucket rather than passing the frame size
             # through. This used to send min(1024, ...), which turned a
             # 1080x1920 request into 1024x1024 - a square, which the cover
@@ -543,7 +602,7 @@ class CloudflareBackend:
             # photo-realism are both things the prompt alone failed to
             # suppress elsewhere.
             body["negative_prompt"] = _NEGATIVE
-        url = f"{self.BASE}{self.account_id}/ai/run/{self.model}"
+        url = f"{self.BASE}{self.account_id}/ai/run/{model}"
         with httpx.Client(timeout=self.timeout) as client:
             resp = client.post(url, json=body, headers={
                 "Authorization": f"Bearer {self.token}",
@@ -562,7 +621,7 @@ class CloudflareBackend:
             log_event("VISUAL", "cloudflare charged neurons for this image",
                       neurons=f"{self.last_neurons:.2f}",
                       job_total=f"{self.spent_neurons:.2f}",
-                      daily_free=10000, model=self.model)
+                      daily_free=10000, model=model)
 
         if resp.status_code in (429, 402):
             raise QuotaExhausted(
@@ -571,7 +630,7 @@ class CloudflareBackend:
                 f"This process has spent {self.spent_neurons:.0f} of the "
                 f"10,000 free neurons.")
         if resp.status_code == 401:
-            raise RuntimeError(
+            raise ModelUnavailable(
                 "cloudflare: token rejected (401). The API token needs the "
                 "Workers AI permission and must belong to this account id.")
         resp.raise_for_status()

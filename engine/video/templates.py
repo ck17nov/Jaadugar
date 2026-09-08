@@ -197,7 +197,11 @@ TEMPLATES: dict[str, StyleTemplate] = {
         highlight_color="&H00B0B0FF", outline=6, safe_bottom=0.16,
         # A held frame wants the gentlest possible cut between shots.
         transition="fade", transition_duration=0.9,
-        motion_cycle=["zoom_in", "pan_left", "zoom_in", "pan_right"],
+        # Dollies, not slides. A frame held for fourteen seconds needs the
+        # movement to read as depth rather than as a picture being dragged
+        # sideways, and a combined zoom+pan costs nothing extra.
+        motion_cycle=["dolly_in_right", "zoom_in", "dolly_in_left",
+                      "dolly_out_down"],
         kenburns=True,
         contrast=1.02, saturation=1.05,
         visual_style_suffix=("cel-shaded 2D animation still, soft painted "
@@ -231,7 +235,8 @@ TEMPLATES: dict[str, StyleTemplate] = {
         caption_style="block",                  # never flash single words at kids
         highlight_color="&H0080E0FF", outline=6, safe_bottom=0.16,
         transition="fade", transition_duration=0.65,
-        motion_cycle=["zoom_in", "pan_right", "zoom_out", "pan_left"],
+        motion_cycle=["dolly_in_right", "zoom_in", "dolly_in_left",
+                      "zoom_out"],
         contrast=1.02, saturation=1.06,
         # A bedtime story is a PICTURE BOOK, not a set of flashcards.
         #

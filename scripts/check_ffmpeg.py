@@ -28,6 +28,7 @@ FILTERS: list[tuple[str, str]] = [
     ("zoompan", "Ken Burns motion - every scene would be a static frame"),
     ("xfade", "cross-fades between scenes; also the batched long-form render"),
     ("subtitles", "burnt-in captions (needs libass)"),
+    ("deband", "removes gradient banding from flat-colour art in the final pass"),
     ("sidechaincompress", "ducking music under the voice"),
     ("loudnorm", "the -14 LUFS master; YouTube would re-level it badly"),
     ("silencedetect", "quality gate: long-silence check"),

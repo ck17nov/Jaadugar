@@ -463,7 +463,11 @@ class TestCloudflareBackend:
         """429 must not be retried three times per scene."""
         import inspect
         from engine.visuals.ai_image import CloudflareBackend
-        src = inspect.getsource(CloudflareBackend.fetch)
+        # The WHOLE class, not one method: the request path was split into
+        # fetch() (walks the model chain) and _fetch_one() (does the call), and
+        # asserting against a single method's source made these tests fail on
+        # a refactor that changed nothing they are actually about.
+        src = inspect.getsource(CloudflareBackend)
         assert "QuotaExhausted" in src
         assert "429" in src
 
@@ -471,7 +475,7 @@ class TestCloudflareBackend:
         """flux returns base64 JSON; stable-diffusion returns raw bytes."""
         import inspect
         from engine.visuals.ai_image import CloudflareBackend
-        src = inspect.getsource(CloudflareBackend.fetch)
+        src = inspect.getsource(CloudflareBackend)
         assert "b64decode" in src
         assert "content_type" in src
 

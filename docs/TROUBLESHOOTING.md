@@ -176,9 +176,23 @@ To trade quality for speed in `config.yaml`:
 
 ```yaml
 video:
-  preset: fast     # medium -> fast is roughly 2x quicker
-  crf: 21          # 19 -> 21 is smaller and slightly softer
+  preset: veryfast # see below - this is where the real gain is
+  crf: 18
 ```
+
+Measured on ffmpeg 9.0 at 1080x1920, per core, using the pipeline's own
+filter chains. An earlier version of this page claimed "medium -> fast is
+roughly 2x quicker", which is wrong:
+
+| preset / crf      | cost per core | output size |
+|-------------------|---------------|-------------|
+| `medium` / 19     | 49.3x realtime| -           |
+| `fast` / 19       | 42.9x realtime| 3.30 MB     |
+| `veryfast` / 18   | 20.3x realtime| 3.12 MB     |
+
+medium -> fast is 1.15x, not 2x. The real step is fast -> veryfast, which is
+2.1x faster AND produces a slightly SMALLER file: the faster preset costs
+compression efficiency and the lower CRF buys it back.
 
 ### `command failed (143)`
 Exit 143 is SIGTERM — something killed FFmpeg, normally an outer timeout or the
