@@ -125,6 +125,15 @@ def hamming(a: int, b: int) -> int:
     return bin(a ^ b).count("1")
 
 
+def _as_float(text: str | None) -> float:
+    """A header value as a number, or 0.0. Never raises: a malformed
+    accounting header must not lose an image that already arrived."""
+    try:
+        return max(0.0, float(str(text).strip()))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _trim_bottom(path: Path, fraction: float) -> None:
     """Cut a strip off the bottom of an image, in place.
 
@@ -440,6 +449,24 @@ class CloudflareBackend:
     max_parallel = 4
     BASE = "https://api.cloudflare.com/client/v4/accounts/"
 
+    # SDXL IS UNMETERED, MEASURED. Every response carries a
+    # `cf-ai-neurons` header giving what that request cost, and the header is
+    # real: flux-1-schnell reports 172.80 for one image and llama-3.1-8b
+    # reports 0.45 for a short completion. SDXL reports 0.00, repeatedly, for
+    # a 768x1344 image at 20 steps - which agrees with its absence from the
+    # published pricing table.
+    #
+    # So the daily 10,000-neuron allowance is not the binding constraint on
+    # image generation that it appears to be, and a 145-image long-form video
+    # is affordable where 145 flux images (25,000 neurons) would be two and a
+    # half days of allowance. This is a second, independent reason to prefer
+    # SDXL over flux here - the first being that flux has no width/height and
+    # returns a square the cover crop cuts back to the free backend's
+    # resolution.
+    #
+    # "Unmetered today" is not a promise, which is why `auto` and the
+    # fallback chain exist. Watch the header rather than assuming.
+
     # Models that honour width/height. Everything else returns a square.
     SIZED_MODELS = ("stable-diffusion-xl-base-1.0", "stable-diffusion-xl-lightning",
                     "dreamshaper-8-lcm", "stable-diffusion-v1-5")
@@ -473,6 +500,10 @@ class CloudflareBackend:
         self.steps = max(1, min(20 if self._num_steps_model(model) else 8,
                                 int(steps)))
         self.timeout = timeout
+        # Neurons charged for the last request, and the running total for this
+        # process. See the note where they are read.
+        self.last_neurons = 0.0
+        self.spent_neurons = 0.0
 
     @staticmethod
     def _num_steps_model(model: str) -> bool:
@@ -518,10 +549,27 @@ class CloudflareBackend:
                 "Authorization": f"Bearer {self.token}",
                 "Content-Type": "application/json"})
 
+        # What that request actually cost, straight from Cloudflare.
+        #
+        # Recorded rather than assumed. SDXL measures 0.00 today while flux
+        # measures 172.80, and the whole "a long-form video is affordable"
+        # conclusion rests on that. If Cloudflare starts metering SDXL this is
+        # where it will show up first - as a rising number in the logs, rather
+        # than as an unexplained 429 halfway through a 145-image render.
+        self.last_neurons = _as_float(resp.headers.get("cf-ai-neurons"))
+        if self.last_neurons > 0:
+            self.spent_neurons += self.last_neurons
+            log_event("VISUAL", "cloudflare charged neurons for this image",
+                      neurons=f"{self.last_neurons:.2f}",
+                      job_total=f"{self.spent_neurons:.2f}",
+                      daily_free=10000, model=self.model)
+
         if resp.status_code in (429, 402):
             raise QuotaExhausted(
                 f"cloudflare: daily neuron allowance exhausted "
-                f"({resp.status_code}). It resets at 00:00 UTC.")
+                f"({resp.status_code}). It resets at 00:00 UTC. "
+                f"This process has spent {self.spent_neurons:.0f} of the "
+                f"10,000 free neurons.")
         if resp.status_code == 401:
             raise RuntimeError(
                 "cloudflare: token rejected (401). The API token needs the "
