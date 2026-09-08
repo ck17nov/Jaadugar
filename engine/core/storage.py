@@ -64,8 +64,19 @@ RECLAIM_ON_SIGHT = frozenset({
 # SCHEDULED is deliberately NOT here: it has already been uploaded, so its
 # local media is genuinely spare (see RECLAIM_ON_SIGHT). Its database ROW
 # still has to survive, which is a separate guard in db.delete_jobs.
-NEVER_RECLAIM = frozenset({JobStatus.AWAITING_APPROVAL.value,
-                           JobStatus.READY.value})
+NEVER_RECLAIM = frozenset({JobStatus.AWAITING_APPROVAL.value})
+
+# READY means two different things, and that is why it was mishandled.
+#
+# In a REAL run it means approved and rendered with the upload still to
+# happen, so the video is about to be needed and must not be deleted. In a DRY
+# RUN it is the terminal state - nothing will ever upload it - and the local
+# file is the only copy, so without an age-based sweep dry-run output
+# accumulates forever on a free-tier disk.
+#
+# So the policy has to know which run it is, rather than picking one meaning
+# and being wrong half the time.
+DRY_RUN_TERMINAL = frozenset({JobStatus.READY.value})
 
 
 @dataclass
@@ -139,14 +150,21 @@ def reclaim_job(job_dir: Path, job_id: str = "") -> Reclaimed:
 
 
 def may_reclaim(status: str, *, age_days: float = 0.0,
-                after_days: float = 0.0) -> bool:
+                after_days: float = 0.0, dry_run: bool = False) -> bool:
     """Whether this job's media can go now.
 
     Two independent reasons: it reached a state where the media is no longer
     needed, or it is simply old. Approval is exempt from both - an unwatched
     video with no file is worse than a full disk.
+
+    READY is exempt too in a REAL run, because it means the upload has not
+    happened yet and deleting the video makes it impossible. In a dry run
+    READY is terminal and the age sweep is what stops dry-run output filling
+    the disk, so `dry_run=True` puts it back in scope.
     """
     if status in NEVER_RECLAIM:
+        return False
+    if status in DRY_RUN_TERMINAL and not dry_run:
         return False
     if status in RECLAIM_ON_SIGHT:
         return True
@@ -154,7 +172,8 @@ def may_reclaim(status: str, *, age_days: float = 0.0,
 
 
 def sweep(workspace: Path, jobs, *, after_days: float = 7.0,
-          keep_last: int = 5, now: float | None = None) -> list[Reclaimed]:
+          keep_last: int = 5, now: float | None = None,
+          dry_run: bool = False) -> list[Reclaimed]:
     """Reclaim every eligible job. `jobs` is an iterable of VideoJob.
 
     `keep_last` always spares the newest N jobs whatever their age or state.
@@ -178,7 +197,7 @@ def sweep(workspace: Path, jobs, *, after_days: float = 7.0,
             continue
         age_days = max(0.0, (stamp - (job.updated_at or stamp)) / 86400.0)
         if not may_reclaim(job.status, age_days=age_days,
-                           after_days=after_days):
+                           after_days=after_days, dry_run=dry_run):
             continue
         result = reclaim_job(directory, job.job_id)
         if result.removed:

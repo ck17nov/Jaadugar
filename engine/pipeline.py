@@ -1074,7 +1074,7 @@ class Pipeline:
         days = (float(self.cfg.get("storage.reclaim_after_days", 7.0))
                 if after_days is None else float(after_days))
         results = sweep(self.workspace, self.db.list_jobs(limit=1000),
-                        after_days=days)
+                        after_days=days, dry_run=bool(self.cfg.dry_run))
         return [r.to_dict() for r in results]
 
     def collect_analytics(self, *, days: int = 28) -> dict[str, Any]:

@@ -295,10 +295,19 @@ class TestStorageReclaim:
                            after_days=7) is False
         assert "AWAITING_APPROVAL" in NEVER_RECLAIM
 
-    def test_ready_waits_for_the_age_sweep(self):
-        """In a dry run READY is final and the local file is the only copy."""
+    def test_ready_waits_for_the_age_sweep_in_a_dry_run(self):
+        """In a dry run READY is final and the local file is the only copy,
+        so the age sweep is what stops output accumulating forever."""
+        assert may_reclaim("READY", dry_run=True) is False
+        assert may_reclaim("READY", age_days=8, after_days=7,
+                           dry_run=True) is True
+
+    def test_ready_is_protected_in_a_real_run(self):
+        """In a real run READY means the upload has not happened yet, and
+        deleting the video makes it impossible - which is exactly how ten
+        approved videos were destroyed by one tap on Clear."""
         assert may_reclaim("READY") is False
-        assert may_reclaim("READY", age_days=8, after_days=7) is True
+        assert may_reclaim("READY", age_days=999, after_days=7) is False
 
     def test_the_sweep_spares_the_newest_jobs(self, tmp_path):
         jobs = []

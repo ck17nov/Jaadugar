@@ -16,8 +16,9 @@ from pathlib import Path
 import pytest
 
 from engine.core.db import Database
-from engine.core.models import JobStatus, VideoJob
-from engine.core.storage import NEVER_RECLAIM, RECLAIM_ON_SIGHT, may_reclaim
+from engine.core.models import VideoJob
+from engine.core.storage import (DRY_RUN_TERMINAL, NEVER_RECLAIM,
+                                 RECLAIM_ON_SIGHT, may_reclaim)
 
 # Everything that means "the work is over and nobody is waiting for it".
 FINISHED = ("PUBLISHED", "FAILED", "REJECTED", "CANCELLED")
@@ -80,11 +81,19 @@ class TestClearKeepsWhatIsStillNeeded:
 
 
 class TestMediaReclaimPolicy:
-    def test_ready_media_is_never_reclaimed(self):
-        assert JobStatus.READY.value in NEVER_RECLAIM
+    def test_ready_media_is_never_reclaimed_in_a_real_run(self):
         assert may_reclaim("READY") is False
         # ...not even when it is ancient. The age sweep was the other route in.
         assert may_reclaim("READY", age_days=999.0, after_days=7.0) is False
+
+    def test_ready_is_still_sweepable_in_a_dry_run(self):
+        """READY is TERMINAL in a dry run - nothing will ever upload it - and
+        the local file is the only copy, so without the age sweep dry-run
+        output accumulates forever on a free-tier disk. Two meanings, one
+        state; the policy has to know which run it is."""
+        assert may_reclaim("READY", age_days=8.0, after_days=7.0,
+                           dry_run=True) is True
+        assert may_reclaim("READY", dry_run=True) is False
 
     def test_approval_media_is_never_reclaimed(self):
         assert may_reclaim("AWAITING_APPROVAL", age_days=999.0,
@@ -98,8 +107,18 @@ class TestMediaReclaimPolicy:
             assert status in RECLAIM_ON_SIGHT, status
             assert may_reclaim(status) is True, status
 
-    def test_the_two_policies_do_not_contradict(self):
+    def test_the_policies_do_not_contradict(self):
         assert not (NEVER_RECLAIM & RECLAIM_ON_SIGHT)
+        assert not (DRY_RUN_TERMINAL & RECLAIM_ON_SIGHT)
+        assert not (DRY_RUN_TERMINAL & NEVER_RECLAIM)
+
+    def test_the_clear_button_protects_ready_in_either_mode(self):
+        """delete_jobs takes no dry_run flag on purpose. Clear is a tap on
+        visible history, and losing a real pending upload to a stray tap is
+        far worse than dry-run files lingering until the age sweep."""
+        import inspect
+        from engine.core.db import Database as _Db
+        assert "dry_run" not in inspect.signature(_Db.delete_jobs).parameters
 
 
 @pytest.mark.parametrize("status", IN_FLIGHT)
