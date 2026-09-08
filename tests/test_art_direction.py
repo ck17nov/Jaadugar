@@ -120,3 +120,45 @@ class TestIllustratedExplainer:
             if template.prefer_ai:
                 suffix = template.visual_style_suffix.lower()
                 assert any(w in suffix for w in drawn), name
+
+
+class TestTemplateIsReachable:
+    """A template nobody can select is not a feature.
+
+    ILLUSTRATED_EXPLAINER was added for the long-form reference look and was
+    reachable only by forcing `video.style_template` in config - there is no
+    template field in the API or the app at all.
+    """
+
+    def test_a_long_form_story_gets_the_held_frame_look(self):
+        template = select_template("90s village nostalgia story",
+                                   "storytelling", long_form=True)
+        assert template.name == "ILLUSTRATED_EXPLAINER"
+
+    def test_the_same_subject_as_a_short_does_not(self):
+        """A 45-second story wants 6-second scenes, not 14-second ones."""
+        template = select_template("90s village nostalgia story",
+                                   "storytelling", long_form=False)
+        assert template.name == "STORYTELLING"
+
+    def test_child_directed_still_wins_over_length(self):
+        """KIDS_STORY's pacing and caption style are part of the safety
+        profile, not a preference a format can override."""
+        template = select_template("kids bedtime stories", "gentle",
+                                   made_for_kids=True, long_form=True)
+        assert template.name == "KIDS_STORY"
+
+    def test_a_long_form_explainer_is_not_hijacked(self):
+        """Only narrated STORIES want held frames. An explainer or a news
+        piece is not improved by fourteen-second holds."""
+        for niche in ("personal finance", "AI news", "pc and laptop tech"):
+            template = select_template(niche, "educational and clear",
+                                       long_form=True)
+            assert template.name != "ILLUSTRATED_EXPLAINER", niche
+
+    def test_the_pipeline_passes_the_format_through(self):
+        """Otherwise the routing above can never fire in production."""
+        from engine import pipeline
+        source = inspect.getsource(pipeline.Pipeline)
+        assert "long_form=" in source
+        assert "LONGFORM" in source

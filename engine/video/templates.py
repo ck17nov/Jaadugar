@@ -85,6 +85,15 @@ class StyleTemplate:
 
 
 # --------------------------------------------------------------------------
+# Subjects whose LONG-FORM version wants a held frame rather than a cut every
+# six seconds. Deliberately narrow: a long-form explainer or news piece is not
+# improved by fourteen-second holds, only a narrated story is.
+LONGFORM_STORY_HINTS = (
+    "story", "stories", "nostalgia", "memoir", "folklore", "tale", "tales",
+    "legend", "legends", "childhood", "village", "mystery", "history",
+)
+
+
 TEMPLATES: dict[str, StyleTemplate] = {
     "FAST_FACTS": StyleTemplate(
         name="FAST_FACTS",
@@ -328,11 +337,21 @@ _PRIORITY = ("KIDS_STORY", "MYSTERY", "TOP_5", "FAST_FACTS", "STORYTELLING",
 
 def select_template(niche: str, style: str = "", *,
                     made_for_kids: bool = False,
+                    long_form: bool = False,
                     forced: str = "") -> StyleTemplate:
     """Choose a template from the niche and the user's style text.
 
     Child-directed content always gets KIDS_STORY: its caption style and pacing
     are part of the safety profile, not a preference.
+
+    `long_form` exists because the right look for a story depends on its
+    LENGTH, not only its subject. A 45-second story wants STORYTELLING's
+    6-second scenes; a half-hour narrated story wants a frame held for
+    fourteen and no burnt-in captions, which is what the reference channels
+    for this format actually do - and at 6 seconds a 34-minute video needs 340
+    images and looks like a montage. Without this, ILLUSTRATED_EXPLAINER was
+    reachable only by forcing it in config, so the template existed and could
+    not be chosen.
     """
     if forced:
         template = TEMPLATES.get(forced.strip().upper())
@@ -353,6 +372,10 @@ def select_template(niche: str, style: str = "", *,
         return TEMPLATES["KIDS_STORY"]
 
     haystack = f"{niche} {style}".lower()
+    # A long-form STORY gets the held-frame treatment before the keyword
+    # matching below can route it to STORYTELLING's faster cutting.
+    if long_form and any(hint in haystack for hint in LONGFORM_STORY_HINTS):
+        return TEMPLATES["ILLUSTRATED_EXPLAINER"]
     # Plural-tolerant token set: "true horror stories" must match the "story"
     # hint, otherwise it silently falls through to the default template.
     tokens: set[str] = set()

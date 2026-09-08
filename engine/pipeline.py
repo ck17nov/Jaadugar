@@ -928,6 +928,10 @@ class Pipeline:
         template = select_template(
             request.niche, request.style,
             made_for_kids=profile.made_for_kids,
+            # A half-hour story and a 45-second one want different pacing from
+            # the same subject, so the format is part of the choice.
+            long_form=str(getattr(request, "video_format", "")).upper()
+            == "LONGFORM",
             forced=str(self.cfg.get("video.style_template", "")))
         profile = apply_to_profile(profile, template)
 
