@@ -239,9 +239,13 @@ visuals:
   cloudflare_model: "@cf/stabilityai/stable-diffusion-xl-base-1.0"
   # Neurons are charged per step, so this trades daily allowance for detail.
   # 4 is the documented default for this distilled model and 8 the ceiling.
-  # SDXL allows up to 20; 8 is the low end of useful and keeps the daily
-  # neuron allowance good for roughly 70 images.
-  cloudflare_steps: 8
+  # 20, the documented maximum for SDXL, because it measured FREE.
+  #
+  # At a fixed seed, 8 steps gave saturation 75 and contrast 41; 20 gave 107
+  # and 53 - the difference between a hazy dithered frame and a clean one. And
+  # 20 steps took 19.1s against 18.1s for 8, so the request overhead dominates
+  # and the extra steps cost essentially no wall time.
+  cloudflare_steps: 20
   gemini_image_model: gemini-3.1-flash-image
   # Used by the huggingface backend. Ignored by pollinations.
   ai_image_model: black-forest-labs/FLUX.1-schnell

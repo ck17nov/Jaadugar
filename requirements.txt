@@ -22,7 +22,17 @@ huggingface_hub==1.30.0
 requests==2.32.3
 Pillow==11.1.0
 numpy==2.2.1
-typer==0.15.1
+# 0.15.1 renders --help as a TypeError against click 8.2+.
+#
+# "Parameter.make_metavar() missing 1 required positional argument: 'ctx'" -
+# click changed that signature and typer 0.15 calls it the old way. Every
+# command still RAN; only the help output was a stack trace, which is a
+# miserable first impression for anyone typing `jaadugar --help`. Appeared
+# when installing huggingface_hub pulled click forward.
+#
+# Do NOT solve this by pinning click down: gtts is verified working at click
+# 8.5.0 and is what synthesises Hindi when edge-tts is unavailable.
+typer>=0.16,<1.0
 rich==13.9.4
 python-dotenv==1.0.1
 # --- TTS (free, no key) ---

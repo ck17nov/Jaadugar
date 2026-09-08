@@ -6,6 +6,8 @@ rate limited, so a suite that called it would be both slow and flaky.
 """
 from __future__ import annotations
 
+import os
+
 import io
 import random
 
@@ -213,11 +215,29 @@ class TestBackendSelection:
         nobody had a reason to edit a config line to escape it."""
         assert load_config().get("visuals.ai_image_backend") == "auto"
 
+    # These tests must not depend on whether the DEVELOPER has credentials.
+    #
+    # They used to delete the environment variable and then call
+    # load_config(), which re-reads .env and re-adds anything not currently in
+    # os.environ ("real environment always wins over the file"). So the delete
+    # was undone, and the tests only passed on a machine with no credentials -
+    # they broke the moment real Cloudflare keys were added to .env, which is
+    # the normal state of a working install. Loading the config FIRST and
+    # clearing the variables afterwards is order- and machine-independent,
+    # because build_backend reads the secrets when it is called.
+    @staticmethod
+    def _config_without(*names):
+        cfg = load_config()
+        for name in names:
+            os.environ.pop(name, None)
+        return cfg
+
     def test_auto_degrades_to_keyless_when_nothing_is_configured(
             self, monkeypatch):
-        for name in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"):
-            monkeypatch.delenv(name, raising=False)
-        assert build_backend(load_config()).id == "pollinations"
+        monkeypatch.setattr(os, "environ", dict(os.environ))
+        cfg = self._config_without("CLOUDFLARE_ACCOUNT_ID",
+                                   "CLOUDFLARE_API_TOKEN", "HF_API_TOKEN")
+        assert build_backend(cfg).id == "pollinations"
 
     def test_auto_never_picks_huggingface(self, monkeypatch):
         """A token proves nothing about remaining credit.
@@ -226,21 +246,23 @@ class TestBackendSelection:
         images, so auto-selecting it opens every job with a failed call. It
         stays available under its own name.
         """
-        for name in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"):
-            monkeypatch.delenv(name, raising=False)
-        monkeypatch.setenv("HF_API_TOKEN", "hf_probe_token")
-        assert build_backend(load_config()).id == "pollinations"
+        monkeypatch.setattr(os, "environ", dict(os.environ))
+        cfg = self._config_without("CLOUDFLARE_ACCOUNT_ID",
+                                   "CLOUDFLARE_API_TOKEN")
+        os.environ["HF_API_TOKEN"] = "hf_probe_token"
+        assert build_backend(cfg).id == "pollinations"
 
     def test_auto_prefers_cloudflare_when_its_credentials_exist(
             self, monkeypatch):
+        cfg = load_config()
         monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
-        assert build_backend(load_config()).id == "cloudflare"
+        assert build_backend(cfg).id == "cloudflare"
 
     def test_huggingface_without_a_token_degrades_instead_of_failing(
             self, monkeypatch):
-        cfg = load_config()
-        monkeypatch.delenv("HF_API_TOKEN", raising=False)
+        monkeypatch.setattr(os, "environ", dict(os.environ))
+        cfg = self._config_without("HF_API_TOKEN")
         cfg.set("visuals.ai_image_backend", "huggingface")
         assert build_backend(cfg).id == "pollinations"
 
