@@ -373,21 +373,85 @@ class TestCloudflareBackend:
         from engine.visuals.ai_image import CloudflareBackend
         return CloudflareBackend("acct", "token", **kwargs)
 
+    FLUX = "@cf/black-forest-labs/flux-1-schnell"
+
     def test_flux_is_not_size_aware(self):
         """It returns a square, which a 9:16 crop then trims to a third."""
-        assert self._backend().supports_size is False
+        assert self._backend(model=self.FLUX).supports_size is False
 
     def test_sdxl_is_size_aware(self):
-        backend = self._backend(
-            model="@cf/stabilityai/stable-diffusion-xl-base-1.0")
+        assert self._backend().supports_size is True
+
+    def test_the_default_model_can_be_sized(self):
+        """The whole point of paying: flux returns a square that the cover
+        crop cuts back to 576x1024, which is what the FREE backend gives."""
+        backend = self._backend()
+        assert "stable-diffusion-xl" in backend.model
         assert backend.supports_size is True
+
+    def test_a_nine_by_sixteen_frame_gets_a_trained_portrait_bucket(self):
+        """Not 1080x1920, and not 1024x1024.
+
+        The old code sent min(1024, ...), producing a square; asking for the
+        frame size outright is outside SDXL's trained buckets and duplicates
+        the subject. 768x1344 is a real bucket at very nearly 9:16.
+        """
+        assert self._backend()._bucket(1080, 1920) == (768, 1344)
+        assert self._backend()._bucket(1920, 1080) == (1344, 768)
+        assert self._backend()._bucket(1080, 1080) == (1024, 1024)
+
+    def test_the_portrait_bucket_beats_the_keyless_cap(self):
+        w, h = self._backend()._bucket(1080, 1920)
+        assert w * h > 576 * 1024 * 1.5      # keyless is capped at 0.59 MP
+
+    def test_sdxl_uses_num_steps_and_a_negative_prompt(self):
+        """SDXL's parameter is `num_steps`; only flux takes `steps`."""
+        sent = {}
+        backend = self._backend()
+
+        class _Resp:
+            status_code = 200
+            content = bytes([255, 216, 255])
+            headers = {"content-type": "image/jpeg"}
+
+            def json(self):
+                return {}
+
+            def raise_for_status(self):
+                return None
+
+        class _Client:
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *a):
+                return False
+
+            def post(self_inner, url, json=None, headers=None):
+                sent.update(json or {})
+                return _Resp()
+
+        import engine.visuals.ai_image as mod
+        real = mod.httpx.Client
+        mod.httpx.Client = lambda *a, **k: _Client()
+        try:
+            backend.fetch("a cat", width=1080, height=1920, seed=5)
+        finally:
+            mod.httpx.Client = real
+        assert sent.get("num_steps") == backend.steps
+        assert "steps" not in sent
+        assert sent["width"], sent["height"] == (768, 1344)
+        assert "watermark" in sent.get("negative_prompt", "")
 
     def test_steps_default_to_the_documented_value(self):
         """Neurons are charged per step, so this sets the daily image count."""
-        assert self._backend().steps == 4
+        assert self._backend().steps == 8                    # SDXL
+        assert self._backend(model=self.FLUX, steps=4).steps == 4
 
-    def test_steps_are_clamped_to_the_ceiling(self):
-        assert self._backend(steps=99).steps == 8
+    def test_steps_are_clamped_to_each_models_own_ceiling(self):
+        """flux is a distilled model and stops at 8; SDXL allows 20."""
+        assert self._backend(model=self.FLUX, steps=99).steps == 8
+        assert self._backend(steps=99).steps == 20
         assert self._backend(steps=0).steps == 1
 
     def test_credentials_are_required(self):

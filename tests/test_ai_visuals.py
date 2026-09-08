@@ -208,8 +208,34 @@ class TestFailureHandling:
 
 
 class TestBackendSelection:
-    def test_the_default_is_keyless(self):
+    def test_the_default_is_auto(self):
+        """auto exists because the keyless backend is measurably unfit and
+        nobody had a reason to edit a config line to escape it."""
+        assert load_config().get("visuals.ai_image_backend") == "auto"
+
+    def test_auto_degrades_to_keyless_when_nothing_is_configured(
+            self, monkeypatch):
+        for name in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"):
+            monkeypatch.delenv(name, raising=False)
         assert build_backend(load_config()).id == "pollinations"
+
+    def test_auto_never_picks_huggingface(self, monkeypatch):
+        """A token proves nothing about remaining credit.
+
+        The HF free credit is a one-off that answers 402 after roughly seven
+        images, so auto-selecting it opens every job with a failed call. It
+        stays available under its own name.
+        """
+        for name in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("HF_API_TOKEN", "hf_probe_token")
+        assert build_backend(load_config()).id == "pollinations"
+
+    def test_auto_prefers_cloudflare_when_its_credentials_exist(
+            self, monkeypatch):
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
+        assert build_backend(load_config()).id == "cloudflare"
 
     def test_huggingface_without_a_token_degrades_instead_of_failing(
             self, monkeypatch):

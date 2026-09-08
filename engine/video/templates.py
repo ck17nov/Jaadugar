@@ -53,6 +53,17 @@ class StyleTemplate:
     contrast: float = 1.045
     saturation: float = 1.07
     visual_style_suffix: str = ""          # appended to every image prompt
+    # What ONE `visual_prompt` should describe, in the script writer's words.
+    #
+    # This was a single hard-coded sentence asking for "a literal,
+    # photographable subject, camera framing and lighting". For a template
+    # that draws its images that is the wrong brief twice over: it asks the
+    # writer for a photograph, and it asks for camera language - focal
+    # length, depth of field - that an illustration has no use for. The
+    # writer then hands the image model a photographic brief with an
+    # illustration suffix stapled on, and the two fight.
+    image_brief: str = ("a literal, photographable subject, camera framing "
+                        "and lighting")
     music_mood: str = "cinematic"
     # Generate the images instead of searching stock libraries.
     #
@@ -135,6 +146,10 @@ TEMPLATES: dict[str, StyleTemplate] = {
         visual_style_suffix=("2D illustrated storybook scene, clean line art, "
                              "flat warm colours, hand-painted background, "
                              "consistent art style"),
+        image_brief=("one drawn moment: WHO is in frame, WHAT they are doing, "
+                     "WHERE they are, and the time of day. Name the people by "
+                     "the names used in the narration so the same characters "
+                     "recur. No camera or lens language"),
         prefer_ai=True,
         music_mood="sombre",
     ),
@@ -148,6 +163,44 @@ TEMPLATES: dict[str, StyleTemplate] = {
         contrast=1.07, saturation=1.12,
         visual_style_suffix="bold graphic composition, strong subject separation",
         music_mood="tech",
+    ),
+    "ILLUSTRATED_EXPLAINER": StyleTemplate(
+        name="ILLUSTRATED_EXPLAINER",
+        description=("Long-form illustrated narration. One drawn scene held "
+                     "for a long beat, no captions."),
+        # 14 seconds, and that is not a typo.
+        #
+        # Measured off the 34-minute nostalgia video this template exists to
+        # match: it holds a single drawn frame for 12 to 16 seconds while the
+        # narrator talks over it, and the only movement is a slow push. At the
+        # 6s of STORYTELLING a half-hour video needs 340 images, which at the
+        # keyless generator's 8-45s per image is hours of generation and a
+        # near-certain rate limit. At 14s it needs 145, and - more to the
+        # point - it looks like the reference instead of a montage.
+        scene_seconds=14.0, visual_frequency=0.5, words_per_second=2.3,
+        font_scale=0.92, uppercase=False,
+        # No captions at all.
+        #
+        # The reference videos carry none: the picture is the whole frame and
+        # the voice does the work. Burnt-in subtitles over a held illustration
+        # are the thing that makes this format look like an automated upload.
+        caption_style="none",
+        highlight_color="&H00B0B0FF", outline=6, safe_bottom=0.16,
+        # A held frame wants the gentlest possible cut between shots.
+        transition="fade", transition_duration=0.9,
+        motion_cycle=["zoom_in", "pan_left", "zoom_in", "pan_right"],
+        kenburns=True,
+        contrast=1.02, saturation=1.05,
+        visual_style_suffix=("cel-shaded 2D animation still, soft painted "
+                             "background, warm nostalgic palette, gentle rim "
+                             "light, consistent character design"),
+        image_brief=("one held frame from an animated film: WHO is in it, "
+                     "WHAT they are doing, WHERE, and the light. Name people "
+                     "by the names in the narration. Compose it to be looked "
+                     "at for fifteen seconds - depth, a foreground and a "
+                     "background. No camera or lens language"),
+        prefer_ai=True,
+        music_mood="sombre",
     ),
     "MYSTERY": StyleTemplate(
         name="MYSTERY",
@@ -183,6 +236,10 @@ TEMPLATES: dict[str, StyleTemplate] = {
         visual_style_suffix=("gentle children's storybook illustration, "
                              "soft rounded shapes, warm friendly colours, "
                              "hand-drawn picture book art, nothing scary"),
+        image_brief=("one picture-book page: the named character, what they "
+                     "are doing right now, and where. Keep it to one or two "
+                     "characters and one clear action a small child can read "
+                     "at a glance. No camera or lens language"),
         music_mood="playful",
     ),
     "KIDS_LEARNING": StyleTemplate(
@@ -343,6 +400,8 @@ def apply_to_profile(profile: NicheProfile,
     profile.music_mood = template.music_mood
     if template.visual_style_suffix:
         profile.visual_style = template.visual_style_suffix
+    if template.image_brief:
+        profile.image_brief = template.image_brief
     return profile
 
 

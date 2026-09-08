@@ -51,6 +51,11 @@ class NicheProfile:
     tone: str = "curious, confident, plain-spoken"
     vocabulary: str = "everyday words, no jargon unless explained in one clause"
     visual_style: str = "clean cinematic photography, high contrast, single clear subject"
+    # What one `visual_prompt` should describe. Set from the template, which
+    # is the thing that knows whether these images will be photographed or
+    # drawn; see StyleTemplate.image_brief.
+    image_brief: str = ("a literal, photographable subject, camera framing "
+                        "and lighting")
     pacing: str = "fast"                     # fast | medium | calm
     hook_style: str = "curiosity gap in the first sentence"
     cta_style: str = "one short line, no begging"

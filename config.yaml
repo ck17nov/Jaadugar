@@ -220,11 +220,28 @@ visuals:
   #                   returns a SQUARE image, which a 9:16 crop then trims to a
   #                   third of the frame. Use the sdxl model below for Shorts
   #                   if that shows.
-  ai_image_backend: pollinations
-  cloudflare_model: "@cf/black-forest-labs/flux-1-schnell"
+  # auto = the best backend whose credentials are present: Cloudflare
+  # Workers AI first, then Hugging Face, then the keyless fallback. The
+  # keyless one caps at 0.59 MP and ignores the requested art style
+  # (measured - see engine/visuals/ai_image.py), so leaving this on "auto"
+  # means adding Cloudflare credentials is the only step needed to fix
+  # image quality.
+  ai_image_backend: auto
+  # SDXL rather than flux-1-schnell, deliberately.
+  #
+  # flux gives a better image per step but has NO width/height parameter, so
+  # it returns a square that the cover crop cuts back to 576x1024 - the exact
+  # resolution the free keyless backend already gives away, meaning the
+  # upgrade would buy nothing. SDXL accepts a size (documented 256-2048) and
+  # is asked for its trained 768x1344 portrait bucket: 1.03 MP at very nearly
+  # 9:16, which halves the upscale. It also accepts a negative prompt, the
+  # only thing that reliably removes watermarks and mangled hands.
+  cloudflare_model: "@cf/stabilityai/stable-diffusion-xl-base-1.0"
   # Neurons are charged per step, so this trades daily allowance for detail.
   # 4 is the documented default for this distilled model and 8 the ceiling.
-  cloudflare_steps: 4
+  # SDXL allows up to 20; 8 is the low end of useful and keeps the daily
+  # neuron allowance good for roughly 70 images.
+  cloudflare_steps: 8
   gemini_image_model: gemini-3.1-flash-image
   # Used by the huggingface backend. Ignored by pollinations.
   ai_image_model: black-forest-labs/FLUX.1-schnell

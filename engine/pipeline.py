@@ -597,7 +597,19 @@ class Pipeline:
         bible = self._character_bible(job_dir, script)
 
         assets = self._retry("visuals", lambda: self.visual_engine.generate(
-            scenes, job_dir / "assets", style=request.style,
+            # The ART DIRECTION, not the tone.
+            #
+            # This passed `request.style`, which is one of the six phrases in
+            # the app's Style dropdown - "fast-paced, curiosity-driven",
+            # "gentle and simple (for young children)". Those describe PACING
+            # and are the right input for the script writer. None of them
+            # describes a picture, and every one of them landed in the
+            # dedicated art-direction slot of every image prompt, diluting the
+            # template's own look with a phrase the model cannot draw.
+            #
+            # `profile.visual_style` is what the template set for exactly this
+            # purpose (templates.py apply_to_profile).
+            scenes, job_dir / "assets", style=profile.visual_style,
             made_for_kids=profile.made_for_kids, width=w, height=h,
             durations=durations, bible=bible), job)
 

@@ -71,13 +71,30 @@ _UA = {"User-Agent": "AutoTubeAI/0.1 (+https://github.com/local/autotube-ai)"}
 # extra clause dilutes the scene description, which is the part that matters.
 _CONSTRAINTS = "no text, no watermark, no captions, no signature"
 
-_KIDS_CONSTRAINTS = "gentle, friendly, nothing frightening"
+# Child-directed, and phrased for the failure that actually happened.
+#
+# This was "gentle, friendly, nothing frightening", and a bedtime-story prompt
+# came back as an adult woman in a slip dress. The generator will not honour a
+# vague reassurance, so the subject and the clothing are now stated outright.
+# It is still the character bible's explicit ages that do most of the work.
+_KIDS_CONSTRAINTS = ("gentle, friendly, nothing frightening, suitable for "
+                     "young children, characters fully and modestly clothed, "
+                     "no adult themes")
 
 # Fallback when the template supplies no style. Illustration rather than
 # photography: an unstyled AI photograph looks worse than real stock, whereas
 # an unstyled AI illustration is at least coherent.
 _DEFAULT_STYLE = ("2D illustration, clean line art, flat colours, "
                   "soft natural light")
+
+# For backends that accept a negative prompt. Every item here is something
+# that was actually observed in output and could not be removed by asking
+# nicely in the positive prompt: watermarks, mangled hands, and the soft
+# airbrushed look that reads as machine-made.
+_NEGATIVE = ("watermark, signature, text, caption, logo, extra limbs, "
+             "extra fingers, deformed hands, deformed face, blurry, "
+             "low resolution, jpeg artefacts, duplicated subject, "
+             "two heads, cropped head, airbrushed, oversaturated")
 
 
 def average_hash(path: Path, size: int = 8) -> int:
@@ -102,16 +119,73 @@ def hamming(a: int, b: int) -> int:
     return bin(a ^ b).count("1")
 
 
-class PollinationsBackend:
-    """Keyless and free. The default, and the reason this costs nothing.
+def _trim_bottom(path: Path, fraction: float) -> None:
+    """Cut a strip off the bottom of an image, in place.
 
-    Reports one model (`sana`) and accepts others by silently mapping them, so
-    the model name here is nearly cosmetic. Painterly house style; see note 4
-    in the module docstring.
+    For provider watermarks. Re-saved at high quality because the result is
+    about to be upscaled several times over and this is not the place to add
+    another generation of JPEG loss.
+    """
+    fraction = max(0.0, min(fraction, 0.2))
+    if fraction <= 0:
+        return
+    try:
+        with Image.open(path) as raw:
+            img = raw.convert("RGB")
+            keep = int(img.height * (1.0 - fraction))
+            if keep < 16:
+                return
+            img.crop((0, 0, img.width, keep)).save(
+                path, "JPEG", quality=95, subsampling=1)
+    except Exception as exc:                    # noqa: BLE001
+        # A failed cosmetic crop must not lose the image.
+        log_event("VISUAL", "could not trim the provider watermark",
+                  error=str(exc)[:120])
+
+
+class PollinationsBackend:
+    """Keyless and free, and the LAST RESORT rather than the default.
+
+    Measured against the live anonymous endpoint on 2026-09-08, because the
+    images it returns were the standing complaint about this app and it was
+    worth knowing exactly what it can and cannot do:
+
+    1. HARD 0.59 MEGAPIXEL CAP. It honours the aspect ratio of the size you
+       ask for and then scales to a fixed 589,824-pixel budget: 1080x1920 came
+       back 576x1024, 1024x1024 came back 768x768, 832x1216 came back 635x928.
+       A 1080x1920 frame is 2.07 MP, so every image is upscaled at least 3.5x
+       by area - 4.9x once the Ken Burns oversize is included. That is the
+       whole of the "face is blurry" complaint and no filter can undo it.
+
+    2. THE `model` PARAMETER IS IGNORED. flux, sana, turbo, flux-realism,
+       flux-anime, sdxl and dreamshaper were requested with one prompt and one
+       seed and returned SEVEN BYTE-IDENTICAL images (sha256 b691f0b7ca2f16e0).
+       There is no model choice on this tier, so `pollinations_model` below is
+       decorative.
+
+    3. IT IGNORES ART DIRECTION. Asked for "flat 2D cel-shaded illustration,
+       thick clean outlines, flat colour fills, no gradients, no photorealism"
+       it returned soft airbrushed semi-realism, which is what it returns for
+       everything. The style suffix a template writes cannot reach it.
+
+    4. IT IGNORES `nologo=true` AND "no watermark". Output carries a watermark
+       in the bottom-right corner, which is why `watermark_bottom` exists.
+
+    5. IT DISREGARDS THE CHILD-DIRECTED CONSTRAINTS. A bedtime-story prompt
+       naming a small girl returned an adult woman in a slip dress. For kids
+       content that is a safety failure, not a quality one - so the character
+       bible's explicit ages are load-bearing here, not a nicety.
+
+    Kept because it needs no key and no card, and a soft picture beats no
+    video. But `build_backend` now prefers anything else that is configured.
     """
 
     id = "pollinations"
     label = "Pollinations (keyless)"
+    # Fraction of the frame height to discard before conditioning, to remove
+    # the watermark this endpoint applies whatever you ask for. Small: the
+    # stamp sits in the last ~2% of the frame.
+    watermark_bottom = 0.025
 
     def __init__(self, model: str = "sana", timeout: int = 120):
         self.model = model
@@ -345,19 +419,44 @@ class CloudflareBackend:
     SIZED_MODELS = ("stable-diffusion-xl-base-1.0", "stable-diffusion-xl-lightning",
                     "dreamshaper-8-lcm", "stable-diffusion-v1-5")
 
+    # Models that take `num_steps` (max 20) rather than flux's `steps` (max 8).
+    STEP_KEY_NUM = SIZED_MODELS
+
+    # SDXL's TRAINED ASPECT BUCKETS, and the reason this is not just
+    # "ask for 1080x1920".
+    #
+    # The documented range is 256-2048 per side, so 1080x1920 is accepted. But
+    # SDXL was trained at 1024x1024 and on a fixed set of aspect buckets, and
+    # generating far outside them is what produces the two-headed,
+    # duplicated-subject frames the model is notorious for at tall aspects.
+    # 768x1344 is a real bucket, is 0.571 against the 0.5625 a 9:16 frame
+    # wants - close enough that the cover crop takes under 2% - and is 1.03 MP
+    # against the keyless backend's 0.59. That halves the upscale without
+    # asking the model for a shape it cannot draw.
+    BUCKETS = ((768, 1344), (832, 1216), (1024, 1024), (1216, 832), (1344, 768))
+
     def __init__(self, account_id: str, token: str,
-                 model: str = "@cf/black-forest-labs/flux-1-schnell",
-                 steps: int = 4, timeout: int = 120):
+                 model: str = "@cf/stabilityai/stable-diffusion-xl-base-1.0",
+                 steps: int = 8, timeout: int = 120):
         self.account_id = account_id
         self.token = token
         self.model = model
-        # flux-1-schnell is a distilled model: 4 is the documented default and
-        # 8 the ceiling. Kept at 4 because neurons are charged per step - each
-        # extra step is ~10 of the 10,000 a day, so 6 steps costs a third of
-        # the daily image count for a difference this pipeline then downscales
-        # away anyway.
-        self.steps = max(1, min(8, int(steps)))
+        # Clamped to whatever THIS model allows: flux-1-schnell is a distilled
+        # model and stops at 8, SDXL takes up to 20. Neurons are charged per
+        # step (9.6 of the daily 10,000 each on flux), so the default is the
+        # low end of useful rather than the ceiling.
+        self.steps = max(1, min(20 if self._num_steps_model(model) else 8,
+                                int(steps)))
         self.timeout = timeout
+
+    @staticmethod
+    def _num_steps_model(model: str) -> bool:
+        return any(name in model for name in CloudflareBackend.STEP_KEY_NUM)
+
+    def _bucket(self, width: int, height: int) -> tuple[int, int]:
+        """The trained bucket closest in aspect to the frame we are filling."""
+        target = width / max(height, 1)
+        return min(self.BUCKETS, key=lambda wh: abs(wh[0] / wh[1] - target))
 
     def available(self) -> bool:
         return bool(self.account_id and self.token and self.model)
@@ -368,12 +467,26 @@ class CloudflareBackend:
 
     def fetch(self, prompt: str, *, width: int, height: int, seed: int) -> bytes:
         import base64
-        body: dict = {"prompt": prompt, "steps": self.steps}
+        body: dict = {"prompt": prompt}
+        if self._num_steps_model(self.model):
+            body["num_steps"] = self.steps
+        else:
+            body["steps"] = self.steps
         if self.supports_size:
-            # These models cap at 1024 per side and want multiples of 8.
-            body["width"] = min(1024, width - width % 8)
-            body["height"] = min(1024, height - height % 8)
+            # Snap to a trained bucket rather than passing the frame size
+            # through. This used to send min(1024, ...), which turned a
+            # 1080x1920 request into 1024x1024 - a square, which the cover
+            # crop then cut back to 576x1024. That is EXACTLY the resolution
+            # the keyless backend gives away for free, so the paid-for
+            # upgrade bought nothing. Found by reading the model card: the
+            # real ceiling is 2048, not 1024.
+            body["width"], body["height"] = self._bucket(width, height)
             body["seed"] = seed
+            # The one reliable lever on this model, and the keyless backend
+            # has no equivalent: state what must NOT appear. Watermarks and
+            # photo-realism are both things the prompt alone failed to
+            # suppress elsewhere.
+            body["negative_prompt"] = _NEGATIVE
         url = f"{self.BASE}{self.account_id}/ai/run/{self.model}"
         with httpx.Client(timeout=self.timeout) as client:
             resp = client.post(url, json=body, headers={
@@ -409,20 +522,66 @@ class CloudflareBackend:
         return base64.b64decode(image)
 
 
+def _cloudflare(cfg):
+    return CloudflareBackend(
+        account_id=cfg.secret("CLOUDFLARE_ACCOUNT_ID"),
+        token=cfg.secret("CLOUDFLARE_API_TOKEN"),
+        model=str(cfg.get("visuals.cloudflare_model",
+                          "@cf/black-forest-labs/flux-1-schnell")),
+        steps=int(cfg.get("visuals.cloudflare_steps", 6)))
+
+
+def _huggingface(cfg):
+    return HuggingFaceBackend(
+        model=str(cfg.get("visuals.ai_image_model",
+                          "black-forest-labs/FLUX.1-schnell")),
+        token=cfg.secret("HF_API_TOKEN"))
+
+
 def build_backend(cfg) -> object:
     """Pick a backend from config, falling back to the keyless one.
 
     Falls back rather than failing: a missing HF token should degrade to free
     generation, not stop the job.
+
+    "auto" is the default and means "the best one that is actually
+    configured", which exists because the keyless backend is measurably
+    unfit (see PollinationsBackend) and the difference between an unusable
+    video and a good one was a config line nobody had a reason to edit.
+    Dropping CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN into the
+    environment is now the whole of the upgrade.
     """
-    wanted = str(cfg.get("visuals.ai_image_backend", "pollinations")).lower()
+    wanted = str(cfg.get("visuals.ai_image_backend", "auto")).lower()
+
+    if wanted in ("auto", ""):
+        # Cloudflare only, and Hugging Face deliberately NOT in this chain.
+        #
+        # `available()` can see a token but cannot see whether any credit is
+        # left behind it, and the HF Inference Providers free credit is a
+        # one-off that this project has already spent - it answers 402 after
+        # about seven images. Auto-selecting it means every job opens with a
+        # guaranteed failed call before degrading. Naming "huggingface"
+        # explicitly still works, for when there is credit to spend.
+        for build in (_cloudflare,):
+            try:
+                backend = build(cfg)
+            except Exception as exc:            # noqa: BLE001
+                log_event("VISUAL", "could not construct an image backend",
+                          error=str(exc)[:140])
+                continue
+            if backend.available():
+                log_event("VISUAL", "auto-selected an image backend",
+                          backend=backend.id, model=getattr(backend, "model", ""))
+                return backend
+        log_event("VISUAL", "no image credentials configured, falling back to "
+                  "keyless generation - images will be soft and will ignore "
+                  "the requested art style",
+                  fix="set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN")
+        return PollinationsBackend(
+            model=str(cfg.get("visuals.pollinations_model", "sana")))
+
     if wanted == "cloudflare":
-        backend = CloudflareBackend(
-            account_id=cfg.secret("CLOUDFLARE_ACCOUNT_ID"),
-            token=cfg.secret("CLOUDFLARE_API_TOKEN"),
-            model=str(cfg.get("visuals.cloudflare_model",
-                              "@cf/black-forest-labs/flux-1-schnell")),
-            steps=int(cfg.get("visuals.cloudflare_steps", 6)))
+        backend = _cloudflare(cfg)
         if backend.available():
             log_event("VISUAL", "using Cloudflare Workers AI",
                       backend=backend.id, model=backend.model,
@@ -442,10 +601,7 @@ def build_backend(cfg) -> object:
             return backend
         log_event("VISUAL", "no GEMINI_API_KEY, using keyless generation")
     if wanted == "huggingface":
-        backend = HuggingFaceBackend(
-            model=str(cfg.get("visuals.ai_image_model",
-                              "black-forest-labs/FLUX.1-schnell")),
-            token=cfg.secret("HF_API_TOKEN"))
+        backend = _huggingface(cfg)
         if backend.available():
             log_event("VISUAL", "using paid image generation",
                       backend=backend.id, model=backend.model)
@@ -507,7 +663,15 @@ class AIImageProvider:
         characters = (req.characters or "").strip()
         if characters:
             parts.append(characters)
-        parts.append(req.style.strip() or _DEFAULT_STYLE)
+        # The scene prompt may already carry the art direction: the script
+        # post-processor appends `profile.visual_style` to every
+        # `visual_prompt` it did not already find it in. Saying it twice in
+        # one prompt does not double the effect, it just pushes the scene
+        # further from the front - which is the one thing the module docstring
+        # says never to do.
+        style = req.style.strip() or _DEFAULT_STYLE
+        if style and style.lower() not in parts[0].lower():
+            parts.append(style)
         parts.append(_CONSTRAINTS)
         if req.made_for_kids:
             parts.append(_KIDS_CONSTRAINTS)
@@ -530,6 +694,12 @@ class AIImageProvider:
                                   seed=seed)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(data)
+        # Some backends stamp a logo whatever the prompt and query string say.
+        # Trimming it here rather than in condition_image keeps the knowledge
+        # of WHICH backend watermarks with the backend that does it.
+        trim = float(getattr(self.backend, "watermark_bottom", 0.0) or 0.0)
+        if trim > 0:
+            _trim_bottom(out_path, trim)
 
     def _claim(self, digest: int, scene_index: int) -> int | None:
         """Register a hash. Returns the clashing scene index, or None if new."""
