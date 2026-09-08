@@ -406,9 +406,11 @@ class ClearBody(BaseModel):
 def clear_jobs(body: ClearBody) -> dict[str, Any]:
     """Remove finished jobs from the list, and their media from disk.
 
-    Jobs still in flight or waiting for approval are never cleared, whatever
-    is asked: tidying up history should not silently abandon a render that is
-    halfway through, or throw away a video the user is about to review.
+    "Finished" means PUBLISHED, FAILED, REJECTED or CANCELLED. Anything still
+    in flight, waiting for approval, approved-but-not-yet-uploaded (READY) or
+    uploaded-and-waiting-to-go-live (SCHEDULED) is never cleared, whatever is
+    asked - tidying up history must not throw away a video that has not been
+    sent yet, or forget one that is about to publish.
     """
     db = _db()
     cutoff = (time.time() - body.older_than_days * 86400.0

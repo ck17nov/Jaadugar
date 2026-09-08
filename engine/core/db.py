@@ -329,11 +329,20 @@ class Database:
         user: clearing the dashboard should tidy up history, not silently
         abandon a render that is halfway through.
         """
+        # READY and SCHEDULED are not history, and leaving them out of this
+        # tuple was data loss. READY means approved and rendered with the
+        # upload still to happen, so clearing it threw away the video the
+        # upload was about to send. SCHEDULED means already uploaded with a
+        # publishAt, so the media is spare but the ROW is the only record that
+        # something is going live - clearing it makes the Schedule tab forget
+        # a video that will still publish.
         active = (JobStatus.IDEA.value, JobStatus.RESEARCH.value,
                   JobStatus.SCRIPT.value, JobStatus.VOICE.value,
                   JobStatus.VISUALS.value, JobStatus.RENDERING.value,
                   JobStatus.QUALITY_CHECK.value,
-                  JobStatus.AWAITING_APPROVAL.value)
+                  JobStatus.AWAITING_APPROVAL.value,
+                  JobStatus.READY.value,
+                  JobStatus.SCHEDULED.value)
         doomed: list[VideoJob] = []
         for job in self.list_jobs(limit=5000):
             if job_ids is not None and job.job_id not in job_ids:

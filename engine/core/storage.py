@@ -50,8 +50,22 @@ RECLAIM_ON_SIGHT = frozenset({
     JobStatus.FAILED.value,
 })
 
-# The one state that must never be touched automatically.
-NEVER_RECLAIM = frozenset({JobStatus.AWAITING_APPROVAL.value})
+# States whose media must never be deleted automatically.
+#
+# READY was missing, and that was data loss with a clear reproduction: approve
+# a video, and it moves to READY - rendered, approved, upload not yet done.
+# READY is not in RECLAIM_ON_SIGHT so nothing freed it immediately, but it was
+# not protected either, so both the age sweep and the dashboard's Clear button
+# would delete its video.mp4. The upload then had nothing to send, which
+# presents as "publish does nothing" and as a published video with no
+# thumbnail. Found in the server log: ten reclaims freeing 987 MB immediately
+# before one "jobs cleared count=10".
+#
+# SCHEDULED is deliberately NOT here: it has already been uploaded, so its
+# local media is genuinely spare (see RECLAIM_ON_SIGHT). Its database ROW
+# still has to survive, which is a separate guard in db.delete_jobs.
+NEVER_RECLAIM = frozenset({JobStatus.AWAITING_APPROVAL.value,
+                           JobStatus.READY.value})
 
 
 @dataclass
