@@ -90,7 +90,13 @@ def needs_translation(narration_language: str, caption_language: str) -> bool:
 
 def translate_scenes(scenes: list[Scene], *, target: str, router: Any,
                      max_chars: int = 90, batch: int = 12) -> int:
-    """Fill `scene.caption_text` for every scene. Returns how many were set.
+    """Fill EMPTY `scene.caption_text`. Returns how many were set.
+
+    Scenes that already carry a caption are left alone. That makes this
+    idempotent, and it is what lets a banked script keep the caption its
+    author wrote: those are hand-authored translations of that exact scene,
+    and machine-translating over them would be a straight downgrade - the
+    Hindi captions being wrong is the reason the bank exists.
 
     Batched because one call per scene on a 300-scene long-form video would be
     300 round trips against a rate-limited free tier.
@@ -102,9 +108,16 @@ def translate_scenes(scenes: list[Scene], *, target: str, router: Any,
     """
     if router is None or not scenes:
         return 0
+    pending = [s for s in scenes if not (s.caption_text or "").strip()]
+    authored = len(scenes) - len(pending)
+    if authored:
+        log_event("CAPTION", "keeping captions that came with the script",
+                  authored=authored, translating=len(pending))
+    if not pending:
+        return 0
     filled = 0
-    for start in range(0, len(scenes), batch):
-        chunk = scenes[start:start + batch]
+    for start in range(0, len(pending), batch):
+        chunk = pending[start:start + batch]
         numbered = "\n".join(
             f"{i + 1}. {scene.narration.strip()}"
             for i, scene in enumerate(chunk) if scene.narration.strip())
@@ -138,7 +151,7 @@ def translate_scenes(scenes: list[Scene], *, target: str, router: Any,
                       missing=missing, of=len(chunk), provider=provider)
     if filled:
         log_event("CAPTION", "captions translated", target=target,
-                  scenes=filled, of=len(scenes))
+                  scenes=filled, of=len(pending))
     return filled
 
 

@@ -13,7 +13,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from .models import JobStatus, VideoJob
 
@@ -169,6 +169,38 @@ CREATE TABLE IF NOT EXISTS automations (
 );
 CREATE INDEX IF NOT EXISTS ix_automations_enabled ON automations(enabled, created_at);
 
+-- The script bank: pre-written, human-reviewed scripts.
+--
+-- The JSONL file is the DELIVERY format; this table is the runtime. Keeping
+-- state (used_at) in the file would mean rewriting a 300-line file on every
+-- render and losing the state on any re-import, so the file carries content
+-- and the table carries content plus state.
+--
+-- `used_at` rather than a "where we got to" pointer: a pointer breaks the
+-- moment an entry is deleted or the file is reordered, and a timestamp also
+-- answers "which script became which video, and when".
+CREATE TABLE IF NOT EXISTS bank_entries (
+    entry_id     TEXT PRIMARY KEY,
+    grp          TEXT NOT NULL,
+    topic        TEXT NOT NULL DEFAULT '',
+    shape        TEXT NOT NULL DEFAULT 'narrative',
+    language     TEXT NOT NULL DEFAULT 'en',
+    video_format TEXT NOT NULL DEFAULT 'SHORT',
+    made_for_kids INTEGER DEFAULT 0,
+    title        TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL DEFAULT '',
+    est_seconds  REAL DEFAULT 0,
+    imported_at  REAL NOT NULL,
+    used_at      REAL DEFAULT 0,
+    used_job_id  TEXT DEFAULT '',
+    payload      TEXT NOT NULL
+);
+-- The selection query is "next unused entry for this group+language+format,
+-- oldest first", so that is the index.
+CREATE INDEX IF NOT EXISTS ix_bank_pick
+    ON bank_entries(grp, language, video_format, used_at, imported_at);
+CREATE INDEX IF NOT EXISTS ix_bank_hash ON bank_entries(content_hash);
+
 CREATE TABLE IF NOT EXISTS service_configs (
     name        TEXT PRIMARY KEY,
     enabled     INTEGER DEFAULT 1,
@@ -208,6 +240,29 @@ class Database:
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
             self._conn.commit()
+        self._add_missing_columns()
+
+    # ---- migration ---------------------------------------------------
+    #
+    # CREATE TABLE IF NOT EXISTS does nothing to a table that already exists,
+    # so a column added to SCHEMA never reaches a database created before it.
+    # The failure is a runtime "no such column" on a machine that has been
+    # running for a while and never on a fresh one, which is the worst
+    # possible place for it to surface.
+    ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+        ("bank_entries", "topic", "TEXT NOT NULL DEFAULT ''"),
+    )
+
+    def _add_missing_columns(self) -> None:
+        for table, column, spec in self.ADDED_COLUMNS:
+            with self._lock:
+                have = {r["name"] for r in
+                        self._conn.execute(f"PRAGMA table_info({table})")}
+                if not have or column in have:
+                    continue        # table absent (fresh DB) or already there
+                self._conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {spec}")
+                self._conn.commit()
 
     # ---- low level ---------------------------------------------------
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
@@ -315,6 +370,134 @@ class Database:
             "SELECT COUNT(*) AS n FROM video_jobs WHERE automation_id=?",
             (automation_id,))
         return int(row["n"]) if row else 0
+
+    # ------------------------------------------------------------------
+    # Script bank
+    # ------------------------------------------------------------------
+    def save_bank_entry(self, entry) -> None:
+        """Insert or replace one entry, PRESERVING its used state.
+
+        Re-importing a corrected file must not un-use scripts that have
+        already become videos, or the same story publishes twice.
+        """
+        existing = self.query_one(
+            "SELECT used_at, used_job_id FROM bank_entries WHERE entry_id=?",
+            (entry.entry_id,))
+        used_at = float(existing["used_at"]) if existing else 0.0
+        used_job = str(existing["used_job_id"]) if existing else ""
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO bank_entries (entry_id, grp, topic, "
+                "shape, language, video_format, made_for_kids, title, "
+                "content_hash, est_seconds, imported_at, used_at, "
+                "used_job_id, payload) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (entry.entry_id, entry.group, entry.topic, entry.shape,
+                 entry.language, entry.video_format,
+                 int(bool(entry.made_for_kids)),
+                 entry.title, entry.content_hash, float(entry.estimated_seconds),
+                 time.time(), used_at, used_job,
+                 json.dumps(entry.to_dict(), ensure_ascii=False)))
+            self._conn.commit()
+
+    def bank_entries(self, *, group: str = "", topic: str = "",
+                     language: str = "", video_format: str = "",
+                     unused_only: bool = False,
+                     limit: int = 5000) -> list[dict]:
+        """Raw bank rows, newest-imported last."""
+        clauses, params = [], []
+        if group:
+            clauses.append("grp=?")
+            params.append(group.lower())
+        if topic:
+            # Same semantics as claim_bank_entry: a topic-less entry is
+            # group-wide and counts towards every topic. Listing and claiming
+            # disagreeing about what is available would make the status
+            # report a lie.
+            clauses.append("(topic='' OR topic=?)")
+            params.append(topic.lower())
+        if language:
+            clauses.append("language=?")
+            params.append(language.lower())
+        if video_format:
+            clauses.append("video_format=?")
+            params.append(video_format.upper())
+        if unused_only:
+            clauses.append("used_at<=0")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = self.query(
+            f"SELECT * FROM bank_entries{where} ORDER BY imported_at LIMIT ?",
+            (*params, limit))
+        return [dict(r) for r in rows]
+
+    def claim_bank_entry(self, *, group: str, language: str,
+                         video_format: str, job_id: str,
+                         topics: Sequence[str] = (),
+                         near_seconds: float = 0.0,
+                         tolerance: float = 0.25) -> dict | None:
+        """Take the next unused entry and mark it used, atomically.
+
+        Atomic because two automations firing at the same minute would
+        otherwise both take entry #1 and publish the same story twice. The
+        UPDATE carries `used_at<=0` in its WHERE, so exactly one of them wins.
+
+        `near_seconds` makes the Create screen's duration field a FILTER
+        rather than a target: ask for 45s and you get a script whose own
+        length is within tolerance of that, instead of a script stretched to
+        fit by the speaking-rate re-fit.
+        """
+        clauses = ["grp=?", "language=?", "video_format=?", "used_at<=0"]
+        params: list = [group.lower(), language.lower(), video_format.upper()]
+        wanted = [t.strip().lower() for t in topics if t and t.strip()]
+        if wanted:
+            # An entry with no topic is group-wide and matches any topic
+            # selection, so a bank imported before topics existed keeps
+            # working instead of becoming unreachable.
+            marks = ",".join("?" for _ in wanted)
+            clauses.append(f"(topic='' OR topic IN ({marks}))")
+            params += wanted
+        if near_seconds > 0:
+            low = near_seconds * (1.0 - tolerance)
+            high = near_seconds * (1.0 + tolerance)
+            clauses.append("est_seconds BETWEEN ? AND ?")
+            params += [low, high]
+        where = " AND ".join(clauses)
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT * FROM bank_entries WHERE {where} "
+                f"ORDER BY imported_at LIMIT 1", tuple(params)).fetchone()
+            if row is None:
+                return None
+            updated = self._conn.execute(
+                "UPDATE bank_entries SET used_at=?, used_job_id=? "
+                "WHERE entry_id=? AND used_at<=0",
+                (time.time(), job_id, row["entry_id"]))
+            self._conn.commit()
+            if updated.rowcount != 1:
+                return None                 # somebody else claimed it first
+        return dict(row)
+
+    def release_bank_entry(self, entry_id: str) -> None:
+        """Put an entry back in the pool.
+
+        Called when a claimed script fails to render: the script is fine, the
+        render was not, and burning a curated entry on a transient ffmpeg
+        failure is pure loss.
+        """
+        with self._lock:
+            self._conn.execute(
+                "UPDATE bank_entries SET used_at=0, used_job_id='' "
+                "WHERE entry_id=?", (entry_id,))
+            self._conn.commit()
+
+    def bank_counts(self) -> list[dict]:
+        """Per group/language/format: how many entries, how many left."""
+        rows = self.query(
+            "SELECT grp, language, video_format, COUNT(*) AS total, "
+            "SUM(CASE WHEN used_at<=0 THEN 1 ELSE 0 END) AS unused "
+            "FROM bank_entries GROUP BY grp, language, video_format "
+            "ORDER BY grp, language, video_format")
+        return [dict(r) for r in rows]
 
     def automation_finished_runs(self, automation_id: str) -> int:
         """How many of an automation's videos have reached a final state.

@@ -28,13 +28,14 @@ from .content.retention import analyze as analyze_retention, auto_improve
 from .content.script import ScriptGenerator
 from .core.config import Config, load_config
 from .core.db import Database
+from .core.groups import group_for_topic
 from .core.logging import log_event, setup_logging
 from .core.models import (AutomationRequest, ContentIdea, JobStatus, Mode,
                           QualityReport, ResearchVideo, Script, VideoJob,
                           VideoMetadata)
 from .core.niche import build_profile
-from .core.util import (clamp, ensure_dir, have_ffmpeg, read_json,
-                        safe_write_json, sha1, slugify)
+from .core.util import (clamp, count_words, ensure_dir, have_ffmpeg,
+                        read_json, safe_write_json, sha1, slugify)
 from .quality.gate import QualityGate
 from .research.gaps import cluster_videos, find_gaps, research_context_block
 from .research.youtube import QuotaGuard, YouTubeResearch
@@ -315,13 +316,136 @@ class Pipeline:
                          "videos": [v.to_dict() for v in videos]})
         return videos
 
-    def stage_idea(self, job: VideoJob, request: AutomationRequest, profile,
-                   videos: list[ResearchVideo]) -> tuple[ContentIdea, str]:
-        self._advance(job, JobStatus.IDEA, "generating concepts")
+    # ------------------------------------------------------------------
+    # Script bank
+    # ------------------------------------------------------------------
+    def stage_bank(self, job: VideoJob, request: AutomationRequest):
+        """Claim a banked script for this job, or return None.
+
+        Runs before research, because a banked entry makes the research call
+        advisory rather than load-bearing: the topic, angle and hook are
+        already decided, so the only thing research still contributes is
+        title patterns and the trend snapshot in the artifacts.
+        """
+        source = (request.script_source or "live").strip().lower()
+        if source not in ("bank", "bank_first"):
+            return None
+
+        from .content import bank_use
+        group = (request.niche_group or "").strip().lower()
+        if not group:
+            found = group_for_topic(request.niche)
+            group = found.key if found else ""
+        if not group:
+            if source == "bank":
+                raise PipelineError(
+                    "bank", f"script_source=bank but {request.niche!r} does "
+                            f"not belong to a known channel group")
+            log_event("BANK", "no channel group for this niche; generating live",
+                      niche=request.niche)
+            return None
+
+        claim = bank_use.claim(
+            self.db, group=group, language=request.language,
+            video_format=request.video_format, job_id=job.job_id,
+            topics=[request.niche], near_seconds=float(request.duration_seconds),
+            require_review=bool(self.cfg.get("bank.require_review", True)))
+        if claim is None:
+            # Retry without the duration filter before giving up: a bank with
+            # only 30-second stories in it should still serve a 45-second
+            # request, since the entry's own length is what gets used anyway.
+            claim = bank_use.claim(
+                self.db, group=group, language=request.language,
+                video_format=request.video_format, job_id=job.job_id,
+                topics=[request.niche], near_seconds=0.0,
+                require_review=bool(self.cfg.get("bank.require_review", True)))
+        if claim is None:
+            counts = {f"{r['grp']}/{r['language']}/{r['video_format']}":
+                      f"{r['unused']}/{r['total']}"
+                      for r in self.db.bank_counts()}
+            if source == "bank":
+                raise PipelineError(
+                    "bank", f"no unused reviewed entry for {group}/"
+                            f"{request.language}/{request.video_format}; "
+                            f"have {counts or 'nothing'}")
+            log_event("BANK", "bank is empty for this slot; generating live",
+                      group=group, language=request.language,
+                      video_format=request.video_format, have=str(counts))
+            return None
+
+        # THE ENTRY'S OWN LENGTH WINS. The Create screen's duration is a
+        # filter when drawing from the bank, not a target: stretching or
+        # compressing a written script to hit a requested number is what the
+        # speaking-rate re-fit does, and it is audible.
+        entry_seconds = int(round(claim.entry.estimated_seconds))
+        if entry_seconds and entry_seconds != request.duration_seconds:
+            log_event("BANK", "duration taken from the banked script",
+                      requested=request.duration_seconds, using=entry_seconds,
+                      entry=claim.entry_id)
+            request.duration_seconds = entry_seconds
+        job.request = request.to_dict()
+        safe_write_json(Path(job.dir) / "bank_entry.json",
+                        claim.entry.to_dict())
+        return claim
+
+    def _release_bank(self, claim, exc: BaseException) -> None:
+        """Return a claimed entry to the pool, never masking the real error."""
+        if claim is None:
+            return
+        try:
+            from .content import bank_use
+            bank_use.release(self.db, claim, reason=str(exc)[:160])
+        except Exception as inner:              # noqa: BLE001
+            # A failure here must not replace the exception being handled -
+            # that would turn "TTS timed out" into "database is locked" and
+            # send the diagnosis in entirely the wrong direction.
+            log_event("BANK", "could not release the claimed entry",
+                      entry=getattr(claim, "entry_id", "?"),
+                      error=str(inner)[:120])
+
+    def _banked_idea(self, job: VideoJob, claim,
+                     videos: list[ResearchVideo]) -> tuple[ContentIdea, str]:
+        """The idea a claimed entry already decided.
+
+        Skipping the generation call is the point: it is one of the three
+        independent LLM views of the topic whose disagreement is what made the
+        image prompts drift from the script.
+
+        Research still runs and is still written to the artifacts - it feeds
+        title patterns at the metadata stage - it just no longer chooses the
+        subject.
+        """
+        from .content import bank_use
         clusters = cluster_videos(videos)
         gaps = find_gaps(clusters, videos)
         context = research_context_block(videos, clusters, gaps)
+
+        best = bank_use.to_idea(claim.entry)
+        self._advance(job, JobStatus.IDEA, f"banked: {best.topic[:50]}")
+        safe_write_json(Path(job.dir) / "idea.json", {
+            "selected": best.to_dict(),
+            "source": f"bank:{claim.entry_id}",
+            "all_candidates": [],
+            "clusters": [c.to_dict() for c in clusters],
+            "gaps": [g.to_dict() for g in gaps],
+        })
+        job.idea = best.to_dict()
+        log_event("IDEA", "taken from the script bank",
+                  title=best.working_title[:70], entry=claim.entry_id)
+        return best, context
+
+    def stage_idea(self, job: VideoJob, request: AutomationRequest, profile,
+                   videos: list[ResearchVideo],
+                   claim=None) -> tuple[ContentIdea, str]:
+        if claim is not None:
+            return self._banked_idea(job, claim, videos)
+
+        # ---- live generation, unchanged from before the bank existed ----
+        self._advance(job, JobStatus.IDEA, "generating concepts")
         hints = self.learner.hints()
+        clusters = cluster_videos(videos)
+        gaps = find_gaps(clusters, videos)
+        context = research_context_block(videos, clusters, gaps)
 
         ideas = self._retry("idea", lambda: self.idea_engine.generate(
             request.niche, profile, videos, clusters, gaps,
@@ -345,7 +469,10 @@ class Pipeline:
         return best, context
 
     def stage_script(self, job: VideoJob, request: AutomationRequest, profile,
-                     idea: ContentIdea, context: str) -> Script:
+                     idea: ContentIdea, context: str, claim=None) -> Script:
+        if claim is not None:
+            return self._banked_script(job, request, profile, claim)
+
         self._advance(job, JobStatus.SCRIPT, idea.topic[:60])
         hints = self.learner.hints()
 
@@ -387,6 +514,47 @@ class Pipeline:
         })
         job.script = script.to_dict()
         self.db.save_job(job)
+        return script
+
+    def _banked_script(self, job: VideoJob, request: AutomationRequest,
+                       profile, claim) -> Script:
+        """Assemble the Script from a claimed entry.
+
+        No generation, no auto_improve. The retention score is still measured
+        because it is useful to know, but it no longer edits: rewriting a
+        scene's narration would silently invalidate that scene's authored
+        caption and authored image brief, which is precisely the drift the
+        bank removes.
+        """
+        from .content import bank_use
+        entry = claim.entry
+        self._advance(job, JobStatus.SCRIPT, f"banked: {entry.title[:50]}")
+
+        script = bank_use.to_script(
+            entry, language=request.language,
+            caption_language=self._caption_language(request))
+        script.idea_id = job.idea.get("idea_id", "") if job.idea else ""
+
+        report = analyze_retention(script, profile,
+                                   target_duration=request.duration_seconds)
+        script.retention_score = report.score
+        script.retention_notes = report.notes
+
+        self.db.save_script(script, sha1(script.script))
+        safe_write_json(Path(job.dir) / "script.json", {
+            **script.to_dict(),
+            "retention_report": report.to_dict(),
+            "auto_improvements": [],
+            "bank": claim.to_dict(),
+        })
+        job.script = script.to_dict()
+        self.db.save_job(job)
+        log_event("SCRIPT", "assembled from the script bank",
+                  entry=claim.entry_id, scenes=len(script.scenes),
+                  words=count_words(script.script),
+                  captions="authored" if bank_use.has_authored_captions(entry)
+                           else "will be translated",
+                  retention=f"{report.score:.0f}/100")
         return script
 
     # ------------------------------------------------------------------
@@ -601,7 +769,7 @@ class Pipeline:
         script.scenes = [s.to_dict() for s in scenes]
         safe_write_json(job_dir / "captions_translated.json", dump(scenes))
 
-    def _character_bible(self, job_dir: Path, script: Script):
+    def _character_bible(self, job_dir: Path, script: Script, claim=None):
         """The recurring cast, or None when it would not be used.
 
         Returns None rather than an empty bible when disabled, so the visual
@@ -613,6 +781,20 @@ class Pipeline:
             # Stock photography cannot honour a character description, so
             # asking for one is a wasted call.
             return None
+        if claim is not None:
+            # A banked entry DECLARES its cast, so inferring it from the
+            # narration is both a wasted call and strictly worse: inference
+            # can miss a character the author named, and the description it
+            # invents is not the one the image briefs were written against.
+            from .content import bank_use
+            bible = bank_use.bible_for(claim.entry)
+            if bible:
+                bible.save(job_dir / "character_bible.json")
+                log_event("VISUALS", "cast taken from the banked script",
+                          characters=len(bible.characters),
+                          entry=claim.entry_id)
+                return bible
+            return None
         from .content.characters import build_bible
         scenes = script.scene_objects()
         narration = "\n".join(f"{i}. {s.narration}" for i, s in enumerate(scenes))
@@ -622,7 +804,7 @@ class Pipeline:
         return bible or None
 
     def stage_visuals(self, job: VideoJob, request: AutomationRequest, profile,
-                      script: Script) -> list:
+                      script: Script, claim=None) -> list:
         self._advance(job, JobStatus.VISUALS, f"scenes={len(script.scenes)}")
         job_dir = Path(job.dir)
         scenes = script.scene_objects()
@@ -641,7 +823,7 @@ class Pipeline:
         # factual content this is pure cost. Built once and reused for every
         # scene, because the entire point is that the descriptions do not
         # change between shots.
-        bible = self._character_bible(job_dir, script)
+        bible = self._character_bible(job_dir, script, claim)
 
         assets = self._retry("visuals", lambda: self.visual_engine.generate(
             # The ART DIRECTION, not the tone.
@@ -1079,12 +1261,17 @@ class Pipeline:
                   mode=request.mode, dry_run=self.cfg.dry_run)
         started = time.time()
 
+        # Claimed before research so the entry's own length can replace the
+        # requested duration before the niche profile's pacing is used.
+        claim = self.stage_bank(job, request)
         try:
             videos = self.stage_research(job, request, profile)
-            idea, context = self.stage_idea(job, request, profile, videos)
-            script = self.stage_script(job, request, profile, idea, context)
+            idea, context = self.stage_idea(job, request, profile, videos,
+                                            claim)
+            script = self.stage_script(job, request, profile, idea, context,
+                                       claim)
             voice, total, offsets = self.stage_voice(job, request, profile, script)
-            assets = self.stage_visuals(job, request, profile, script)
+            assets = self.stage_visuals(job, request, profile, script, claim)
             video = self.stage_render(job, request, profile, script, voice,
                                       total, offsets)
             meta, quality = self.stage_finalize(job, request, profile, idea,
@@ -1093,10 +1280,16 @@ class Pipeline:
             uploaded = self.stage_publish(
                 job, request, meta, quality,
                 fact_requires_approval=bool(fact.get("requires_approval")))
-        except PipelineError:
+        except PipelineError as exc:
+            # The script was fine; something after it was not. Put the entry
+            # back rather than burning a curated script on a transient TTS or
+            # ffmpeg failure - unlike a generated script it cannot be
+            # reproduced on demand.
+            self._release_bank(claim, exc)
             self._advance(job, JobStatus.FAILED, job.error)
             raise
         except Exception as exc:
+            self._release_bank(claim, exc)
             job.error = str(exc)[:500]
             self._advance(job, JobStatus.FAILED, job.error)
             raise PipelineError("pipeline", str(exc)) from exc

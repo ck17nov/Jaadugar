@@ -10,6 +10,9 @@
     autotube upload --job <job_id>
     autotube analytics
     autotube serve
+    autotube stories prompt --group kids --language en
+    autotube stories import batch.jsonl --group kids
+    autotube stories status
 """
 from __future__ import annotations
 
@@ -53,6 +56,9 @@ auth_app = typer.Typer(no_args_is_help=True, help="YouTube account (OAuth 2.0)."
 jobs_app = typer.Typer(no_args_is_help=True, help="Inspect and act on jobs.")
 app.add_typer(auth_app, name="auth")
 app.add_typer(jobs_app, name="jobs")
+
+from .stories_cli import stories_app                            # noqa: E402
+app.add_typer(stories_app, name="stories")
 
 console = Console()
 

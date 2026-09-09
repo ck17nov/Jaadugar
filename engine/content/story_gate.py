@@ -54,20 +54,37 @@ _RESCUERS = re.compile(
 
 _WANT = re.compile(
     r"\b(wants?|wanted|wishes|wished|needs?|needed|looking for|hoping|"
-    r"tries to reach|dreams? of)\b"
-    r"|चाहत[ीाे]|चाहिए|ढूंढ|तलाश|पाना चाहत|सपना",
+    r"tries to reach|dreams? of|"
+    # A want shown rather than named. "She had been waiting all week for that
+    # one" and "her mouth watered" are stronger writing than "she wanted it",
+    # and the keyword-only pattern scored them as no want at all.
+    r"waiting for|been waiting|mouth watered|longed?|ached to|"
+    r"had to have|could ?n[o']t wait)\b"
+    r"|चाहत[ीाे]|चाहिए|ढूंढ|तलाश|पाना चाहत|सपना|इंतज़ार|मुँह में पानी",
     re.I)
 
 _OBSTACLE = re.compile(
     r"\b(but|however|still|instead|too (high|tall|far|heavy|small)|"
-    r"could ?n[o']t|did ?n[o']t|was ?n[o']t|misses|missed|fails?|failed|"
-    r"stuck|wobbl\w*|slipp\w*)\b"
-    r"|लेकिन|मगर|फिर भी|नहीं|बहुत ऊँच|बहुत दूर|टिक नहीं",
+    r"could ?n[o']t|did ?n[o']t|was ?n[o']t|would ?n[o']t|misses|missed|"
+    r"fails?|failed|stuck|wobbl\w*|slipp\w*|"
+    # PHYSICAL failure, not just negation. A well-written scene says what
+    # happened - "the boat tipped over sideways" - rather than saying that
+    # something did not happen, and the negation-only pattern scored a story
+    # with a real failed attempt as having no obstacle at all.
+    r"tipp\w*|topple\w*|fell|spill\w*|tangl\w*|jamm\w*|refuse\w*|"
+    r"tried again|once more|nothing but)\b"
+    r"|लेकिन|मगर|फिर भी|नहीं|बहुत ऊँच|बहुत दूर|टिक नहीं|गिर|पलट",
     re.I)
 
 _PARTICIPATION = re.compile(
-    r"\b(can you|could you|will you|say it with me|try with me|"
-    r"count with me|clap|knock)\b"
+    # "<verb> with me" generally, rather than a list of three verbs.
+    #
+    # The old pattern recognised only "say it with me", "try with me" and
+    # "count with me", and the effect was visible in the output: the model
+    # reproduced the example phrasings verbatim, so a story about a kite
+    # asked the child to knock three times. A story-appropriate invitation -
+    # "blow with me, one big puff" - scored as no invitation at all.
+    r"\b(can you|could you|will you|\w+ (it )?with me|clap|knock)\b"
     r"|क्या तुम|मेरे साथ|साथ बोलो|साथ गिन",
     re.I)
 
@@ -182,14 +199,33 @@ def _shouted(text: str) -> set[str]:
             and w.strip("\"'.,!?;:()").isupper()}
 
 
+def _depossess(token: str) -> str:
+    """Strip an English possessive so "kiran's" counts as "kiran".
+
+    `_tokens` keeps the apostrophe inside a word, which is right for "don't"
+    and wrong here: a story refers to its protagonist possessively constantly
+    - "Kiran's knees ached", "Devi's stomach twisted" - and counting those as
+    a different word entirely dropped a well-written story from 50% name
+    coverage to 33% and rejected it.
+
+    Only a TRAILING apostrophe-s is removed, so "don't" and "it's" are
+    untouched.
+    """
+    if token.endswith("'s") and len(token) > 3:
+        return token[:-2]
+    if token.endswith("'") and len(token) > 2:
+        return token[:-1]
+    return token
+
+
 def _coverage(candidates: set[str], narrations: list[str]) -> tuple[str, float]:
     if not candidates or not narrations:
         return "", 0.0
     hits: Counter = Counter()
     for narration in narrations:
-        present = set(_tokens(narration))
+        present = {_depossess(t) for t in _tokens(narration)}
         for candidate in candidates:
-            if candidate in present:
+            if _depossess(candidate) in present:
                 hits[candidate] += 1
     if not hits:
         return "", 0.0

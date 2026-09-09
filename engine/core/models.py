@@ -128,6 +128,18 @@ class AutomationRequest(JsonMixin):
     publish_mode: str = "scheduled"           # scheduled | immediate
     made_for_kids: bool = False
     keywords: list[str] = field(default_factory=list)
+    # Where the script comes from.
+    #   "live"       generate it now, as every version before the bank did.
+    #   "bank"       use a pre-written, human-reviewed entry, and fail if
+    #                there is none left - a "just once" automation that
+    #                silently fell back would publish an ungated script.
+    #   "bank_first" prefer the bank, fall back to live generation. The right
+    #                default for a recurring automation, which must keep
+    #                producing after the bank runs dry.
+    script_source: str = "live"
+    # Which group's bank to draw from. Empty derives it from the niche, which
+    # is right whenever the niche is one of the group's listed topics.
+    niche_group: str = ""
     id: str = field(default_factory=lambda: new_id("auto"))
 
 
