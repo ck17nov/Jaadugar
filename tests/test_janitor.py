@@ -48,6 +48,20 @@ class TestItIsActuallyStarted:
         w.start_janitor()
         assert w.janitor is None
 
+    def test_it_announces_itself(self):
+        """A running janitor was indistinguishable from a missing one: it
+        logged only when DISABLED, and Linux does not expose Python thread
+        names, so there was no way to check from outside either."""
+        from backend.api import main as api
+        source = inspect.getsource(api.Worker.start_janitor)
+        assert 'log_event("JANITOR", "started"' in source
+
+    def test_a_quiet_tick_is_still_logged(self, worker):
+        """Logging only on a hit made a healthy quiet janitor look dead."""
+        from backend.api import main as api
+        source = inspect.getsource(api.Worker._sweep_once)
+        assert "nothing old enough to sweep" in source
+
     def test_starting_twice_does_not_start_two_threads(self, worker):
         w, _api = worker
         w.start_janitor()

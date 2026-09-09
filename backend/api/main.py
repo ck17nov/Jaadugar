@@ -340,6 +340,19 @@ class Worker:
                                             daemon=True,
                                             name="autotube-janitor")
             self.janitor.start()
+            # Say that it started, and on what schedule.
+            #
+            # It only logged when DISABLED, which meant a running janitor was
+            # indistinguishable from a missing one - and Linux does not expose
+            # Python thread names, so there was no way to check from outside
+            # either. For something that runs unattended for weeks, "is it
+            # actually on?" has to be answerable from the log.
+            log_event("JANITOR", "started",
+                      every_hours=CFG.get("storage.sweep_interval_hours", 6.0),
+                      reclaim_after_days=CFG.get("storage.reclaim_after_days",
+                                                 7.0),
+                      min_free_gb=CFG.get("storage.min_free_gb", 5.0),
+                      free_gb=f"{self._free_gb():.1f}")
 
     def _free_gb(self) -> float:
         try:
@@ -359,9 +372,18 @@ class Worker:
                       error=str(exc)[:200])
             return 0.0
         freed = sum(float(r.get("freed_mb", 0.0)) for r in results)
+        # BOTH outcomes are logged, including "nothing to do".
+        #
+        # Logging only on a hit made a healthy quiet janitor look identical to
+        # a dead one. A line every six hours is cheap and it is the only
+        # evidence the schedule is alive.
         if results:
             log_event("JANITOR", "swept old job media", reason=reason,
                       jobs=len(results), freed=f"{freed:.1f}MB",
+                      after_days=after_days,
+                      free_gb=f"{self._free_gb():.1f}")
+        else:
+            log_event("JANITOR", "nothing old enough to sweep", reason=reason,
                       after_days=after_days,
                       free_gb=f"{self._free_gb():.1f}")
         return freed
