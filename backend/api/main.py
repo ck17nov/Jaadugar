@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import queue
 import secrets
+import shutil
 import threading
 import time
 from collections import defaultdict, deque
@@ -185,6 +186,7 @@ class Worker:
     def __init__(self) -> None:
         self.queue: queue.Queue[AutomationRequest] = queue.Queue()
         self.thread: threading.Thread | None = None
+        self.janitor: threading.Thread | None = None
         self.current: str | None = None
         self.current_automation: str | None = None
         self.pipeline = None
@@ -321,6 +323,84 @@ class Worker:
             self.current = None
             self.current_automation = None
             self.queue.task_done()
+
+    # ------------------------------------------------------------------
+    # Janitor: the age-based sweep, on a schedule
+    # ------------------------------------------------------------------
+    def start_janitor(self) -> None:
+        """Start the periodic storage sweep, unless it is switched off."""
+        if not bool(CFG.get("storage.auto_sweep", True)):
+            log_event("JANITOR", "automatic sweep disabled by config",
+                      hint="storage.auto_sweep")
+            return
+        with self._lock:
+            if self.janitor and self.janitor.is_alive():
+                return
+            self.janitor = threading.Thread(target=self._janitor_loop,
+                                            daemon=True,
+                                            name="autotube-janitor")
+            self.janitor.start()
+
+    def _free_gb(self) -> float:
+        try:
+            usage = shutil.disk_usage(str(CFG.workspace))
+            return usage.free / (1024 ** 3)
+        except OSError:
+            return float("inf")
+
+    def _sweep_once(self, *, after_days: float, reason: str) -> float:
+        """One sweep. Returns megabytes freed. Never raises."""
+        try:
+            results = self._ensure_pipeline().sweep_storage(
+                after_days=after_days)
+        except Exception as exc:                # noqa: BLE001 - see docstring
+            # A janitor that can kill the process is worse than a full disk.
+            log_event("JANITOR", "sweep failed", reason=reason,
+                      error=str(exc)[:200])
+            return 0.0
+        freed = sum(float(r.get("freed_mb", 0.0)) for r in results)
+        if results:
+            log_event("JANITOR", "swept old job media", reason=reason,
+                      jobs=len(results), freed=f"{freed:.1f}MB",
+                      after_days=after_days,
+                      free_gb=f"{self._free_gb():.1f}")
+        return freed
+
+    def _janitor_loop(self) -> None:
+        interval = max(0.25, float(
+            CFG.get("storage.sweep_interval_hours", 6.0))) * 3600.0
+        normal_days = float(CFG.get("storage.reclaim_after_days", 7.0))
+        urgent_days = max(0.5, float(
+            CFG.get("storage.urgent_reclaim_after_days", 1.0)))
+        floor_gb = float(CFG.get("storage.min_free_gb", 5.0))
+
+        # A short delay before the first sweep. Startup already runs
+        # resume_pending(), and racing it to walk the same directories on two
+        # cores is pointless.
+        first = min(interval, 120.0)
+        time.sleep(first)
+
+        while True:
+            self._sweep_once(after_days=normal_days, reason="scheduled")
+
+            free = self._free_gb()
+            if free < floor_gb:
+                # Escalate. AWAITING_APPROVAL and READY are still exempt, so
+                # this cannot take a video somebody is waiting to review or
+                # upload - it takes the older debris first.
+                log_event("JANITOR", "low disk, sweeping more aggressively",
+                          free_gb=f"{free:.1f}", floor_gb=floor_gb,
+                          after_days=urgent_days)
+                self._sweep_once(after_days=urgent_days, reason="low disk")
+                still = self._free_gb()
+                if still < floor_gb:
+                    # Say so loudly rather than silently continuing to a
+                    # render that will die mid-encode.
+                    log_event("JANITOR", "STILL low on disk after sweeping - "
+                              "renders may fail; approve or reject the "
+                              "pending jobs, or run `autotube prune`",
+                              free_gb=f"{still:.1f}", floor_gb=floor_gb)
+            time.sleep(interval)
 
     @property
     def depth(self) -> int:
@@ -986,6 +1066,15 @@ def on_startup() -> None:
     log_event("API", "backend started", dry_run=CFG.dry_run,
               upload_enabled=bool(CFG.get("youtube.upload_enabled")),
               auth_configured=bool(_expected_token()))
+    # The age-based sweep, on a schedule.
+    #
+    # `reclaim_after_days` has been in config since the storage work landed and
+    # `sweep_storage()` has been implemented all along, but the only caller was
+    # the /maintenance/reclaim endpoint and NOTHING invoked it - so the
+    # immediate reclaim on publish worked and everything else accumulated
+    # forever. Started here so it runs whether or not the phone is open.
+    WORKER.start_janitor()
+
     # Recover anything interrupted by the last shutdown (spec section 22).
     try:
         from engine.pipeline import Pipeline

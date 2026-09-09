@@ -427,3 +427,21 @@ storage:
   # and dry-run output, whose only copy is local - hence the delay rather than
   # an immediate delete.
   reclaim_after_days: 7
+  # Run that sweep automatically, from the backend.
+  #
+  # Without this the setting above was decorative: sweep_storage() existed and
+  # only /maintenance/reclaim called it, and nothing called that. Publishing
+  # freed its own media immediately; jobs that died mid-pipeline did not.
+  auto_sweep: true
+  sweep_interval_hours: 6
+  # Below this much free space the sweep re-runs with `urgent_reclaim_after_days`
+  # instead of `reclaim_after_days`. This is the failure the note above
+  # describes - a full boot volume killing the next render mid-encode - and a
+  # six-hourly sweep alone does not prevent it, because one long-form render
+  # can add several gigabytes between two ticks.
+  #
+  # AWAITING_APPROVAL and READY stay exempt even under pressure: an unwatched
+  # video with no file, or an approved one that can no longer be uploaded, is
+  # worse than a full disk.
+  min_free_gb: 5
+  urgent_reclaim_after_days: 1
