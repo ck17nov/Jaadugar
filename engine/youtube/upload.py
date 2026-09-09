@@ -226,9 +226,29 @@ class YouTubeUploader:
                     self.quota.spend("thumbnail_set")
                 log_event("YOUTUBE", "thumbnail set")
             except Exception as exc:
-                # Custom thumbnails need a verified channel - not fatal.
-                result.warnings.append(f"thumbnail not set: {str(exc)[:160]}")
-                log_event("YOUTUBE", "thumbnail failed", error=str(exc)[:160])
+                # A 403 here is almost always ONE thing, and the truncated
+                # exception did not say which: custom thumbnails are an
+                # "Intermediate feature" gated on phone verification, so an
+                # unverified channel gets `forbidden` from
+                # thumbnails.set - and every thumbnail this pipeline has ever
+                # built was discarded server-side without explanation.
+                #
+                # The same gate also blocks uploads longer than 15 minutes,
+                # which is exactly what the LONGFORM template produces, so
+                # this message is worth being explicit about.
+                status = getattr(getattr(exc, "resp", None), "status", 0)
+                if status == 403:
+                    advice = ("thumbnail refused (403). Custom thumbnails "
+                              "need a phone-verified channel: open "
+                              "youtube.com/verify on this channel. It takes "
+                              "about three minutes and cannot be automated. "
+                              "The same verification unlocks uploads longer "
+                              "than 15 minutes.")
+                else:
+                    advice = f"thumbnail not set: {str(exc)[:160]}"
+                result.warnings.append(advice)
+                log_event("YOUTUBE", "thumbnail failed", status=status or "?",
+                          error=str(exc)[:160])
 
         # ---- captions --------------------------------------------------
         if subtitle is not None and subtitle.exists():

@@ -109,8 +109,78 @@ def _budget(profile: NicheProfile, duration: int, *,
     return target, int(target * 0.82), scenes
 
 
-def _structure(duration: int, is_short: bool) -> list[tuple[str, str, float]]:
+# Roles a STORY has, as opposed to an explainer. Used to swap the enum in the
+# prompt templates, because the model emits one of these per scene and will
+# keep emitting "value" if "value" is still on the list.
+STORY_ROLES = "want|attempt|obstacle|turn|resolve|refrain"
+EXPLAINER_ROLES = "hook|context|promise|value|payoff|cta"
+
+
+def _story_structure(is_short: bool) -> list[tuple[str, str, float]]:
+    """Story beats, for child-directed narrative.
+
+    THE reason kids stories came out as narration and philosophy. Every script
+    got the explainer table below, in which the beat that owns 55-60% of the
+    duration is called "value" and describes itself as "the substance: what
+    happened / how it works". "value" is not a story beat. The
+    _kids_instruction() block correctly demanded one named character, a want,
+    events in order and a warm resolution - and then the scaffold the model
+    actually fills in scene by scene asked for an explainer, so the scaffold
+    won. The artefact on disk proved it: six scenes, 61 words, opening on a
+    rhetorical question about a bedtime RULE with no character in it, no want,
+    no attempt, no obstacle, and the mother solving it.
+
+    The specific craft points encoded here: the character must want ONE
+    concrete thing, must try and fail before succeeding, and must have the
+    idea themselves - a story where an adult fixes it teaches the listener
+    that they cannot. The closing refrain is what makes a small child ask for
+    the same story again.
+
+    Fractions sum to exactly 1.0; see the note in _structure.
+    """
+    if is_short:
+        return [
+            ("want", "name the character in the first five words and the ONE "
+                     "thing they want", 0.14),
+            ("attempt", "the character tries it THEMSELVES and it does not "
+                        "work", 0.22),
+            ("obstacle", "it gets harder; say what that feels like in the "
+                         "body", 0.22),
+            ("turn", "the character THEMSELVES has the idea or notices the "
+                     "thing", 0.22),
+            ("resolve", "they get it, and one warm line of how that feels",
+             0.14),
+            ("refrain", "the refrain, word for word, as the last line", 0.06),
+        ]
+    return [
+        ("want", "name the character and the ONE thing they want", 0.10),
+        ("attempt", "first try, in their own hands, and it fails small", 0.16),
+        ("obstacle", "the first try has made it harder", 0.16),
+        ("attempt2", "second try, a different idea, closer but not enough",
+         0.16),
+        ("turn", "the character THEMSELVES sees what to do", 0.16),
+        ("resolve", "they do it and it works", 0.16),
+        ("refrain", "the refrain, word for word, as the last line", 0.10),
+    ]
+
+
+def is_kids_story(profile) -> bool:
+    """Child-directed NARRATIVE, as opposed to child-directed teaching.
+
+    Teaching content wants repetition and drills and has no narrative arc to
+    interrupt; a story wants beats. The same split _kids_instruction() makes.
+    """
+    if not getattr(profile, "made_for_kids", False):
+        return False
+    name = (getattr(profile, "name", "") or "").lower()
+    return not any(hint in name for hint in KIDS_LEARNING_HINTS)
+
+
+def _structure(duration: int, is_short: bool,
+               profile=None) -> list[tuple[str, str, float]]:
     """(role, purpose, fraction-of-duration). Dynamic, not hard-coded seconds."""
+    if profile is not None and is_kids_story(profile):
+        return _story_structure(is_short)
     if is_short:
         return [
             ("hook", "one sentence that creates an unresolved question or shock", 0.07),
@@ -234,20 +304,50 @@ def _kids_instruction(profile) -> str:
             "- Ask the child to join in out loud at least twice.\n"
             "- Nothing scary. No danger.\n")
     return (
-        "\nTHIS IS A CHILD-DIRECTED STORY, so tell an actual STORY.\n"
-        "- ONE named character a small child can picture, introduced by name "
-        "in the first two scenes.\n"
-        "- Something the character WANTS, or a small gentle problem: a lost "
-        "toy, a dark room, a friend who will not share. Gentle stakes are the "
-        "point - with nothing at stake there is no story, only description.\n"
-        "- Events in ORDER, each scene moving to the next. No scene may be a "
-        "general statement about the theme.\n"
-        "- A warm resolution where the problem is solved, and one line of "
-        "feeling at the end.\n"
-        "- Concrete and sensory: what things look like, sound like and feel "
-        "like. No abstraction, no moral lecture, no rhetorical questions "
-        "about life.\n"
-        "- Simple words, one idea per sentence, calm. Nothing scary, no real "
+        "\nTHIS IS A CHILD-DIRECTED STORY. Tell an actual STORY, not a "
+        "description of one.\n"
+        "\nCHARACTER AND AGENCY\n"
+        "- ONE named character. The name appears in the FIRST FIVE WORDS of "
+        "scene 1 and in most scenes after it. Never \"a little girl\" - a "
+        "name.\n"
+        "- The character WANTS one concrete thing a four-year-old can "
+        "picture: a lost shoe, the top shelf, a friend to share, the dark to "
+        "be less dark.\n"
+        "- THE CHARACTER SOLVES IT THEMSELVES. No adult rescues them - no "
+        "mother, no teacher, no narrator explaining. A grown-up may be "
+        "present and may be kind, but the idea that fixes it must be the "
+        "child's own.\n"
+        "- THREE TRIES. The first does not work. The second does not work "
+        "and makes it a little worse. The third works, and it works because "
+        "of something the character noticed earlier in the story.\n"
+        "\nTHE REFRAIN - NOT OPTIONAL\n"
+        "- Invent one short line of FOUR TO EIGHT WORDS and repeat it WORD "
+        "FOR WORD at least three times: once near the start, once in the "
+        "middle, and as the very last line. Not paraphrased - identical "
+        "every time. This is what makes a small child ask for the story "
+        "again.\n"
+        "\nOPENING - BANNED\n"
+        "- Do NOT open with a question. Not \"Have you ever\", not \"What "
+        "if\", not \"Can a hug\", not any rhetorical question about life, "
+        "rules or feelings. Scene 1 opens on the character doing something, "
+        "somewhere, right now.\n"
+        "\nCONCRETE, NOT ABSTRACT\n"
+        "- Every scene contains at least one thing you could photograph and "
+        "one thing you could hear, touch or smell. No scene may be a general "
+        "statement about the theme. If a sentence would still be true with "
+        "the character removed from it, delete it.\n"
+        "- No moral, no lesson, no \"and that is why\". The end is one line "
+        "about what the character feels, not what the listener should "
+        "learn.\n"
+        "\nPARTICIPATION\n"
+        "- Invite the child to join in out loud EXACTLY TWICE, naming the "
+        "action: \"Can you knock three times with me?\", \"Say it with "
+        "me.\" These are the only questions allowed anywhere in the "
+        "script.\n"
+        "\nLENGTH\n"
+        "- At least 20 words per scene, and at least 120 words in total for "
+        "a short. Six scenes of ten words each is an outline, not a story.\n"
+        "\nSimple words, one idea per sentence, calm. Nothing scary, no real "
         "danger, no romance.\n")
 
 
@@ -269,7 +369,7 @@ class ScriptGenerator:
         target_words, min_words, scene_count = _budget(
             profile, duration,
             max_scenes=int(self.cfg.get("content.max_scenes", DEFAULT_MAX_SCENES)))
-        structure = _structure(duration, is_short)
+        structure = _structure(duration, is_short, profile)
 
         # A single JSON response cannot carry a 3,000-word script: free-tier
         # per-minute token limits (6k-12k TPM) cut it off mid-array, and even
@@ -659,6 +759,9 @@ Return this exact JSON shape and nothing else:
                    + "\n".join(f"  - {c}" for c in covered)) if covered else ""
         lang_line = _language_line(language)
         kids_line = _kids_instruction(profile)
+        # The role list has to agree with the beat table, or the model keeps
+        # emitting "value" for a story because "value" is still on the menu.
+        role_enum = STORY_ROLES if is_kids_story(profile) else EXPLAINER_ROLES
         edge = ""
         if is_first:
             edge = (f"\nThis is the OPENING. Scene 1 must be the hook, stated "
@@ -700,7 +803,7 @@ Hindi or Tamil prompt returns a worse picture.
 Return this exact JSON shape and nothing else:
 {{
   "scenes": [
-    {{"role": "hook|context|promise|value|payoff|cta",
+    {{"role": "{role_enum}",
       "narration": "spoken words only",
       "visual_prompt": "one image description",
       "visual_keywords": ["noun", "noun"],
@@ -745,6 +848,7 @@ Return this exact JSON shape and nothing else:
             for role, purpose, frac in structure)
         lang_line = _language_line(language)
         kids_line = _kids_instruction(profile)
+        role_enum = STORY_ROLES if is_kids_story(profile) else EXPLAINER_ROLES
         return f"""Write an original {duration}-second {'YouTube Short' if is_short else 'YouTube video'} script.
 
 {profile.prompt_block()}
@@ -785,7 +889,7 @@ Return this exact JSON shape:
   "title_ideas": ["8-12 words each, 5 options, no ALL CAPS, no false claims"],
   "hook": "the first sentence, max 12 words",
   "scenes": [
-    {{"role": "hook|context|promise|value|payoff|cta",
+    {{"role": "{role_enum}",
       "narration": "spoken words only",
       "visual_prompt": "one image description",
       "visual_keywords": ["noun", "noun"],

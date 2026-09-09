@@ -507,15 +507,43 @@ class TestKidsStoryPrompt:
     def test_a_story_needs_a_named_character(self):
         assert "named character" in self._instruction("kids moral stories")
 
-    def test_gentle_stakes_are_required_rather_than_forbidden(self):
-        """"no conflict" is what produced an essay about hugs."""
+    def test_stakes_are_required_rather_than_forbidden(self):
+        """"no conflict" is what produced an essay about hugs.
+
+        The requirement is now stated as three failed tries rather than as
+        "gentle stakes", because the vaguer wording still produced a story in
+        which nothing was attempted.
+        """
         text = self._instruction("kids bedtime stories")
         assert "no conflict" not in text
-        assert "at stake" in text
+        assert "THREE TRIES" in text
+        assert "does not work" in text
 
-    def test_abstraction_is_ruled_out(self):
+    def test_the_child_must_solve_it_themselves(self):
+        """The measured failure: the MOTHER solved the problem. A story where
+        an adult fixes it teaches the listener that they cannot."""
         text = self._instruction("kids bedtime stories")
-        assert "rhetorical questions" in text
+        assert "SOLVES IT THEMSELVES" in text
+        assert "No adult rescues" in text
+
+    def test_a_verbatim_refrain_is_demanded(self):
+        """Zero of the three kids scripts on disk contained any repeated
+        phrase, and the refrain is what makes a small child ask again."""
+        text = self._instruction("kids bedtime stories")
+        assert "REFRAIN" in text
+        assert "WORD FOR WORD" in text
+
+    def test_abstraction_and_opening_questions_are_ruled_out(self):
+        """The shipped story opened on a rhetorical question about a bedtime
+        RULE, with no character in it."""
+        text = self._instruction("kids bedtime stories")
+        assert "rhetorical question" in text
+        assert "Do NOT open with a question" in text
+
+    def test_a_word_floor_is_stated(self):
+        """The measured defect was 61 words across six scenes - an outline."""
+        text = self._instruction("kids bedtime stories")
+        assert "20 words per scene" in text
 
     def test_rhymes_are_stories_not_drills(self):
         """A nursery rhyme is a performance, not a flashcard."""

@@ -57,6 +57,15 @@ class PipelineError(RuntimeError):
         self.stage = stage
 
 
+class _ThumbnailNotApplicable(Exception):
+    """Not an error: this format has nowhere to put a custom thumbnail.
+
+    Raised rather than nesting the whole stage in an `if`, so the one
+    `except Exception` below still catches genuine generation failures and
+    this case does not get logged as one.
+    """
+
+
 class JobCancelled(RuntimeError):
     """Raised when the user asks for a job to stop.
 
@@ -769,8 +778,22 @@ class Pipeline:
                 self.cfg.get("youtube.synthetic_disclosure", True))), job)
 
         # ---- thumbnail --------------------------------------------------
+        #
+        # Not built for SHORTS, deliberately. A custom thumbnail on a Short
+        # has been restricted to YouTube Partner Programme channels since
+        # 2026-07-25 and there is no API surface for it at all, so building
+        # one costs render time to produce a file nothing can upload. For a
+        # Short the first frame IS the thumbnail, which is a composition
+        # problem rather than an upload one.
         thumbnail: Path | None = None
+        shorts = str(request.video_format or "").upper() != "LONGFORM"
+        if shorts:
+            log_event("THUMBNAIL", "skipped for a Short - custom thumbnails "
+                      "are YPP-only with no API surface; the first frame is "
+                      "the thumbnail")
         try:
+            if shorts:
+                raise _ThumbnailNotApplicable
             thumbnail, variants = self.thumbnail_engine.generate(
                 title=meta.title, out_dir=job_dir / "thumbnails", video=video,
                 video_format=request.video_format,
@@ -782,6 +805,8 @@ class Pipeline:
                              "variants": [{"style": v.style, "score": v.score,
                                            "text": v.text, "metrics": v.metrics}
                                           for v in variants]})
+        except _ThumbnailNotApplicable:
+            pass                                # already logged, not a failure
         except Exception as exc:
             log_event("THUMBNAIL", "generation failed", error=str(exc)[:180])
 

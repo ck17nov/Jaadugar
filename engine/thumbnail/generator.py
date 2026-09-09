@@ -9,7 +9,7 @@ actually see in feeds and on the channel grid) and keeps text minimal.
 """
 from __future__ import annotations
 
-import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,8 +21,13 @@ from ..core.logging import log_event
 from ..core.util import clamp, ffmpeg_bin, run, words
 from ..video.fonts import display_font
 
-# YouTube thumbnail spec: 1280x720, under 2 MB, JPG/PNG.
-THUMB_W, THUMB_H = 1280, 720
+# YouTube thumbnail spec: 1280x720 minimum, under 2 MB, JPG/PNG.
+#
+# Rendered at 1920x1080 rather than the 1280x720 minimum. The text is
+# rasterised natively at this size instead of being upscaled with the image,
+# and it measured 356 KB - comfortably inside the 2 MB cap, which was the only
+# reason to stay small.
+THUMB_W, THUMB_H = 1920, 1080
 MAX_BYTES = 2 * 1024 * 1024
 
 # Filler that never earns thumbnail space. Deliberately KEEPS the curiosity
@@ -56,7 +61,22 @@ def _headline(title: str, max_words: int = 4) -> str:
     CAUGHT").  Taking the longest CONTIGUOUS run of content words preserves
     meaning: the same title yields "FIRST LIGHT".
     """
-    raw = re.sub(r"[^\w\s'-]", " ", title or "").split()
+    # `\w` DROPS COMBINING MARKS, and that silently destroyed every Hindi
+    # headline. Python's \w matches Devanagari base letters (category Lo) but
+    # not the matras and viramas (Mn/Mc) that turn them into words - so
+    # "गाँव की स्कूल यादें" lost ा ँ ी ् ू े
+    # ं and became eight bare consonants, from which the four-word cap
+    # produced the headline "ग व क स". Both Hindi jobs on disk shipped that.
+    #
+    # Same bug class as engine/core/util.py words(), where an ASCII-only
+    # pattern returned zero words for Indic text. Category "M" is the whole
+    # fix and it is script-general.
+    raw = "".join(
+        ch if (ch.isalnum() or unicodedata.category(ch).startswith("M")
+               or ch in " '-")
+        else " "
+        for ch in (title or "")
+    ).split()
     if not raw:
         return ""
 
@@ -127,8 +147,15 @@ def _is_qualifier(word: str) -> bool:
 
 
 def _fit_font(font_path: Path, text: str, max_w: int, max_h: int,
-              start: int = 150) -> tuple[ImageFont.FreeTypeFont, list[str]]:
-    """Largest font size that fits `text` in at most 2 lines."""
+              start: int = 260) -> tuple[ImageFont.FreeTypeFont, list[str]]:
+    """Largest font size that fits `text` in at most 2 lines.
+
+    `start` is a CEILING, not a size - the sweep below walks down from it
+    until the text fits. It was 150, which measured as the binding constraint
+    rather than the frame: "SCHOOL DAYS" fits at 222, and the difference at
+    the ~120px width most impressions are actually served at is a cap height
+    of 12.1px against 17.9px. Small text on a thumbnail is invisible text.
+    """
     wordlist = text.split()
     for size in range(start, 34, -4):
         font = ImageFont.truetype(str(font_path), size)
