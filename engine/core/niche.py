@@ -70,6 +70,13 @@ class NicheProfile:
     music_mood: str = "subtle tension, low-mid, non-distracting"
     caption_style: str = "karaoke"
     disclaimers: list[str] = field(default_factory=list)
+    # Which _FAMILIES entry this profile was built from. The builder knows it
+    # and used to throw it away, so anything downstream that needed to ask
+    # "is this a finance video" had to re-guess from the niche STRING - and a
+    # niche of "mutual funds explained" contains neither "finance" nor any
+    # other family word, so every one of those guesses was wrong for exactly
+    # the niches that matter most.
+    family: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -144,8 +151,28 @@ _FAMILIES: dict[str, dict[str, Any]] = {
         "scene_seconds": 3.8,
     },
     "finance": {
-        "keys": {"finance", "money", "investing", "stocks", "economics", "business",
-                 "crypto", "saving", "budget", "entrepreneur"},
+        # The actual vocabulary of the channel, not the word "finance".
+        #
+        # The original ten keys were all category names, so every real topic
+        # missed: "mutual funds explained", "SIP vs lump sum" and "term
+        # insurance basics" all matched the EDUCATION family instead. Three
+        # things key off this - the spoken disclaimer, `is_sensitive`, and
+        # `requires_fact_check` - so a miss here shipped a finance video with
+        # none of the three.
+        "keys": {"finance", "money", "investing", "stocks", "economics",
+                 "business", "crypto", "saving", "budget", "entrepreneur",
+                 # instruments
+                 "fund", "mutual", "sip", "etf", "equity", "bond", "debt",
+                 "share", "dividend", "portfolio", "demat", "nifty", "sensex",
+                 # India-specific vehicles and schemes
+                 "ppf", "nps", "epf", "elss", "fd", "rd", "nsc",
+                 "sukanya", "atal", "apy",
+                 # everyday money
+                 "insurance", "premium", "policy", "tax", "gst", "itr",
+                 "loan", "emi", "mortgage", "credit", "cibil", "score",
+                 "salary", "income", "pension", "retirement", "interest",
+                 "inflation", "bank", "upi", "gold", "rent", "expense",
+                 "emergency", "compounding", "nominee", "kyc"},
         "tone": "calm, concrete, anti-hype",
         "visual_style": ("clean editorial photography, muted greens and greys, charts "
                          "as abstract shapes only"),
@@ -284,6 +311,7 @@ def build_profile(niche: str, *, audience: str = "18-35", style: str = "",
     spec = _FAMILIES[fam]
 
     profile = NicheProfile(name=niche)
+    profile.family = fam
     for key in ("tone", "vocabulary", "visual_style", "pacing", "hook_style",
                 "cta_style", "music_mood", "scene_seconds", "words_per_second",
                 "caption_style", "audience"):

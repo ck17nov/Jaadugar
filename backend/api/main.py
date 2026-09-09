@@ -127,6 +127,13 @@ class AutomationBody(BaseModel):
     keywords: list[str] = Field(default_factory=list, max_length=10)
     # "immediate" uploads on approval; "scheduled" hands YouTube a publishAt.
     publish_mode: Literal["scheduled", "immediate"] = "scheduled"
+    # Where the script comes from. "live" is the default and the behaviour
+    # every automation had before the script bank existed. "bank" fails when
+    # the bank is empty rather than quietly generating an unreviewed script;
+    # "bank_first" falls back, which is what a daily automation needs.
+    script_source: Literal["live", "bank_first", "bank"] = "live"
+    # Which group's bank to draw from. Empty derives it from the niche.
+    niche_group: str = Field(default="", max_length=32)
 
     @field_validator("upload_time")
     @classmethod
@@ -1053,6 +1060,55 @@ def list_niche_groups() -> dict[str, Any]:
     """
     from engine.core.groups import dump
     return {"groups": dump()}
+
+
+@app.get("/script-bank", dependencies=[Depends(require_api_key)])
+def script_bank_status() -> dict[str, Any]:
+    """How many reviewed scripts are left, per group / language / format.
+
+    The Create screen needs this to say something honest next to the "use my
+    reviewed scripts" option. Offering a choice that cannot be fulfilled and
+    only finding out when the render fails is the failure this avoids.
+
+    `unused` counts stored entries; `ready` counts the reviewed ones, which
+    are the only entries a render will actually claim.
+    """
+    import json as _json
+
+    db = _db()
+    try:
+        return _bank_status(db, _json)
+    finally:
+        db.close()
+
+
+def _bank_status(db, _json) -> dict[str, Any]:
+    reviewed: dict[str, int] = {}
+    for row in db.bank_entries(limit=5000):
+        if row["used_at"]:
+            continue
+        try:
+            payload = _json.loads(row["payload"])
+        except Exception:                       # noqa: BLE001
+            continue
+        if not (payload.get("human") or {}).get("reviewer"):
+            continue
+        key = f"{row['grp']}|{row['language']}|{row['video_format']}"
+        reviewed[key] = reviewed.get(key, 0) + 1
+
+    slots = []
+    for row in db.bank_counts():
+        key = f"{row['grp']}|{row['language']}|{row['video_format']}"
+        slots.append({
+            "group": row["grp"], "language": row["language"],
+            "video_format": row["video_format"],
+            "total": int(row["total"] or 0),
+            "unused": int(row["unused"] or 0),
+            "ready": reviewed.get(key, 0),
+        })
+    return {"slots": slots,
+            "ready_total": sum(s["ready"] for s in slots),
+            "sources": ["live", "bank_first", "bank"]}
 
 
 @app.delete("/youtube/accounts/{channel_id}",

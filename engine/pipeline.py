@@ -468,6 +468,51 @@ class Pipeline:
                   hook_type=best.hook_type)
         return best, context
 
+    def _finish_script(self, job: VideoJob, request: AutomationRequest,
+                       profile, script: Script, *,
+                       improve: bool, extra: dict[str, Any]) -> Script:
+        """The tail both script paths share: disclaimer, score, save.
+
+        Factored out so the mandatory disclaimer cannot be applied on one
+        path and forgotten on the other - it was two near-identical blocks,
+        which is exactly how that happens.
+
+        `improve` is off for a banked script: auto_improve rewrites narration
+        to hit a retention target, and rewriting a scene invalidates that
+        scene's authored caption and authored image brief.
+        """
+        from .content import disclaimer
+
+        # Before the retention pass, so the score describes the video that
+        # will actually be rendered rather than the one without the opener.
+        added = disclaimer.apply(
+            script, profile, language=request.language,
+            caption_language=self._caption_language(request))
+
+        report = analyze_retention(script, profile,
+                                   target_duration=request.duration_seconds)
+        applied: list[str] = []
+        if improve:
+            script, applied = auto_improve(script, profile, report)
+            if applied:
+                report = analyze_retention(
+                    script, profile,
+                    target_duration=request.duration_seconds)
+        script.retention_score = report.score
+        script.retention_notes = report.notes
+
+        self.db.save_script(script, sha1(script.script))
+        safe_write_json(Path(job.dir) / "script.json", {
+            **script.to_dict(),
+            "retention_report": report.to_dict(),
+            "auto_improvements": applied,
+            "disclaimer": disclaimer.family_for(profile) if added else "",
+            **extra,
+        })
+        job.script = script.to_dict()
+        self.db.save_job(job)
+        return script
+
     def stage_script(self, job: VideoJob, request: AutomationRequest, profile,
                      idea: ContentIdea, context: str, claim=None) -> Script:
         if claim is not None:
@@ -491,30 +536,28 @@ class Pipeline:
                       measured=f"{measured:.2f} wps")
             profile.words_per_second = measured
 
+        # Take the mandatory disclaimer out of the budget rather than adding
+        # it on top: a "45 second" finance short otherwise lands at 55.
+        # Floored at 60% of the request so a very short video cannot have its
+        # entire body squeezed out by the opener.
+        from .content import disclaimer
+        overhead = disclaimer.seconds_for(profile, request.language)
+        body_seconds = request.duration_seconds
+        if overhead > 0:
+            body_seconds = max(int(request.duration_seconds * 0.6),
+                               int(request.duration_seconds - overhead))
+            log_event("SCRIPT", "reserved time for the mandatory disclaimer",
+                      requested=request.duration_seconds,
+                      disclaimer=f"{overhead:.1f}s", writing_for=body_seconds)
+
         script = self._retry("script", lambda: self.script_engine.generate(
-            idea, profile, duration=request.duration_seconds,
+            idea, profile, duration=body_seconds,
             language=request.language, video_format=request.video_format,
             research_context=context, strategy_hints=hints), job)
 
         # Retention pass + safe auto-improvement (spec section 15).
-        report = analyze_retention(script, profile,
-                                  target_duration=request.duration_seconds)
-        script, applied = auto_improve(script, profile, report)
-        if applied:
-            report = analyze_retention(script, profile,
-                                       target_duration=request.duration_seconds)
-        script.retention_score = report.score
-        script.retention_notes = report.notes
-
-        self.db.save_script(script, sha1(script.script))
-        safe_write_json(Path(job.dir) / "script.json", {
-            **script.to_dict(),
-            "retention_report": report.to_dict(),
-            "auto_improvements": applied,
-        })
-        job.script = script.to_dict()
-        self.db.save_job(job)
-        return script
+        return self._finish_script(job, request, profile, script,
+                                   improve=True, extra={})
 
     def _banked_script(self, job: VideoJob, request: AutomationRequest,
                        profile, claim) -> Script:
@@ -535,26 +578,15 @@ class Pipeline:
             caption_language=self._caption_language(request))
         script.idea_id = job.idea.get("idea_id", "") if job.idea else ""
 
-        report = analyze_retention(script, profile,
-                                   target_duration=request.duration_seconds)
-        script.retention_score = report.score
-        script.retention_notes = report.notes
-
-        self.db.save_script(script, sha1(script.script))
-        safe_write_json(Path(job.dir) / "script.json", {
-            **script.to_dict(),
-            "retention_report": report.to_dict(),
-            "auto_improvements": [],
-            "bank": claim.to_dict(),
-        })
-        job.script = script.to_dict()
-        self.db.save_job(job)
+        script = self._finish_script(job, request, profile, script,
+                                     improve=False,
+                                     extra={"bank": claim.to_dict()})
         log_event("SCRIPT", "assembled from the script bank",
                   entry=claim.entry_id, scenes=len(script.scenes),
                   words=count_words(script.script),
                   captions="authored" if bank_use.has_authored_captions(entry)
                            else "will be translated",
-                  retention=f"{report.score:.0f}/100")
+                  retention=f"{script.retention_score:.0f}/100")
         return script
 
     # ------------------------------------------------------------------
