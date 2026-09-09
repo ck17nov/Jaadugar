@@ -26,6 +26,21 @@ import httpx
 from ..core.logging import log_event
 
 
+class RateLimited(RuntimeError):
+    """Throttled, with the API's own reported wait attached.
+
+    Separate from LLMError so the retry layer can sleep for `retry_after`
+    instead of guessing. Groq reports x-ratelimit-reset-tokens in values as
+    small as 157ms, against a flat 25-second backoff.
+    """
+
+    def __init__(self, message: str, retry_after: float = 0.0,
+                 model: str = ""):
+        super().__init__(message)
+        self.retry_after = max(0.0, float(retry_after))
+        self.model = model
+
+
 class LLMError(RuntimeError):
     pass
 
@@ -177,6 +192,45 @@ def _cannot_do_json(message: str) -> bool:
     return "json_validate_failed" in message.lower()
 
 
+def parse_reset(value: str | None) -> float:
+    """Groq's reset headers, in seconds. "1m26.4s", "615ms", "2.5s".
+
+    Returns 0.0 for anything unparseable, which means "retry now" - the
+    caller already has its own ceiling, and an unreadable header should not
+    become a long sleep.
+    """
+    text = (value or "").strip().lower()
+    if not text:
+        return 0.0
+    total, number = 0.0, ""
+    index = 0
+    while index < len(text):
+        ch = text[index]
+        if ch.isdigit() or ch == ".":
+            number += ch
+            index += 1
+            continue
+        if text.startswith("ms", index):
+            total += float(number or 0) / 1000.0
+            number = ""
+            index += 2
+            continue
+        if ch == "m":
+            total += float(number or 0) * 60.0
+            number = ""
+            index += 1
+            continue
+        if ch == "s":
+            total += float(number or 0)
+            number = ""
+            index += 1
+            continue
+        index += 1
+    if number:
+        total += float(number)
+    return total
+
+
 def _is_model_retired(message: str) -> bool:
     """True if the error means "that model ID is gone", not "you are throttled"."""
     if re.search(r"\b(429|rate limit|quota|401|403|invalid api key|"
@@ -216,20 +270,91 @@ class GroqProvider:
         self.api_key = api_key or os.environ.get("GROQ_API_KEY", "")
         self.model = model or os.environ.get("GROQ_MODEL", "") or self.FALLBACK_MODELS[0]
         self.timeout = timeout
+        # model -> (tokens remaining, epoch when the window resets).
+        #
+        # Populated from EVERY response, including failures: the header comes
+        # back on a 429 too, and it is the only way to know which model still
+        # has headroom.
+        self._budget: dict[str, tuple[int, float]] = {}
 
     def available(self) -> bool:
         return bool(self.api_key)
 
+    # ------------------------------------------------------------------
+    # Per-model token budget, read from the response headers
+    # ------------------------------------------------------------------
+    def _note_budget(self, model: str, headers) -> None:
+        """Remember how much this model has left, and when it resets."""
+        remaining = headers.get("x-ratelimit-remaining-tokens")
+        if remaining is None:
+            return
+        try:
+            left = int(float(remaining))
+        except (TypeError, ValueError):
+            return
+        reset = parse_reset(headers.get("x-ratelimit-reset-tokens"))
+        self._budget[model] = (left, time.time() + reset)
+
+    @staticmethod
+    def _reported_wait(headers) -> float:
+        """How long the API says to wait, capped so a bad header cannot hang.
+
+        `retry-after` first because it is the explicit instruction; the
+        token-reset header is the fallback. Observed values go as low as
+        157ms, against the flat 25-second backoff this replaces.
+        """
+        for name in ("retry-after", "x-ratelimit-reset-tokens",
+                     "x-ratelimit-reset-requests"):
+            wait = parse_reset(headers.get(name))
+            if wait > 0:
+                return min(wait, 90.0)
+        return 5.0
+
     def _candidates(self) -> list[str]:
-        return [self.model] + [m for m in self.FALLBACK_MODELS if m != self.model]
+        """Models to try, the one with the most headroom first.
+
+        Ordering by remembered budget rather than by a fixed list means a
+        model throttled a moment ago goes to the back instead of being tried
+        first again. A model with no record sorts ahead of a known-empty one,
+        because an unknown budget is more promising than a spent one.
+        """
+        models = [self.model] + [m for m in self.FALLBACK_MODELS
+                                 if m != self.model]
+        now = time.time()
+
+        def headroom(name: str) -> float:
+            record = self._budget.get(name)
+            if record is None:
+                return float("inf")         # never used; assume full
+            left, resets_at = record
+            if now >= resets_at:
+                return float("inf")         # the window has rolled over
+            return float(left)
+
+        # Stable sort, so the configured order breaks ties.
+        return sorted(models, key=lambda m: -headroom(m))
 
     def complete(self, prompt: str, *, system: str = "", json_mode: bool = False,
                  temperature: float = 0.8, max_tokens: int = 4096) -> LLMResult:
-        last: LLMError | None = None
-        for model in self._candidates():
+        last: Exception | None = None
+        limited: list[RateLimited] = []
+        candidates = self._candidates()
+        for model in candidates:
             try:
                 result = self._call(model, prompt, system, json_mode,
                                     temperature, max_tokens)
+            except RateLimited as exc:
+                # THE FIX. Groq's limits are PER MODEL - four models each
+                # reported their own remaining-token count, 8,000 tokens a
+                # minute each - so a 429 here says nothing about the next
+                # model. Sleeping on this one while three others sit idle with
+                # full budgets is what turned 45 long-form section calls into
+                # 26 of the run's 81 minutes.
+                log_event("LLM", "model rate-limited, rotating to the next",
+                          model=model, retry_after=f"{exc.retry_after:.1f}s")
+                limited.append(exc)
+                last = exc
+                continue
             except LLMError as exc:
                 text = str(exc)
                 if _cannot_do_json(text):
@@ -246,6 +371,15 @@ class GroqProvider:
                 continue
             self.model = model          # stick with what worked
             return result
+
+        if limited and len(limited) == len(candidates):
+            # EVERY model is throttled. Raise with the SHORTEST reported wait
+            # so the retry layer sleeps exactly that long instead of guessing.
+            soonest = min(limited, key=lambda e: e.retry_after)
+            raise RateLimited(
+                f"every groq model is rate-limited; the soonest resets in "
+                f"{soonest.retry_after:.1f}s",
+                retry_after=soonest.retry_after)
         raise last or LLMError("no usable groq model")
 
     def _call(self, model: str, prompt: str, system: str, json_mode: bool,
@@ -263,8 +397,15 @@ class GroqProvider:
             resp = client.post(self.ENDPOINT, json=payload, headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"})
+            # Record what this model has left BEFORE anything can raise. The
+            # header comes back on failures too, and it is what tells the
+            # rotation below which model to try next.
+            self._note_budget(model, resp.headers)
             if resp.status_code == 429:
-                raise LLMError("groq rate limit reached (free tier)")
+                wait = self._reported_wait(resp.headers)
+                raise RateLimited(
+                    f"groq rate limit on {model} (retry in {wait:.1f}s)",
+                    retry_after=wait, model=model)
             if resp.status_code >= 400:
                 raise LLMError(f"groq {resp.status_code}: {resp.text[:220]}")
             data = resp.json()
@@ -609,10 +750,21 @@ class LLMRouter:
                 if attempt >= attempts or not _is_transient_llm(
                         str(exc), retry_timeouts=retry_timeouts):
                     raise
+                # Sleep for as long as the API ASKED, when it said.
+                #
+                # This was a flat 25s doubling to 50s. Groq reports
+                # x-ratelimit-reset-tokens in values as small as 157ms, so the
+                # fixed backoff was up to 40x longer than necessary - and on a
+                # 45-call long-form script that is most of the wall clock. A
+                # small floor stops a near-zero reset becoming a hot loop.
+                reported = getattr(exc, "retry_after", 0.0) or 0.0
+                wait = max(0.5, min(reported, delay)) if reported else delay
                 log_event("LLM", "transient, waiting rather than downgrading",
                           provider=provider.name, attempt=f"{attempt}/{attempts}",
-                          wait=f"{delay:.0f}s", error=str(exc)[:120])
-                time.sleep(delay)
+                          wait=f"{wait:.1f}s",
+                          source="api" if reported else "backoff",
+                          error=str(exc)[:120])
+                time.sleep(wait)
                 delay *= 2
         raise last or LLMError(f"{provider.name} failed")
 
