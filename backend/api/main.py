@@ -589,12 +589,21 @@ def cancel_job(job_id: str) -> dict[str, Any]:
 
 @app.get("/automations", dependencies=[Depends(require_api_key)])
 def list_automations(include_cancelled: bool = False,
-                     limit: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
-    """Every recurring automation, so the app can show what is scheduled.
+                    include_completed: bool = False,
+                    limit: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
+    """Every automation that is still live, so the app can show what is coming.
 
     Until now the only record of an automation was a row in the phone's own
     database, which meant there was nowhere to see what had been scheduled and
     no way to cancel it authoritatively.
+
+    A "just once" automation whose video has published is FINISHED and is
+    hidden by default. It used to sit in the Schedule tab forever offering a
+    "Stop automation" button that could not stop anything, because there was
+    nothing left to run. A recurring automation is live until cancelled and
+    stays, which is the distinction: the list answers "what will happen next",
+    not "what has ever been asked for". `include_completed=true` brings them
+    back for debugging.
     """
     db = _db()
     # Resolve channel titles once rather than per row. Best-effort: a missing
@@ -618,6 +627,19 @@ def list_automations(include_cancelled: bool = False,
         except ValueError:
             payload = {}
         automation_id = row["id"]
+
+        # Is there anything left for this automation to do?
+        #
+        # Only "once" can ever finish. A daily or weekly automation is live
+        # until cancelled, which is why it stays in the list forever - that is
+        # correct and is what the user expects.
+        wanted = max(1, int(payload.get("count", 1) or 1))
+        finished = db.automation_finished_runs(automation_id)
+        completed = (str(row.get("frequency", "once")).lower() == "once"
+                     and finished >= wanted)
+        if completed and not include_completed:
+            continue
+
         out.append({
             "id": automation_id,
             "niche": row.get("niche", ""),
@@ -632,6 +654,9 @@ def list_automations(include_cancelled: bool = False,
             "language": payload.get("language", ""),
             "made_for_kids": bool(payload.get("made_for_kids", False)),
             "videos_made": db.count_jobs_for_automation(automation_id),
+            "runs_finished": finished,
+            "runs_requested": wanted,
+            "completed": completed,
             "running": automation_id == WORKER.current_automation,
             # WHICH CHANNEL this posts to, resolved the same way the pipeline
             # resolves it: an explicit id, else the topic's group mapping,

@@ -316,6 +316,41 @@ class Database:
             (automation_id,))
         return int(row["n"]) if row else 0
 
+    def automation_finished_runs(self, automation_id: str) -> int:
+        """How many of an automation's videos have reached a final state.
+
+        PUBLISHED or SCHEDULED only. Deliberately NOT counting
+        AWAITING_APPROVAL or READY: those still need the user, so a "just
+        once" automation holding one of them is not finished and must stay
+        visible in the Schedule tab.
+        """
+        if not automation_id:
+            return 0
+        row = self.query_one(
+            "SELECT COUNT(*) AS n FROM video_jobs "
+            "WHERE automation_id=? AND status IN (?, ?)",
+            (automation_id, JobStatus.PUBLISHED.value,
+             JobStatus.SCHEDULED.value))
+        return int(row["n"]) if row else 0
+
+    def automation_has_approved_run(self, automation_id: str) -> bool:
+        """True when a human has already approved a video from this automation.
+
+        Used by the publish gate: the Made-for-Kids classification needs an
+        explicit human confirmation, but it needs it ONCE per automation, not
+        once per video. Without this, a kids automation set to "publish
+        without asking" waited for approval on every single run - which made
+        the setting a lie.
+        """
+        if not automation_id:
+            return False
+        row = self.query_one(
+            "SELECT COUNT(*) AS n FROM video_jobs "
+            "WHERE automation_id=? AND status IN (?, ?, ?)",
+            (automation_id, JobStatus.PUBLISHED.value,
+             JobStatus.SCHEDULED.value, JobStatus.READY.value))
+        return bool(row and int(row["n"]) > 0)
+
     def delete_jobs(self, *, job_ids: list[str] | None = None,
                     keep_active: bool = True,
                     older_than: float | None = None) -> list[VideoJob]:

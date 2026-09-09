@@ -177,13 +177,28 @@ def _cannot_do_json(message: str) -> bool:
     A DIFFERENT MODEL is the fix, which is why it belongs beside the
     retirement check rather than in the transient one - waiting cannot help.
 
-    Measured on the live key: openai/gpt-oss-120b and gpt-oss-20b both answer
-    HTTP 400 json_validate_failed on the kids-story prompt, with an EMPTY
-    `failed_generation` so there is nothing to repair. Asked the same prompt
-    with JSON mode off, gpt-oss-120b returns 200 and zero characters of
-    content - it is a reasoning model putting everything in the reasoning
-    channel. qwen/qwen3.8-27b answers the identical prompt in JSON mode
-    correctly, 2,577 characters.
+    CORRECTED 2026-09-10. The observation below was right and the conclusion
+    was wrong, and it cost this project its best model for three days.
+
+    What was measured: gpt-oss-120b and gpt-oss-20b answered HTTP 400
+    json_validate_failed on the kids-story prompt with an EMPTY
+    `failed_generation`; with JSON mode off, gpt-oss-120b returned 200 and
+    zero characters. That was read as "this model cannot satisfy JSON mode",
+    so it was demoted permanently and qwen wrote every story instead.
+
+    The real cause was an unbounded reasoning budget plus the legacy
+    `max_tokens` alias. Re-measured on the identical prompt and key:
+        json_object + max_tokens=4096                -> 400, empty
+        no JSON mode, max_completion_tokens=1500     -> 200, 0 chars,
+                                                        completion_tokens=1500
+        + reasoning_effort=low + max_completion      -> 200, 2,761 chars
+    The reasoning channel was eating the entire budget. `_call` now always
+    sends `reasoning_effort` for these models, so this path should no longer
+    fire for that reason.
+
+    It is KEPT because a genuine per-model JSON incapacity is still possible
+    and a different model is still the only fix - waiting cannot help, which
+    is why it lives beside the retirement check rather than the transient one.
 
     Before this, a 400 failed the whole PROVIDER, so the fallback list was
     never consulted and kids-story generation fell through to the template -
@@ -389,8 +404,30 @@ class GroqProvider:
             "messages": ([{"role": "system", "content": system}] if system else [])
                         + [{"role": "user", "content": prompt}],
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            # `max_completion_tokens`, NOT `max_tokens`.
+            #
+            # These are not the same thing on a reasoning model. `max_tokens`
+            # is the legacy alias and does not separate the hidden reasoning
+            # channel from the content, so an unbounded reasoning pass can
+            # consume the entire budget and return a valid 200 with ZERO
+            # characters of content. Measured: gpt-oss-120b with
+            # max_completion_tokens=1500 and no JSON mode returned
+            # completion_tokens=1500 and content of length 0.
+            "max_completion_tokens": max_tokens,
         }
+        # THE PARAMETER THAT WAS MISSING, and it cost this project its best
+        # model for three days.
+        #
+        # Without it, gpt-oss burns its whole completion budget on reasoning
+        # and then fails JSON validation with an EMPTY `failed_generation`,
+        # which read exactly like "this model cannot do JSON mode". It can.
+        # Measured on the identical kids-story prompt and the same key:
+        #   json_object + max_tokens=4096            -> 400 json_validate_failed
+        #   + reasoning_effort=low + max_completion  -> 200, 2,761 chars
+        # The wrong conclusion demoted gpt-oss-120b on the first call of every
+        # job, which is why qwen wrote every story instead.
+        if "gpt-oss" in model or model.startswith("openai/"):
+            payload["reasoning_effort"] = "low"
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         with httpx.Client(timeout=self.timeout) as client:

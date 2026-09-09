@@ -303,6 +303,12 @@ data class AutomationSummaryDto(
     @SerialName("made_for_kids") val madeForKids: Boolean = false,
     @SerialName("videos_made") val videosMade: Int = 0,
     val running: Boolean = false,
+    // A "just once" automation whose video has published is finished. The
+    // backend hides those by default; these fields exist so the app can say
+    // "1 of 1 done" rather than showing a Stop button that stops nothing.
+    @SerialName("runs_finished") val runsFinished: Int = 0,
+    @SerialName("runs_requested") val runsRequested: Int = 1,
+    val completed: Boolean = false,
     // Where this automation publishes, resolved by the backend the same way
     // the pipeline resolves it. Without these, two daily automations are
     // indistinguishable in the list - which defeats having several.

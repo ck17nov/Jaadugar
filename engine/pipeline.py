@@ -57,6 +57,44 @@ class PipelineError(RuntimeError):
         self.stage = stage
 
 
+def needs_approval(*, mode: str, config_default_requires_approval: bool,
+                   made_for_kids: bool, kids_already_confirmed: bool,
+                   fact_requires_approval: bool) -> tuple[bool, str]:
+    """Whether to hold a finished video for a human. Returns (hold, reason).
+
+    Extracted and made pure because the previous inline version had two bugs
+    that a test would have caught immediately:
+
+    1. The CONFIG default was an unconditional OR, so
+       `automation.approval_required: true` acted as a FLOOR and no request
+       could escape it. Choosing "Auto - publish without asking" in the app
+       therefore did nothing at all, which is worse than either behaviour
+       because the UI promised something it could not deliver.
+    2. `made_for_kids` forced approval unconditionally, so a kids automation
+       could NEVER auto-publish - and kids is the main channel here. The
+       thing that needs confirming is the CLASSIFICATION, and a human who
+       approved the first video of an automation has confirmed it for the
+       rest.
+
+    Honouring auto is safe because `youtube.force_private` pins every upload
+    to private, so "auto" means "uploaded privately, waiting in Studio", not
+    "live to subscribers unreviewed".
+
+    A fact-check flag is never auto-published, whatever the mode: that is a
+    correctness risk rather than a preference.
+    """
+    if fact_requires_approval:
+        return True, "factual risk needs review"
+    if made_for_kids and not kids_already_confirmed:
+        return True, ("kids classification must be confirmed once for this "
+                      "automation")
+    if str(mode).upper() == Mode.AUTO.value:
+        return False, ""
+    if config_default_requires_approval:
+        return True, "approval mode"
+    return False, ""
+
+
 class _ThumbnailNotApplicable(Exception):
     """Not an error: this format has nowhere to put a custom thumbnail.
 
@@ -878,17 +916,29 @@ class Pipeline:
                       blockers="; ".join(quality.blockers[:3]))
             return None
 
-        approval_required = (
-            bool(self.cfg.get("automation.approval_required", True))
-            or request.mode == Mode.APPROVAL.value
-            or fact_requires_approval
-            or meta.made_for_kids)      # kids content always confirms (spec 9)
+        # "Publish without asking" has to actually mean it.
+        #
+        # This was an unconditional OR over the CONFIG default, so
+        # `automation.approval_required: true` was a floor rather than a
+        # default and no request could ever escape it. Choosing "Auto -
+        # publish without asking" in the app did nothing, which is worse than
+        # either behaviour because the UI promised something it could not do.
+        #
+        # Safe to honour because `youtube.force_private` pins every upload to
+        # private visibility, so "auto" means "uploaded, private, waiting for
+        # you in Studio" - not "live to subscribers unreviewed".
+        # Made for Kids needs an explicit human confirmation ONCE PER
+        # AUTOMATION, not once per video - see needs_approval().
+        kids_confirmed = self.db.automation_has_approved_run(job.automation_id)
+        approval_required, reason = needs_approval(
+            mode=request.mode,
+            config_default_requires_approval=bool(
+                self.cfg.get("automation.approval_required", True)),
+            made_for_kids=bool(meta.made_for_kids),
+            kids_already_confirmed=kids_confirmed,
+            fact_requires_approval=bool(fact_requires_approval))
 
         if approval_required:
-            reason = ("kids classification must be confirmed"
-                      if meta.made_for_kids else
-                      "factual risk needs review" if fact_requires_approval else
-                      "approval mode")
             self._advance(job, JobStatus.AWAITING_APPROVAL, reason)
             log_event("PUBLISH", "waiting for human approval", reason=reason,
                       job=job.job_id)
