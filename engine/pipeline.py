@@ -279,7 +279,18 @@ class Pipeline:
         """
         from .core.util import jaccard
         recent = self.db.recent_script_texts(limit=6)
-        texts = [t for _, t in recent if t]
+        # Skip repeats of ONE banked entry: a released-and-reclaimed entry
+        # stores the same text twice and would look like a duplicate run.
+        seen: set[str] = set()
+        texts = []
+        for _script_id, text, provider in recent:
+            if not text:
+                continue
+            if provider.startswith("bank:"):
+                if provider in seen:
+                    continue
+                seen.add(provider)
+            texts.append(text)
         if len(texts) < 2:
             return 0
         threshold = float(
@@ -377,7 +388,32 @@ class Pipeline:
         # filter when drawing from the bank, not a target: stretching or
         # compressing a written script to hit a requested number is what the
         # speaking-rate re-fit does, and it is audible.
+        #
+        # Recomputed from the MEASURED speaking rate rather than taken from
+        # the entry. `estimated_seconds` is derived at import from a static
+        # per-group table, and the table is optimistic: it assumes 2.0 words
+        # per second for kids while edge-tts measurably delivers 3.21, so a
+        # 135-word story was recorded as 68 seconds and read in 43. The stored
+        # value is still the right thing to FILTER on - it is stable and
+        # voice-independent - but the request duration has to match what this
+        # voice will actually produce.
         entry_seconds = int(round(claim.entry.estimated_seconds))
+        try:
+            spec = self.voice_engine.voice_spec(
+                request.language, "energetic", gender=request.voice_gender)
+            measured = self.calibrated_words_per_second(
+                request.language, spec, 0.0)
+        except Exception:                       # noqa: BLE001
+            measured = 0.0
+        if measured > 0 and claim.entry.word_count:
+            calibrated = int(round(claim.entry.word_count / measured))
+            if calibrated and abs(calibrated - entry_seconds) > 2:
+                log_event("BANK", "duration recomputed at the measured rate",
+                          entry=claim.entry_id,
+                          from_table=f"{entry_seconds}s",
+                          measured=f"{measured:.2f} wps",
+                          using=f"{calibrated}s")
+            entry_seconds = calibrated or entry_seconds
         if entry_seconds and entry_seconds != request.duration_seconds:
             log_event("BANK", "duration taken from the banked script",
                       requested=request.duration_seconds, using=entry_seconds,
@@ -695,6 +731,21 @@ class Pipeline:
         self._record_speech_rate(voice_language, spec, script, speech_seconds)
 
         # ---- duration re-fit -------------------------------------------
+        #
+        # A BANKED SCRIPT HAS NO TARGET. Its length is whatever a person
+        # wrote, and the requested duration was only ever a filter for
+        # choosing it - so there is nothing to correct toward. Measured on a
+        # real run: a 135-word story recorded in 42.9s against a 68s
+        # "target", and the re-fit slowed the voice by 12% to stretch it,
+        # producing a 52s video read unnaturally slowly. Distorting a
+        # human-written script to reach a number the number was never meant
+        # to be is strictly worse than a video that is 43 seconds long.
+        if (script.provider or "").startswith("bank:"):
+            log_event("TTS", "no duration re-fit for a banked script",
+                      measured=f"{total:.1f}s",
+                      requested=f"{request.duration_seconds}s",
+                      note="the written script's own length is the duration")
+            request.duration_seconds = int(round(total))
         target = float(request.duration_seconds)
         tolerance = float(self.cfg.get("quality.duration_tolerance_pct", 25)) / 100.0
         drift = (total - target) / target if target > 0 else 0.0
@@ -893,6 +944,16 @@ class Pipeline:
         job.assets = [a.to_dict() for a in assets]
         self.db.save_assets(job.job_id, assets)
         self.db.save_job(job)
+
+        # Rewrite script.json with the measured timings and the chosen
+        # assets. It was written at the script stage, before the voice was
+        # measured and before any image existed, so every scene on disk read
+        # `duration: 0.0` and `asset_path: ""` - the one artifact somebody
+        # opens to ask "why does scene 3 not match its picture" could not
+        # answer the question.
+        existing = read_json(job_dir / "script.json", {}) or {}
+        safe_write_json(job_dir / "script.json",
+                        {**existing, **script.to_dict()})
         return assets
 
     def stage_render(self, job: VideoJob, request: AutomationRequest, profile,

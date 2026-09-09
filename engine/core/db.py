@@ -667,15 +667,28 @@ class Database:
              json.dumps(d, ensure_ascii=False), time.time()),
         )
 
-    def recent_script_texts(self, limit: int = 50) -> list[tuple[str, str]]:
+    def recent_script_texts(
+            self, limit: int = 50) -> list[tuple[str, str, str]]:
+        """(script_id, text, provider), newest first.
+
+        The PROVIDER is returned because the self-similarity check needs it.
+        A banked script's provider is "bank:<entry_id>", and two renders of
+        one entry are the same text by design - so without it, retrying a
+        banked video after a failed render reads as a 100% duplicate of its
+        own failed attempt and can never publish.
+        """
         rows = self.query(
-            "SELECT script_id, payload FROM scripts ORDER BY created_at DESC LIMIT ?", (limit,))
+            "SELECT script_id, provider, payload FROM scripts "
+            "ORDER BY created_at DESC LIMIT ?", (limit,))
         out = []
         for r in rows:
             try:
-                out.append((r["script_id"], json.loads(r["payload"]).get("script", "")))
+                payload = json.loads(r["payload"])
             except (ValueError, TypeError):
                 continue
+            out.append((r["script_id"],
+                        payload.get("script", ""),
+                        r["provider"] or payload.get("provider", "")))
         return out
 
     # ---- assets ------------------------------------------------------

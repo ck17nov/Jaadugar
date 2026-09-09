@@ -199,6 +199,17 @@ class CaptionEngine:
         self.enabled = bool(cfg.get("captions.enabled", True))
         self.style = str(cfg.get("captions.style", "karaoke"))
         self.font_size = int(cfg.get("captions.font_size", 92))
+        # A BLOCK caption is a whole sentence; a karaoke caption is three
+        # words. They cannot share a font size.
+        #
+        # At 96px on a 1080-wide frame only 25 characters fit on a line -
+        # correct for "STILL UP ON THE" and hopeless for "Meera saw
+        # Grandmother's slipper still up on the terrace.", which measured
+        # 2,192px against 983px of usable width and ran off both edges. The
+        # cross-language captions are the only ones that arrive as whole
+        # sentences, which is why this only ever broke those.
+        self.block_font_scale = float(
+            cfg.get("captions.block_font_scale", 0.62))
         self.primary = str(cfg.get("captions.primary_color", "&H00FFFFFF"))
         self.highlight = str(cfg.get("captions.highlight_color", "&H0000E5FF"))
         self.outline = int(cfg.get("captions.outline", 6))
@@ -243,6 +254,16 @@ class CaptionEngine:
         """
         groups: list[CaptionGroup] = []
         floor = float(self.cfg.get("captions.min_block_seconds", 0.85))
+        # LINE WRAPPING happens in `_block_events`, which is where escaping
+        # happens - see the note there. It has to, because a translated block
+        # is a whole sentence and nothing was breaking it: the ASS header sets
+        # WrapStyle 2, which makes libass wrap ONLY at an explicit break. The
+        # karaoke path is pre-split into short groups so it never noticed, but
+        # a 56-character sentence measured 2,192px against 983px of usable
+        # width and ran off both edges - a real render lost the "M" from
+        # "Meera" and the "ce." from "terrace.". Reported as "captions aren't
+        # correct", and it hit the cross-language captions specifically
+        # because those are the only ones that arrive as whole sentences.
         for start, end, text in spans:
             clean = (text or "").strip()
             if not clean:
@@ -302,7 +323,7 @@ class CaptionEngine:
         # of tofu boxes once Hindi scripts started generating correctly.
         font_file, family = display_font(
             str(self.cfg.get("captions.font_file", "Anton")), language=language)
-        size = self._scaled_font_size(width, height)
+        size = self._scaled_font_size(width, height, style)
         # MarginV is measured from the bottom for bottom-aligned text.
         margin_v = int(height * self.safe_bottom)
         margin_h = int(width * self.margin_fraction)
@@ -343,7 +364,11 @@ class CaptionEngine:
 
         events: list[str] = []
         if style == "block":
-            events = self._block_events(groups)
+            events = self._block_events(
+                groups,
+                per_line=self._chars_per_line(width, height, language,
+                                              "block"),
+                size=size)
         elif style == "none":
             events = []
         else:
@@ -416,10 +441,86 @@ class CaptionEngine:
         except Exception:
             return self.GLYPH_RATIO
 
+    # The most lines a caption block may occupy. Three lines of large type is
+    # already a third of a portrait frame; beyond that the caption stops being
+    # a caption and becomes the picture. If a sentence needs more, the
+    # sentence is too long and shrinking is the honest response.
+    MAX_BLOCK_LINES = 3
+
+    @staticmethod
+    def _break_lines(text: str, per_line: int) -> list[str]:
+        """Split at word boundaries so no line exceeds `per_line`.
+
+        Never breaks inside a word. A single word longer than the line has
+        nowhere to break and is left over-long: an overflowing caption is
+        bad, a caption with a word chopped in half is worse.
+        """
+        words_in = (text or "").split()
+        if not words_in:
+            return []
+        lines: list[str] = []
+        current = ""
+        for word in words_in:
+            candidate = f"{current} {word}".strip()
+            if current and len(candidate) > per_line:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+        return lines
+
+    def _balance(self, text: str, lines: list[str], per_line: int) -> list[str]:
+        """Even out line lengths without adding a line.
+
+        Greedy filling packs the first line and strands the remainder, so a
+        41-character Hindi caption came out as one full line and then "रखी।"
+        alone. Re-wrapping at the average width instead gives two lines of
+        similar length, which is what a human subtitler does and what makes a
+        two-line caption read as one unit.
+
+        Falls back to the greedy result whenever balancing would need an
+        extra line - staying inside the line budget matters more than looking
+        tidy.
+        """
+        if len(lines) < 2:
+            return lines
+        target = max(8, -(-len(text) // len(lines)))
+        for width in range(target, per_line + 1):
+            candidate = self._break_lines(text, width)
+            if len(candidate) == len(lines):
+                return candidate
+        return lines
+
+    def _wrap_block(self, text: str, per_line: int) -> tuple[list[str], float]:
+        """Lines for this caption, and a font scale in (0, 1].
+
+        Explicit line breaks rather than switching the ASS header to
+        WrapStyle 0, because the wrap point then has to agree with
+        `_chars_per_line` - the same measurement the karaoke path already
+        uses - instead of with libass's own idea of the font metrics. Two
+        systems wrapping the same text at different widths is how a caption
+        comes out on one line in one render and two in the next.
+
+        A sentence needing more than MAX_BLOCK_LINES SHRINKS rather than
+        losing its tail. Dropping the end of a caption is the one outcome
+        worse than an ugly one - a cross-language caption is the only text
+        some viewers of this video can follow at all.
+        """
+        lines = self._break_lines(text, per_line)
+        if len(lines) <= self.MAX_BLOCK_LINES:
+            return self._balance(text, lines, per_line), 1.0
+        # Re-wrap at the width that would fit in the allowed number of lines,
+        # and shrink the type by the same ratio so that width is real.
+        scale = max(0.62, self.MAX_BLOCK_LINES / len(lines))
+        wider = max(8, int(per_line / scale))
+        return self._break_lines(text, wider)[:self.MAX_BLOCK_LINES], scale
+
     def _chars_per_line(self, width: int, height: int,
-                        language: str = "") -> int:
+                        language: str = "", style: str = "") -> int:
         """How many characters fit on ONE line inside the side margins."""
-        size = self._scaled_font_size(width, height)
+        size = self._scaled_font_size(width, height, style)
         usable = width * (1.0 - 2 * self.margin_fraction)
         spacing = self._letter_spacing(language)   # matches the ASS Spacing
         # 6% headroom: the ruler is an average, and one caption of unusually
@@ -437,12 +538,15 @@ class CaptionEngine:
         """
         return float(self.cfg.get("captions.margin_fraction", 0.045))
 
-    def _scaled_font_size(self, width: int, height: int) -> int:
+    def _scaled_font_size(self, width: int, height: int,
+                          style: str = "") -> int:
         """Font size configured for 1080x1920; scale to the actual frame."""
         base = self.font_size
+        if style == "block":
+            base = int(base * self.block_font_scale)
         if width > height:                      # long-form: relatively smaller
-            return max(28, int(base * (height / 1920) * 1.35))
-        return max(28, int(base * (width / 1080)))
+            return max(24, int(base * (height / 1920) * 1.35))
+        return max(24, int(base * (width / 1080)))
 
     def _karaoke_events(self, groups: list[CaptionGroup]) -> list[str]:
         """One event per word-state: the active word is coloured and scaled up."""
@@ -475,8 +579,17 @@ class CaptionEngine:
                     f"Dialogue: 0,{_ts(start)},{_ts(end)},Main,,0,0,0,,{text}")
         return events
 
-    def _block_events(self, groups: list[CaptionGroup]) -> list[str]:
-        """Whole phrase, no per-word highlight (calmer; used for kids content)."""
+    def _block_events(self, groups: list[CaptionGroup],
+                      per_line: int = 0, size: int = 0) -> list[str]:
+        """Whole phrase, no per-word highlight (calmer; used for kids content).
+
+        `per_line` and `size` enable line wrapping. Without them a whole
+        sentence is emitted as one line, and the ASS header sets WrapStyle 2
+        - wrap only at an explicit break - so it runs straight off both edges
+        of the frame. That is what cut the "M" off "Meera" in a measured
+        render, and it only ever hit the cross-language captions because they
+        are the only ones that arrive as complete sentences.
+        """
         events: list[str] = []
         for group in groups:
             # A translated block arrives as ONE "word" holding a whole
@@ -484,12 +597,25 @@ class CaptionEngine:
             # several scripts have no case at all, so it is left alone.
             translated = len(group.words) == 1 and " " in group.words[0].text
             upper = self.uppercase and not translated
-            tokens = [_escape(w.text.upper() if upper else w.text)
-                      for w in group.words]
-            text = "{\\fad(90,70)}" + " ".join(tokens)
+            joined = " ".join(w.text.upper() if upper else w.text
+                              for w in group.words)
+
+            scale = 1.0
+            if per_line > 0:
+                lines, scale = self._wrap_block(joined, per_line)
+            else:
+                lines = [joined]
+            # Escape each line, THEN join with the ASS break. Escaping the
+            # joined string would turn the break's backslash into a literal
+            # one and print "\N" in the middle of the caption.
+            body = "\\N".join(_escape(line) for line in lines)
+
+            prefix = "{\\fad(90,70)}"
+            if scale < 0.999 and size > 0:
+                prefix = f"{{\\fad(90,70)\\fs{max(20, int(size * scale))}}}"
             events.append(
                 f"Dialogue: 0,{_ts(group.start)},{_ts(group.end + 0.14)},"
-                f"Main,,0,0,0,,{text}")
+                f"Main,,0,0,0,,{prefix}{body}")
         return events
 
     @staticmethod

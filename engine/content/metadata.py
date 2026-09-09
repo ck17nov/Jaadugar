@@ -13,7 +13,8 @@ from ..core.config import Config
 from ..core.logging import log_event
 from ..core.models import ContentIdea, Script, VideoMetadata
 from ..core.niche import NicheProfile
-from ..core.util import clamp, keywords, sentences, token_overlap, truncate, words
+from ..core.util import (STOPWORDS, clamp, keywords, sentences,
+                         token_overlap, truncate, words)
 
 YOUTUBE_TITLE_LIMIT = 100
 YOUTUBE_DESC_LIMIT = 5000
@@ -27,6 +28,11 @@ CURIOSITY_WORDS = {
     "nobody", "strange", "stranger", "unexpected", "wrong", "mistake", "myth",
     "found", "discovered", "revealed", "until", "before", "almost", "never",
 }
+# What a human-reviewed authored title is worth, on the 0-1 scale before the
+# x100. Enough to lift a specific, concrete title over a formulaic one of
+# similar mechanical quality, not enough to save a bad one.
+AUTHORED_BONUS = 0.12
+
 EMOTION_WORDS = {
     "shocking", "incredible", "terrifying", "beautiful", "brutal", "insane",
     "amazing", "unbelievable", "wild", "crazy", "stunning", "haunting",
@@ -145,7 +151,17 @@ class MetadataGenerator:
               research: list | None = None) -> VideoMetadata:
         candidates = self._title_candidates(script, idea, profile,
                                             research=research)
-        scored = [self.score_title(t, script, idea) for t in candidates]
+        # Titles that arrived WITH the script, in the order the author put
+        # them - the first is their preferred one. Only for a banked script:
+        # a live-generated script's title_ideas came from the same model that
+        # is about to generate more, so there is nothing human about them.
+        authored = set()
+        if (script.provider or "").startswith("bank:"):
+            authored = {t.strip().lower()
+                        for t in (script.title_ideas or []) if t.strip()}
+        scored = [self.score_title(t, script, idea,
+                                   authored=t.strip().lower() in authored)
+                  for t in candidates]
         scored.sort(key=lambda c: c["score"], reverse=True)
         best = scored[0] if scored else {"title": idea.working_title, "score": 50.0}
 
@@ -280,15 +296,44 @@ Return JSON: {{"titles": ["...", "..."]}}"""
 
     # ------------------------------------------------------------------
     def score_title(self, title: str, script: Script,
-                    idea: ContentIdea) -> dict[str, Any]:
-        """Score 0-100 across the spec's eight dimensions."""
+                    idea: ContentIdea, *, authored: bool = False) -> dict[str, Any]:
+        """Score 0-100 across the spec's eight dimensions.
+
+        `authored` marks a title that came with a human-reviewed banked
+        script rather than being generated during this render. It earns a
+        bonus rather than an automatic win: a person chose it AND a person
+        read it, which is evidence the rubric cannot measure, but a genuinely
+        bad authored title should still be able to lose.
+        """
         text = title.strip()
         lowered = text.lower()
         toks = set(words(lowered))
         length = len(text)
 
+        # Words the video is ACTUALLY about.
+        #
+        # Capitalisation cannot identify a proper noun in a Title Case string:
+        # "What Happens When Kiran Sets a Paper Boat" has eight capitals and
+        # one name. That is why an earlier attempt at this still ranked the
+        # formulaic title first - every candidate scored as maximally
+        # specific. The reliable signal is the SCRIPT: a word that appears in
+        # the narration is a word the video delivers, and "happens" does not
+        # appear in a story about a paper boat while "Kiran" and "boat" do.
+        subject_words = {w for w in words(script.script.lower())
+                         if len(w) > 3 and w not in STOPWORDS}
+
+        # Specificity gates the question-mark bonus.
+        #
+        # A flat +0.25 for "?" paid a vague question the same as a pointed
+        # one, and "What Happens When ...?" is the vaguest possible use of a
+        # question mark - it commits to nothing. A question only earns the
+        # bonus when the title also names something concrete, which is the
+        # difference between "Will Kiran's Boat Reach the Gate?" and "What
+        # Happens When ...?".
+        names_something = (any(c.isdigit() for c in text)
+                           or len(toks & subject_words) >= 2)
         curiosity = clamp(len(toks & CURIOSITY_WORDS) / 2.0)
-        if text.endswith("?"):
+        if text.endswith("?") and names_something:
             curiosity = clamp(curiosity + 0.25)
 
         # Clarity: readable length, not too many words, no jargon pileup.
@@ -299,24 +344,58 @@ Return JSON: {{"titles": ["...", "..."]}}"""
 
         emotional = clamp(len(toks & EMOTION_WORDS) / 2.0 + 0.25)
 
-        # Specificity: numbers, proper nouns, concrete terms.
+        # Specificity: numbers and words the script actually delivers.
         has_number = any(c.isdigit() for c in text)
-        proper_nouns = sum(1 for w in text.split()[1:] if w[:1].isupper())
+        concrete = len(toks & subject_words)
         specificity = clamp((0.4 if has_number else 0.0)
-                            + min(proper_nouns, 3) * 0.2 + 0.2)
+                            + min(concrete, 4) * 0.15 + 0.2)
 
         # Novelty: does it avoid the tired stock phrasings?
+        #
+        # The FORMULAIC OPENERS were the ones actually being produced, and the
+        # rubric rewarded them twice over - once through `curiosity`, which
+        # counts "what"/"how"/"will" plus a question mark, and again through
+        # `click`, which pays a bonus for a curiosity word in the first three
+        # words. A measured run of a hand-written bedtime story scored "What
+        # Happens When Kiran Sets a Paper Boat on a Monsoon Path?" at 75 and
+        # the authored "Kiran and the Paper Boat" at 51, ranking it ninth of
+        # ten. That is the wrong way round: the first is sixty characters of
+        # throat-clearing that promises nothing, and titles that work in this
+        # niche name the character and the trouble - "The Lion Who Couldn't
+        # Roar". Reported as "title is not eye catching".
         tired = ("top 10", "you need to know", "in 60 seconds", "explained simply",
                  "mind blowing", "must know")
-        novelty = clamp(1.0 - sum(1 for t in tired if t in lowered) * 0.4)
+        formulaic = ("what happens when", "you won't believe", "this is why",
+                     "here's why", "here is why", "the truth about",
+                     "what nobody tells you", "everything you need",
+                     "the secret to", "watch what happens")
+        novelty = clamp(1.0
+                        - sum(1 for t in tired if t in lowered) * 0.4
+                        - sum(1 for t in formulaic if lowered.startswith(t)) * 0.5)
 
         # Search relevance: shares vocabulary with the actual content.
         search = clamp(token_overlap(text, f"{idea.topic} {script.script[:600]}") * 1.5)
 
         # Click potential: front-loaded interest.
-        first_three = " ".join(text.split()[:3]).lower()
+        #
+        # This used to pay 0.3 for a CURIOSITY WORD in the first three words,
+        # which - together with the curiosity term above at weight 0.20 -
+        # meant 36% of the score rewarded the same opening word twice. The
+        # result was measurable: "What Happens When Kiran Sets a Paper Boat
+        # on a Monsoon Path?" beat the authored "Kiran's Boat Will Not Sail".
+        #
+        # What actually front-loads interest is a SPECIFIC thing in the
+        # opening words - a name, a number, the subject itself. "Kiran's Boat
+        # Will Not Sail" opens on a character and a problem; "What happens
+        # when" opens on nothing. The curiosity credit stays but is now
+        # smaller than the specific one.
+        opening = text.split()[:3]
+        opening_toks = set(words(" ".join(opening).lower()))
+        opens_specific = (bool(opening_toks & subject_words)
+                          or any(c.isdigit() for w in opening for c in w))
         click = clamp(0.35
-                      + (0.3 if set(words(first_three)) & CURIOSITY_WORDS else 0.0)
+                      + (0.28 if opens_specific else 0.0)
+                      + (0.12 if opening_toks & CURIOSITY_WORDS else 0.0)
                       + (0.2 if has_number else 0.0)
                       + (0.15 if 40 <= length <= 70 else 0.0))
 
@@ -342,8 +421,8 @@ Return JSON: {{"titles": ["...", "..."]}}"""
                    "specificity": 0.14, "novelty": 0.10,
                    "search_relevance": 0.14, "click_potential": 0.16}
         base = sum(parts[k] * weights[k] for k in parts)
-        score = clamp(base - risk) * 100
-        return {"title": text, "score": round(score, 1),
+        score = clamp(base - risk + (AUTHORED_BONUS if authored else 0.0)) * 100
+        return {"title": text, "score": round(score, 1), "authored": authored,
                 "breakdown": {k: round(v, 3) for k, v in parts.items()},
                 "misleading_risk": round(risk, 3), "risk_reasons": reasons}
 

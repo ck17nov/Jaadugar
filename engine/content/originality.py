@@ -105,8 +105,20 @@ class OriginalityChecker:
 
         # --- 2. Against our own history (anti-spam) --------------------
         if self.db is not None:
-            for script_id, text in self.db.recent_script_texts(limit=60):
+            # A banked entry can be claimed more than once - a render that
+            # fails releases it back to the pool - and both attempts store the
+            # same text under different script ids. Comparing them finds a
+            # 100% match and blocks the retry forever, which is a
+            # self-inflicted deadlock rather than near-duplicate publishing.
+            # The bank's own import gate is what guarantees entries are
+            # distinct from each other.
+            own_bank_entry = (script.provider
+                              if script.provider.startswith("bank:") else "")
+            for script_id, text, provider in self.db.recent_script_texts(
+                    limit=60):
                 if script_id == script.script_id or not text:
+                    continue
+                if own_bank_entry and provider == own_bank_entry:
                     continue
                 sim = jaccard(script.script, text, n=4)
                 if sim > result.self_similarity:
