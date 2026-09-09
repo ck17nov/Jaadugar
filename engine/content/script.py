@@ -164,6 +164,22 @@ def _story_structure(is_short: bool) -> list[tuple[str, str, float]]:
     ]
 
 
+def _narrations(script) -> list[str]:
+    """Scene narration, whether the scenes are dicts or Scene objects.
+
+    Script.scenes is typed list[dict], but the same attribute holds Scene
+    objects at several points mid-pipeline, and attribute access on a dict
+    raises rather than returning nothing - so this is not defensive padding,
+    it is the actual contract.
+    """
+    out: list[str] = []
+    for scene in (script.scenes or []):
+        text = (scene.get("narration", "") if isinstance(scene, dict)
+                else getattr(scene, "narration", ""))
+        out.append(str(text or ""))
+    return out
+
+
 def llm_category(profile) -> str:
     """What KIND of request this is, for provider routing.
 
@@ -449,10 +465,88 @@ class ScriptGenerator:
         script = self._post_process(script, profile, target_words, min_words,
                                     duration, is_short)
         self._refuse_boilerplate(script, language)
+        script = self._ensure_story_shape(
+            script, idea, profile, duration, language, is_short, target_words,
+            min_words, scene_count, structure, research_context,
+            strategy_hints)
         log_event("SCRIPT", "script generated", provider=script.provider,
                   words=count_words(script.script), scenes=len(script.scenes),
                   target_words=target_words,
                   est_seconds=f"{script.estimated_duration:.1f}")
+        return script
+
+    # ------------------------------------------------------------------
+    def _ensure_story_shape(self, script: Script, idea: ContentIdea,
+                            profile: NicheProfile, duration: int,
+                            language: str, is_short: bool, target_words: int,
+                            min_words: int, scene_count: int,
+                            structure: list, research_context: str,
+                            strategy_hints: str) -> Script:
+        """Check a kids story is actually a story, and re-ask once if not.
+
+        Runs here rather than in the media quality gate because that one
+        evaluates a rendered file, and by then the script has already cost an
+        image budget and a render. One extra LLM call is the cheap failure.
+
+        Advisory findings are logged and accepted. Blocking ones - no
+        recurring character, no verbatim refrain, an opening rhetorical
+        question, or an adult solving it at the resolution - get exactly one
+        corrective re-ask naming what to fix, and the better of the two
+        attempts is kept. Not raising on a second failure is deliberate: a
+        story that is 3-for-4 on shape is still far better than the
+        boilerplate the alternative degrades to, and refusing here would turn
+        a soft quality problem into a failed job.
+        """
+        if not is_kids_story(profile):
+            return script
+        from .story_gate import evaluate
+
+        narrations = _narrations(script)
+        floor = max(10, target_words // max(len(narrations), 1) - 4)
+        report = evaluate(narrations, words_per_scene_floor=floor)
+        script.story_report = report.to_dict()
+        if report.passed:
+            log_event("SCRIPT", "story shape ok", character=report.character,
+                      refrain=report.refrain[:40],
+                      warnings=len(report.warnings))
+            return script
+
+        log_event("SCRIPT", "story shape failed, re-asking once",
+                  blockers=",".join(f.check for f in report.blockers),
+                  detail=report.summary()[:200])
+        fixes = " ".join(f"FIX: {f.detail}." for f in report.blockers)
+        nudge = (
+            "\n\nYOUR PREVIOUS DRAFT WAS NOT A STORY. Rewrite it completely, "
+            "keeping the same characters and events where they work, and fix "
+            "every one of these:\n"
+            + fixes
+            + "\nThese are hard requirements, not suggestions.")
+        try:
+            data, provider = self.router.complete_json(
+                self._build_prompt(idea, profile, duration, language,
+                                   is_short, target_words, scene_count,
+                                   structure, research_context,
+                                   strategy_hints) + nudge,
+                system=SYSTEM_PROMPT, temperature=self.temperature,
+                max_tokens=4096 if is_short else 8192,
+                category=llm_category(profile))
+            retry = self._parse(data, idea, profile, language, provider)
+            retry = self._post_process(retry, profile, target_words,
+                                       min_words, duration, is_short)
+        except Exception as exc:                # noqa: BLE001 - see docstring
+            log_event("SCRIPT", "story re-ask failed, keeping the first draft",
+                      error=str(exc)[:160])
+            return script
+
+        second = evaluate(_narrations(retry), words_per_scene_floor=floor)
+        retry.story_report = second.to_dict()
+        if len(second.blockers) < len(report.blockers):
+            log_event("SCRIPT", "story shape improved on the re-ask",
+                      was=len(report.blockers), now=len(second.blockers),
+                      character=second.character)
+            return retry
+        log_event("SCRIPT", "re-ask was no better; keeping the first draft",
+                  blockers=len(report.blockers))
         return script
 
     # ------------------------------------------------------------------
@@ -556,6 +650,25 @@ class ScriptGenerator:
             got = count_words(script.script)
             log_event("SCRIPT", "re-ask improved the length", words=got,
                       floor=min_words)
+
+        # A NEAR MISS AFTER A GOOD RE-ASK IS NOT A FAILURE.
+        #
+        # Measured on a real 600-second run: the re-ask returned 1,209 words
+        # against a 1,234-word floor - 98% of it - and this raised, failing
+        # the whole stage and burning a retry plus the LLM quota to re-ask a
+        # question that had already been answered well. The estimate in the
+        # message even said so: "roughly 587s long" for a 600-second target.
+        #
+        # The floor is already `target * 0.82`, so it is a floor under a
+        # tolerance, and the speaking-rate clamp downstream absorbs a few
+        # per cent either way. Accept within 5% of the floor once the re-ask
+        # has run, and say that is what happened.
+        if got < min_words and got >= int(min_words * 0.95):
+            log_event("SCRIPT", "accepting a near-miss on length after the "
+                                "re-ask rather than failing the stage",
+                      words=got, floor=min_words,
+                      short_by=f"{(1 - got / max(min_words, 1)) * 100:.1f}%")
+            return script
 
         if got < min_words:
             # Keep the short REAL script and say why it is short, rather than

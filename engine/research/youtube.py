@@ -15,6 +15,9 @@ that would exceed the budget, reserving room for the day's uploads.
 """
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
 from typing import Any, Iterable
 
 import httpx
@@ -74,6 +77,13 @@ class QuotaGuard:
             return self.db.add_quota(pacific_day(), units, op)
         self._local += units
         return self._local
+
+
+def _keywords(text: str) -> list[str]:
+    """Content words from a niche name, for relevance checks."""
+    stop = {"and", "the", "for", "with", "of", "to", "in", "on", "a", "an"}
+    return [w for w in re.split(r"[^\w]+", (text or "").lower())
+            if w and w not in stop]
 
 
 def _chunks(items: list[str], size: int) -> Iterable[list[str]]:
@@ -247,6 +257,197 @@ class YouTubeResearch:
         return out
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Seeded-channel research: watch a fixed set of channels cheaply
+    # ------------------------------------------------------------------
+    def _seed_path(self) -> Path:
+        return Path(str(self.cfg.get("paths.workspace", "workspace"))) / \
+            "seed_channels.json"
+
+    def _load_seeds(self) -> dict[str, list[str]]:
+        path = self._seed_path()
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return {k: list(v) for k, v in data.items() if isinstance(v, list)}
+        except (ValueError, OSError):
+            return {}
+
+    def _save_seeds(self, seeds: dict[str, list[str]]) -> None:
+        path = self._seed_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(seeds, indent=1, ensure_ascii=False),
+                            encoding="utf-8")
+        except OSError as exc:
+            log_event("RESEARCH", "could not cache seed channels",
+                      error=str(exc)[:120])
+
+    def seed_channels(self, niche: str, profile: NicheProfile, *,
+                      limit: int = 4) -> list[str]:
+        """Channel ids worth watching for this niche. Discovered once, cached.
+
+        This is the ONLY place a `search.list` is spent in the cheap path, and
+        it happens once per niche for the lifetime of the install. Everything
+        afterwards is 1-unit calls against these ids.
+        """
+        key = (niche or "").strip().lower()
+        seeds = self._load_seeds()
+        if seeds.get(key):
+            return seeds[key][:limit]
+        if not self.configured:
+            return []
+        try:
+            self.quota.check("search_list")
+        except QuotaExceeded as exc:
+            log_event("RESEARCH", "cannot discover seed channels today",
+                      reason=str(exc)[:120])
+            return []
+        # The NICHE only. Including profile.audience put "5-7" in the query
+        # and "kids bedtime stories 5-7" returned a comedy channel whose top
+        # video was "Indian Schools, Gully Cricket & Summer Holidays" at 39M
+        # views - relevant to nothing, and it would have seeded every future
+        # research run for that niche because the result is cached.
+        query = (niche or "").strip()
+        try:
+            data = self._get("search", {
+                "part": "snippet", "type": "channel", "q": query,
+                # Over-fetch: the relevance filter below discards channels
+                # whose uploads do not actually match the niche, so the
+                # candidate pool has to be bigger than the target.
+                "maxResults": min(25, max(limit * 4, 10)),
+                "regionCode": str(self.cfg.get("research.region_code", "IN")),
+                "relevanceLanguage": str(
+                    self.cfg.get("research.relevance_language", "en")),
+            })
+            self.quota.spend("search_list")
+        except Exception as exc:                # noqa: BLE001
+            log_event("RESEARCH", "seed channel discovery failed",
+                      error=str(exc)[:140])
+            return []
+        found: list[str] = []
+        for item in data.get("items", []):
+            cid = (((item.get("snippet") or {}).get("channelId"))
+                   or ((item.get("id") or {}).get("channelId")) or "")
+            if cid and cid not in found:
+                found.append(cid)
+        found = self._keep_relevant(found, niche, limit=limit)
+        if found:
+            seeds[key] = found
+            self._save_seeds(seeds)
+            log_event("RESEARCH", "seed channels discovered and cached",
+                      niche=niche, channels=len(found), units_spent=100)
+        else:
+            log_event("RESEARCH", "no channel matched this niche closely "
+                      "enough to seed; falling back to keyword search",
+                      niche=niche)
+        return found
+
+    def _keep_relevant(self, channel_ids: list[str], niche: str, *,
+                       limit: int) -> list[str]:
+        """Drop channels whose recent uploads have nothing to do with the niche.
+
+        Channel search relevance is weak and the result is CACHED FOREVER, so
+        a bad seed poisons every future run for that niche. Validating costs
+        one unit per channel and is checked against the titles the channel
+        actually publishes rather than against its own description, which is
+        marketing.
+        """
+        wanted = {w for w in _keywords(niche) if len(w) > 3}
+        if not wanted or not channel_ids:
+            return channel_ids[:limit]
+        playlists = self._uploads_playlists(channel_ids)
+        scored: list[tuple[float, str]] = []
+        for cid, playlist in playlists.items():
+            ids = self._playlist_video_ids(playlist, limit=10)
+            if not ids:
+                continue
+            titles = " ".join(v.title.lower() for v in self.hydrate(ids))
+            hits = sum(1 for w in wanted if w in titles)
+            share = hits / len(wanted)
+            scored.append((share, cid))
+            log_event("RESEARCH", "seed candidate checked", channel=cid,
+                      niche_overlap=f"{share:.0%}")
+        # A third of the niche's own words appearing in ten recent titles is a
+        # low bar deliberately: it rejects the comedy channel that matched
+        # "kids bedtime stories" while keeping a channel that calls them
+        # "moral stories for children".
+        keep = [cid for share, cid in sorted(scored, reverse=True)
+                if share >= 0.34]
+        return keep[:limit]
+
+    def _uploads_playlists(self, channel_ids: list[str]) -> dict[str, str]:
+        """channel id -> uploads playlist id. One unit for up to 50 channels."""
+        out: dict[str, str] = {}
+        for batch in _chunks(channel_ids, 50):
+            try:
+                self.quota.check("channels_list")
+                data = self._get("channels", {
+                    "part": "contentDetails", "id": ",".join(batch),
+                    "maxResults": 50})
+                self.quota.spend("channels_list")
+            except Exception as exc:            # noqa: BLE001
+                log_event("RESEARCH", "uploads playlist lookup failed",
+                          error=str(exc)[:140])
+                continue
+            for item in data.get("items", []):
+                playlist = (((item.get("contentDetails") or {})
+                             .get("relatedPlaylists") or {}).get("uploads"))
+                if playlist:
+                    out[str(item.get("id", ""))] = str(playlist)
+        return out
+
+    def _playlist_video_ids(self, playlist_id: str, *,
+                            limit: int = 50) -> list[str]:
+        """Recent uploads from one playlist. One unit per 50."""
+        try:
+            self.quota.check("playlist_items")
+            data = self._get("playlistItems", {
+                "part": "contentDetails", "playlistId": playlist_id,
+                "maxResults": min(50, max(1, limit))})
+            self.quota.spend("playlist_items")
+        except Exception as exc:                # noqa: BLE001
+            log_event("RESEARCH", "playlist read failed",
+                      playlist=playlist_id, error=str(exc)[:140])
+            return []
+        out: list[str] = []
+        for item in data.get("items", []):
+            vid = ((item.get("contentDetails") or {}).get("videoId") or "")
+            if vid:
+                out.append(str(vid))
+        return out
+
+    def research_channels(self, niche: str, profile: NicheProfile, *,
+                          per_channel: int = 50) -> list[ResearchVideo]:
+        """Everything the seeded channels published recently, scored.
+
+        Returns [] rather than raising when there are no seeds, so the caller
+        can fall back to keyword search.
+        """
+        channels = self.seed_channels(niche, profile)
+        if not channels:
+            return []
+        playlists = self._uploads_playlists(channels)
+        if not playlists:
+            return []
+        ids: list[str] = []
+        for playlist in playlists.values():
+            ids += self._playlist_video_ids(playlist, limit=per_channel)
+        if not ids:
+            return []
+        videos = self.hydrate(ids)
+        spent = 1 + 2 * len(playlists)
+        log_event("RESEARCH", "seeded-channel corpus", channels=len(playlists),
+                  videos=len(videos), approx_units=spent,
+                  versus_keyword_search=100 * int(
+                      self.cfg.get("research.max_queries", 3)) + 2)
+        min_views = int(self.cfg.get("research.min_views", 5000))
+        videos = [v for v in videos if v.views >= min_views]
+        return score_all(
+            videos, self.cfg.get("scoring.weights"),
+            float(self.cfg.get("scoring.breakout_ratio_threshold", 2.5)))
+
     def research(self, niche: str, profile: NicheProfile, *,
                  video_format: str = "SHORT",
                  extra_keywords: list[str] | None = None,

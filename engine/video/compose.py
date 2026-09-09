@@ -37,7 +37,8 @@ from ..core.config import Config
 from ..core.logging import log_event
 from ..visuals.base import OVERSIZE
 from ..core.models import Scene
-from ..core.util import (CommandError, ensure_dir, ffmpeg_bin, probe_duration,
+from ..core.util import (CommandError, ensure_dir, ffmpeg_bin,
+                        ffmpeg_filter_path, probe_duration,
                          probe_json, run)
 from .fonts import FONT_DIR
 
@@ -147,16 +148,29 @@ class VideoComposer:
                 out.append(d + t)
         return out
 
-    def _motion_filter(self, motion: str, frames: int, w: int, h: int) -> str:
+    def _motion_filter(self, motion: str, frames: int, w: int, h: int, *,
+                       hold_frames: int = 0) -> str:
         """zoompan expression with smoothstep easing.
 
         Source images are rendered 1.18x the frame, so zoom 1.0 shows the whole
         image and zoom 1.18 is a native-resolution crop: the pan never
         interpolates beyond the real pixels, which keeps edges sharp.
+
+        `hold_frames` freezes the opening on frame 0 before the move starts.
+        That exists for SHORTS, where a custom thumbnail is YPP-only with no
+        API surface - so the first frame IS the thumbnail, and it should be the
+        clean composed still rather than something caught a third of the way
+        through a zoom.
         """
         n = max(frames - 1, 1)
+        hold = max(0, min(int(hold_frames), n - 1))
         # p = linear progress, e = eased progress (smoothstep)
-        p = f"(on/{n})"
+        if hold:
+            # Clamped so the first `hold` frames are all progress 0 and the
+            # remaining frames still traverse the full move.
+            p = f"(max(0,min(1,(on-{hold})/{max(n - hold, 1)})))"
+        else:
+            p = f"(on/{n})"
         e = f"({p}*{p}*(3-2*{p}))"
         zc = "iw/2-(iw/zoom/2)"
         yc = "ih/2-(ih/zoom/2)"
@@ -198,11 +212,16 @@ class VideoComposer:
 
     def render_scene_clips(self, timings: list[SceneTiming], out_dir: Path,
                            w: int, h: int,
-                           parallel: int | None = None) -> list[Path]:
+                           parallel: int | None = None,
+                           hold_first_seconds: float = 0.0) -> list[Path]:
         ensure_dir(out_dir)
         if parallel is None:
             parallel = self.render_parallel
         lengths = self._clip_lengths([t.duration for t in timings])
+        # Freeze the opening frame before the move begins. Used for Shorts,
+        # where the first frame is the thumbnail and there is no API to upload
+        # a different one.
+        hold_first = max(0, int(round(hold_first_seconds * self.fps)))
 
         def one(args: tuple[SceneTiming, float]) -> Path:
             timing, length = args
@@ -242,7 +261,10 @@ class VideoComposer:
             vf = (f"sws_flags=lanczos;"
                   f"scale={src_w}:{src_h}:force_original_aspect_ratio=increase:"
                   f"flags=lanczos,crop={src_w}:{src_h},setsar=1,"
-                  + self._motion_filter(timing.motion, frames, w, h)
+                  + self._motion_filter(timing.motion, frames, w, h,
+                                        hold_frames=(
+                                            hold_first
+                                            if timing.index == 0 else 0))
                   + ",format=yuv420p")
             run([ffmpeg_bin(), "-y", "-loglevel", "error",
                  "-loop", "1", "-framerate", str(self.fps),
@@ -587,14 +609,12 @@ class VideoComposer:
         return probe_json(path)
 
 
-def _ffmpeg_path(path: Path) -> str:
-    """Escape a Windows path for use inside an ffmpeg filter argument.
-
-    Filters parse ':' and '\\' themselves, so C:\\a\\b.ass must become
-    C\\:/a/b.ass or ffmpeg reads the drive letter as an option separator.
-    """
-    text = str(path).replace("\\", "/")
-    return text.replace(":", "\\:", 1) if len(text) > 1 and text[1] == ":" else text
+# Kept as a thin alias. The implementation moved to engine/core/util.py so
+# the thumbnail headline burn could share it, rather than carrying a second
+# copy - and the second copy escaped EVERY colon instead of just the drive
+# letter, which ffmpeg rejected and which silently produced thumbnails with
+# no text on them.
+_ffmpeg_path = ffmpeg_filter_path
 
 
 def assign_motion(scenes: list[Scene],

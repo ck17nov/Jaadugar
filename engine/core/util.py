@@ -91,6 +91,23 @@ def which(name: str) -> str | None:
     return shutil.which(name)
 
 
+def ffmpeg_filter_path(path) -> str:
+    """Escape a path for use INSIDE an ffmpeg filter argument.
+
+    Filters parse ':' and '\\' themselves, so C:\\a\\b.ass has to become
+    C\\:/a/b.ass or ffmpeg reads the drive letter as an option separator.
+
+    ONLY the drive letter's colon is escaped. A second, hand-rolled copy of
+    this escaped every colon in the path, ffmpeg rejected the filter, and the
+    caller turned that into a thumbnail with no text on it at all - which is
+    why there is now one implementation here rather than two.
+    """
+    text = str(path).replace("\\", "/")
+    if len(text) > 1 and text[1] == ":":
+        return text.replace(":", "\\:", 1)
+    return text
+
+
 def ffmpeg_bin() -> str:
     return which("ffmpeg") or "ffmpeg"
 

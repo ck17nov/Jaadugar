@@ -248,6 +248,10 @@ class Script(JsonMixin):
     # {"heading": str, "scene_index": int}. Used for real YouTube chapters
     # instead of guessing labels from narration.
     chapters: list[dict[str, Any]] = field(default_factory=list)
+    # Child-directed narrative only: what the story-shape gate found. Kept on
+    # the script so it lands in job.json and a boring story can be diagnosed
+    # after the fact instead of re-run.
+    story_report: dict[str, Any] = field(default_factory=dict)
 
     def scene_objects(self) -> list[Scene]:
         out = []

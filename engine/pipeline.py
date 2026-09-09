@@ -733,8 +733,18 @@ class Pipeline:
                                 f"{len(durations)} timed scenes but "
                                 f"{len(timings)} have images")
 
+        # Hold the opening frame on a SHORT.
+        #
+        # A custom thumbnail on a Short has been YPP-only since 2026-07-25 and
+        # has no API surface at all, so the first frame IS the thumbnail.
+        # Holding it briefly means YouTube samples the clean composed still
+        # rather than a frame caught partway through the Ken Burns move.
+        hold_open = (0.0 if str(request.video_format or "").upper() == "LONGFORM"
+                     else float(self.cfg.get("video.short_hold_first_seconds",
+                                             0.4)))
         clips = self._retry("render", lambda: self.composer.render_scene_clips(
-            timings, job_dir / "clips", w, h), job)
+            timings, job_dir / "clips", w, h,
+            hold_first_seconds=hold_open), job)
         result = self._retry("render", lambda: self.composer.finalize(
             clips, durations, master, ass_path, job_dir / "video.mp4", w, h), job)
         cleanup_clips(clips)
@@ -775,7 +785,11 @@ class Pipeline:
             language=request.language,
             made_for_kids=profile.made_for_kids or request.made_for_kids,
             synthetic_disclosure=bool(
-                self.cfg.get("youtube.synthetic_disclosure", True))), job)
+                self.cfg.get("youtube.synthetic_disclosure", True)),
+            # Real titles from this niche, as PATTERN input. The title prompt
+            # previously saw no research at all, which is why titles came out
+            # generic - it had nothing to be attractive against.
+            research=videos), job)
 
         # ---- thumbnail --------------------------------------------------
         #

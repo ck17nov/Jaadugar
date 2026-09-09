@@ -79,6 +79,58 @@ def _publishable_angle(text: str) -> str:
     return cleaned[0].upper() + cleaned[1:]
 
 
+
+def title_patterns(research: list | None, *, limit: int = 12) -> str:
+    """A prompt block of real, high-performing titles from this niche.
+
+    Sorted by views and capped, because the point is the SHAPE of what works -
+    how long, whether it asks a question, whether it names a character, where
+    the hook sits - and twelve examples show that while fifty become noise the
+    model paraphrases.
+
+    The originality boundary is stated in the prompt rather than assumed. This
+    project has a hard rule against reproducing anyone's content, and "here
+    are competitor titles" is exactly the input that invites it, so the
+    instruction says in words that the structure may be learned and the
+    subject may not.
+    """
+    if not research:
+        return ""
+    rows = []
+    for video in research:
+        title = (getattr(video, "title", "") or "").strip()
+        views = int(getattr(video, "views", 0) or 0)
+        if title:
+            rows.append((views, title))
+    if not rows:
+        return ""
+    rows.sort(reverse=True)
+    seen: set[str] = set()
+    picked: list[tuple[int, str]] = []
+    for views, title in rows:
+        key = title.lower()[:40]
+        if key in seen:
+            continue
+        seen.add(key)
+        picked.append((views, title))
+        if len(picked) >= limit:
+            break
+    listing = "\n".join(f"  - {t}  ({v:,} views)" for v, t in picked)
+    return f"""
+WHAT ALREADY WORKS IN THIS NICHE - these are real titles from other
+channels, with their view counts, sorted by performance:
+{listing}
+
+Learn the SHAPE from them: typical length, whether they ask a question or
+make a promise, whether they name a character, where the strongest word
+sits, what punctuation and emoji they use, and what they leave out.
+
+Do NOT copy any of them, do not rewrite one with a word swapped, and do not
+write a title for THEIR video. The title you write is for OUR video, about
+OUR topic, and it must be true of it. Borrow the pattern, never the content.
+"""
+
+
 class MetadataGenerator:
     def __init__(self, cfg: Config, router=None):
         self.cfg = cfg
@@ -89,8 +141,10 @@ class MetadataGenerator:
               *, video_format: str = "SHORT", language: str = "en",
               made_for_kids: bool = False,
               synthetic_disclosure: bool = True,
-              hashtags: bool = True) -> VideoMetadata:
-        candidates = self._title_candidates(script, idea, profile)
+              hashtags: bool = True,
+              research: list | None = None) -> VideoMetadata:
+        candidates = self._title_candidates(script, idea, profile,
+                                            research=research)
         scored = [self.score_title(t, script, idea) for t in candidates]
         scored.sort(key=lambda c: c["score"], reverse=True)
         best = scored[0] if scored else {"title": idea.working_title, "score": 50.0}
@@ -118,7 +172,8 @@ class MetadataGenerator:
 
     # ------------------------------------------------------------------
     def _title_candidates(self, script: Script, idea: ContentIdea,
-                          profile: NicheProfile) -> list[str]:
+                          profile: NicheProfile,
+                          research: list | None = None) -> list[str]:
         """10 candidates: LLM-generated where available, plus structural ones."""
         out: list[str] = []
         out += [t for t in (script.title_ideas or []) if t.strip()]
@@ -128,7 +183,7 @@ class MetadataGenerator:
         if self.router is not None and len(out) < 10:
             try:
                 data, _ = self.router.complete_json(
-                    self._title_prompt(script, idea, profile),
+                    self._title_prompt(script, idea, profile, research),
                     system=SYSTEM_PROMPT, temperature=0.9, max_tokens=1024)
                 out += [str(t).strip() for t in (data.get("titles") or [])
                         if str(t).strip()]
@@ -164,10 +219,13 @@ class MetadataGenerator:
         return unique[:10]
 
     def _title_prompt(self, script: Script, idea: ContentIdea,
-                      profile: NicheProfile) -> str:
+                      profile: NicheProfile,
+                      research: list | None = None) -> str:
         language = (getattr(script, "language", "") or "en")
         from .translate import language_name
+        patterns = title_patterns(research)
         return f"""Write 10 title options for this video.
+{patterns}
 
 LANGUAGE: write every title in {language_name(language)} ({language}), in that
 language's own script. The title is the first thing a viewer sees, so it must
