@@ -162,7 +162,7 @@ class ChannelStore:
         raw = channels.get(wanted)
         return Channel.from_dict(raw) if raw else None
 
-    def for_niche(self, niche: str) -> Channel | None:
+    def for_niche(self, niche: str, group_key: str = "") -> Channel | None:
         """The channel this topic publishes to.
 
         Three passes, narrowest first:
@@ -175,16 +175,22 @@ class ChannelStore:
            mapping meant nine ticks per channel and forgetting one sent that
            topic silently to the default channel.
         3. Nothing. The caller falls back to the default channel.
+
+        `group_key` is the group the user actually chose on the Create screen.
+        It beats inferring one from the topic, which is what makes a CUSTOM
+        topic land on the right channel: "how to save for a house" is not a
+        listed topic, so inference has nothing exact to match and the video
+        would go to the default channel.
         """
         target = (niche or "").strip().lower()
-        if not target:
+        if not target and not group_key:
             return None
         channels = self.all()
         for channel in channels:
             if any(target == n.strip().lower() for n in (channel.niches or [])):
                 return channel
-        from ..core.groups import group_for_topic
-        found = group_for_topic(target)
+        from ..core.groups import group as group_by_key, group_for_topic
+        found = group_by_key(group_key) or group_for_topic(target)
         if found is None:
             return None
         for channel in channels:

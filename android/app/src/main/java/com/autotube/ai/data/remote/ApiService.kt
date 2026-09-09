@@ -30,6 +30,9 @@ interface ApiService {
     @GET("niche-groups")
     suspend fun nicheGroups(): NicheGroupListDto
 
+    @GET("script-bank")
+    suspend fun scriptBank(): ScriptBankDto
+
     @POST("youtube/accounts/{channelId}/niches")
     suspend fun setAccountNiches(
         @Path("channelId") channelId: String,

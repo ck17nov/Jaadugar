@@ -49,6 +49,14 @@ data class AutomationRequestDto(
     @SerialName("made_for_kids") val madeForKids: Boolean = false,
     val keywords: List<String> = emptyList(),
     @SerialName("publish_mode") val publishMode: String = "scheduled",
+    // "live" | "bank_first" | "bank". Defaults to live, so an automation
+    // created by anything that has not been updated behaves exactly as it did
+    // before the script bank existed.
+    @SerialName("script_source") val scriptSource: String = "live",
+    // The group chosen on the Create screen. Sent explicitly because a CUSTOM
+    // topic cannot be matched back to a group by name, and without it the
+    // video publishes to the default channel.
+    @SerialName("niche_group") val nicheGroup: String = "",
 )
 
 @Serializable
@@ -377,3 +385,28 @@ data class NicheGroupDto(
 
 @Serializable
 data class NicheGroupListDto(val groups: List<NicheGroupDto> = emptyList())
+
+/**
+ * One group/language/format slot of the script bank.
+ *
+ * `ready` is the number that matters: entries that are unused AND have a
+ * human reviewer, which are the only ones a render will claim. `unused`
+ * counts everything stored, so showing that instead would promise scripts
+ * that cannot actually be used.
+ */
+@Serializable
+data class BankSlotDto(
+    val group: String = "",
+    val language: String = "",
+    @SerialName("video_format") val videoFormat: String = "",
+    val total: Int = 0,
+    val unused: Int = 0,
+    val ready: Int = 0,
+)
+
+@Serializable
+data class ScriptBankDto(
+    val slots: List<BankSlotDto> = emptyList(),
+    @SerialName("ready_total") val readyTotal: Int = 0,
+    val sources: List<String> = emptyList(),
+)

@@ -170,13 +170,11 @@ class SecureStore(context: Context) {
         get() = prefs.getString(KEY_BACKEND_URL, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_BACKEND_URL, value.trim()).apply()
 
-    var defaultNiche: String
-        get() = prefs.getString(KEY_DEFAULT_NICHE, "science").orEmpty()
-        set(value) = prefs.edit().putString(KEY_DEFAULT_NICHE, value).apply()
-
-    var defaultLanguage: String
-        get() = prefs.getString(KEY_DEFAULT_LANGUAGE, "en").orEmpty()
-        set(value) = prefs.edit().putString(KEY_DEFAULT_LANGUAGE, value).apply()
+    // defaultNiche and defaultLanguage were removed on request - "from
+    // setting we can remove default niche and default language". The Create
+    // screen remembers its own last choice across process death, so these
+    // only ever applied to a first run while giving the same choice two homes
+    // that could disagree.
 
     var timezone: String
         get() = prefs.getString(KEY_TIMEZONE, "Asia/Kolkata").orEmpty()
@@ -233,8 +231,6 @@ class SecureStore(context: Context) {
         private const val KEY_OAUTH_CLIENT_ID = "yt_oauth_client_id"
         private const val KEY_YT_ACCOUNT = "yt_account_email"
         private const val KEY_BACKEND_URL = "backend_url"
-        private const val KEY_DEFAULT_NICHE = "default_niche"
-        private const val KEY_DEFAULT_LANGUAGE = "default_language"
         private const val KEY_TIMEZONE = "timezone"
         private const val KEY_QUALITY_THRESHOLD = "quality_threshold"
         private const val KEY_AUTO_APPROVE = "auto_approve"

@@ -314,6 +314,34 @@ class CreateViewModel(
         }
     }
 
+    /**
+     * Reviewed scripts left in the bank for the current group/language/format.
+     *
+     * null means "not asked yet", which the screen renders as "checking"
+     * rather than as zero - telling somebody there are no scripts when the
+     * request simply has not returned would make them import a batch they
+     * already have.
+     */
+    private val _bankReady = MutableStateFlow<Int?>(null)
+    val bankReady: StateFlow<Int?> = _bankReady.asStateFlow()
+
+    fun loadBank(group: String, language: String, videoFormat: String) {
+        viewModelScope.launch {
+            repo.scriptBank().onSuccess { bank ->
+                _bankReady.value = bank.slots
+                    .filter { slot ->
+                        // An empty group means "any", which is what the
+                        // screen shows before a group is chosen.
+                        (group.isBlank() || slot.group == group) &&
+                            slot.language.substringBefore("-") ==
+                            language.substringBefore("-") &&
+                            slot.videoFormat == videoFormat
+                    }
+                    .sumOf { it.ready }
+            }
+        }
+    }
+
     /** Raises [kidsBlocked] when a failed start was the child-directed gate. */
     private fun noteStartFailure(error: Throwable) {
         if (error.isKidsConfirmation()) _kidsBlocked.value = true

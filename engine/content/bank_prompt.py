@@ -14,9 +14,10 @@ carries the names, refrains and arcs already used, with instructions to avoid
 them.
 
 Everything here is measured or policy-derived, not stylistic preference:
-  * WORD COUNTS, not durations. Narration pace is fixed per group (kids 2.0
-    words/second, finance 2.5, tech 2.7, science 2.9), so a word count implies
-    a duration deterministically and a duration does not imply a word count.
+  * WORD COUNTS, not durations. Narration pace is fixed per group and topic
+    (kids 2.0 words/second, a SQL walkthrough 2.5, a science fact list 2.9),
+    so a word count implies a duration deterministically and a duration does
+    not imply a word count.
   * CAPTIONS IN THE OTHER LANGUAGE, authored. The pipeline machine-translates
     at render time and the Hindi captions came out wrong.
   * IMAGE BRIEFS IN ENGLISH, content only. The image generator understands
@@ -140,9 +141,8 @@ KIDS_SCENE_SECONDS = 4.0
 
 # A practical ceiling on scenes per banked entry. Pure pacing would ask for
 # 133 scenes for a ten-minute explainer, and 133 hand-written image briefs per
-# script is not something anyone will paste. Above this the entry keeps its
-# scene count and the RENDERER makes several images per scene instead - see
-# `visuals_per_scene` below.
+# script is not something anyone will paste. At 90 a fifteen-minute video
+# still holds each visual for ten seconds.
 MAX_BANK_SCENES = 90
 
 # The longest a single still may hold. Beyond this a video stops reading as a
@@ -166,14 +166,14 @@ _BATCH_WORD_BUDGET = 9000
 
 
 def scene_plan(*, group_key: str, target_seconds: int, shape: str,
-               made_for_kids: bool = False) -> dict[str, Any]:
+               made_for_kids: bool = False, topic: str = "") -> dict[str, Any]:
     """How many scenes an entry of this length should have, and how long each.
 
     Returns the numbers the prompt quotes, so the prompt and the renderer
     cannot disagree about pacing.
     """
     beats = BEATS.get(shape, BEATS["narrative"])
-    wps = words_per_second(group_key, made_for_kids)
+    wps = words_per_second(group_key, made_for_kids, topic)
     words = int(target_seconds * wps)
 
     pace = KIDS_SCENE_SECONDS if made_for_kids else BANK_SCENE_SECONDS
@@ -203,7 +203,8 @@ def scene_plan(*, group_key: str, target_seconds: int, shape: str,
 
 
 def recommended_count(*, group_key: str, target_seconds: int,
-                      shape: str = "", made_for_kids: bool = False) -> int:
+                      shape: str = "", made_for_kids: bool = False,
+                      topic: str = "") -> int:
     """How many entries to ask for in one paste.
 
     A 50-second short costs a few hundred words of JSON, so twenty fit in one
@@ -211,9 +212,9 @@ def recommended_count(*, group_key: str, target_seconds: int,
     so asking for twenty guarantees a truncated batch where the last entries
     silently lose their captions.
     """
-    shape = shape or shape_for(group_key)
+    shape = shape or shape_for(group_key, topic)
     plan = scene_plan(group_key=group_key, target_seconds=target_seconds,
-                      shape=shape, made_for_kids=made_for_kids)
+                      shape=shape, made_for_kids=made_for_kids, topic=topic)
     # narration + caption + brief is about three times the narration, plus
     # per-scene JSON scaffolding.
     per_entry = plan["words"] * 3 + plan["scenes_high"] * 12 + 80
@@ -256,9 +257,14 @@ def shape_for(group_key: str, topic_kind: str = "") -> str:
         if "rhyme" in topic_kind.lower() or "poem" in topic_kind.lower():
             return "poem"
         return "narrative"
-    if key in ("tech", "programming") and any(
-            w in topic_kind.lower() for w in ("fix", "clean", "install",
-                                              "repair", "setup", "speed up")):
+    if key == "tech" and any(
+            w in topic_kind.lower()
+            for w in ("fix", "clean", "install", "repair", "setup",
+                      "speed up", "tips and tricks", "how to",
+                      # Excel and Office are step-by-step by nature: the
+                      # value is "click here, then here", which is a
+                      # procedure, not an explanation of a mechanism.
+                      "excel", "office", "shortcut", "formula")):
         return "procedure"
     return "explainer"
 
@@ -267,7 +273,7 @@ def build(*, group_key: str, language: str, video_format: str,
           target_seconds: int, count: int, shape: str = "",
           used_names: Sequence[str] = (), used_refrains: Sequence[str] = (),
           used_titles: Sequence[str] = (), arc_tally: dict[str, int] | None = None,
-          viral_titles: Sequence[str] = ()) -> str:
+          viral_titles: Sequence[str] = (), topic: str = "") -> str:
     """The prompt to paste into ChatGPT or Claude.
 
     `used_*` and `arc_tally` come from what is already banked, so batch N+1
@@ -278,12 +284,12 @@ def build(*, group_key: str, language: str, video_format: str,
     found = get_group(group_key)
     label = found.label if found else group_key
     topics = list(found.topics) if found else []
-    shape = shape or shape_for(group_key)
+    shape = shape or shape_for(group_key, topic)
     beats = BEATS.get(shape, BEATS["narrative"])
     kids = bool(found and found.child_directed)
     finance = group_key.lower() == "finance"
     plan = scene_plan(group_key=group_key, target_seconds=target_seconds,
-                      shape=shape, made_for_kids=kids)
+                      shape=shape, made_for_kids=kids, topic=topic)
     wps = plan["wps"]
     words_low, words_high = plan["words_low"], plan["words_high"]
     per_scene = plan["words_per_scene"]

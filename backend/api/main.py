@@ -154,6 +154,22 @@ class AutomationBody(BaseModel):
             raise ValueError("days must be 0 (Mon) to 6 (Sun)")
         return v
 
+    @field_validator("language")
+    @classmethod
+    def _check_language(cls, v: str) -> str:
+        """Reject a language this project cannot actually produce.
+
+        The app used to offer Tamil, Telugu, Bengali, Marathi and Gujarati
+        while the voice engine had no voice for them and the font loader no
+        font - which produced a video with silent audio and boxes for
+        subtitles, with nothing on the way there saying no.
+        """
+        from engine.core.languages import VOICES, is_supported
+        if not is_supported(v):
+            allowed = ", ".join(lang.code for lang in VOICES)
+            raise ValueError(f"unsupported language {v!r}; one of: {allowed}")
+        return v
+
     @field_validator("timezone")
     @classmethod
     def _check_tz(cls, v: str) -> str:
@@ -687,7 +703,13 @@ def _automation_target(payload: dict[str, Any], row: dict[str, Any],
     pipeline the app would confidently show the wrong destination.
     """
     niche = str(row.get("niche") or "")
-    group = group_for_topic(niche)
+    # An explicit group beats inferring one from the topic. That matters for a
+    # CUSTOM topic: "how to save for a house" under the Finance group has no
+    # listed topic to match, so without this the group resolves to nothing and
+    # the app shows the default channel while the pipeline uses Finance.
+    from engine.core.groups import group as group_by_key
+    group = (group_by_key(str(payload.get("niche_group") or ""))
+             or group_for_topic(niche))
     explicit = str(payload.get("channel_id") or "")
     channel_id = explicit
     if not channel_id:
@@ -1060,6 +1082,18 @@ def list_niche_groups() -> dict[str, Any]:
     """
     from engine.core.groups import dump
     return {"groups": dump()}
+
+
+@app.get("/languages", dependencies=[Depends(require_api_key)])
+def list_languages() -> dict[str, Any]:
+    """Voice languages, caption languages, and which pairs with which.
+
+    Served rather than hard-coded in the app for the same reason as
+    /niche-groups: two hand-kept copies drift, and here the drift shipped a
+    video with no audio.
+    """
+    from engine.core.languages import dump
+    return dump()
 
 
 @app.get("/script-bank", dependencies=[Depends(require_api_key)])

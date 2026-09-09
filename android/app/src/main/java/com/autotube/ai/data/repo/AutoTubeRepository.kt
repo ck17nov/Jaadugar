@@ -13,6 +13,7 @@ import com.autotube.ai.data.remote.AutomationListDto
 import com.autotube.ai.data.remote.ClearAckDto
 import com.autotube.ai.data.remote.ClearRequestDto
 import com.autotube.ai.data.remote.NicheGroupListDto
+import com.autotube.ai.data.remote.ScriptBankDto
 import com.autotube.ai.data.remote.NicheMapBodyDto
 import com.autotube.ai.data.remote.YouTubeAccountListDto
 import com.autotube.ai.data.remote.CancelAckDto
@@ -203,6 +204,9 @@ class AutoTubeRepository(
     /** The channel groups and their topics. The one canonical list. */
     suspend fun nicheGroups(): Result<NicheGroupListDto> =
         call { api.service().nicheGroups() }
+
+    suspend fun scriptBank(): Result<ScriptBankDto> =
+        call { api.service().scriptBank() }
 
     suspend fun setDefaultAccount(channelId: String): Result<Unit> =
         call { api.service().setDefaultAccount(channelId) }

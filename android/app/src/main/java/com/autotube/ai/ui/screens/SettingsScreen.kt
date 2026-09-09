@@ -86,9 +86,7 @@ fun SettingsScreen() {
     var apiKey by rememberSaveable { mutableStateOf(store.apiKey) }
     var oauthClientId by rememberSaveable { mutableStateOf(store.oauthClientId) }
     var ytAccount by rememberSaveable { mutableStateOf(store.youtubeAccountEmail) }
-    var defaultNiche by rememberSaveable { mutableStateOf(store.defaultNiche) }
     val timezone = store.timezone
-    var defaultLanguage by rememberSaveable { mutableStateOf(store.defaultLanguage) }
     var threshold by rememberSaveable { mutableIntStateOf(store.qualityThreshold) }
     var autoApprove by rememberSaveable { mutableStateOf(store.autoApprove) }
 
@@ -97,8 +95,6 @@ fun SettingsScreen() {
         store.apiKey = apiKey
         store.oauthClientId = oauthClientId
         store.youtubeAccountEmail = ytAccount
-        store.defaultNiche = defaultNiche
-        store.defaultLanguage = defaultLanguage
         store.qualityThreshold = threshold
         store.autoApprove = autoApprove
         editing = false
@@ -110,8 +106,6 @@ fun SettingsScreen() {
         apiKey = store.apiKey
         oauthClientId = store.oauthClientId
         ytAccount = store.youtubeAccountEmail
-        defaultNiche = store.defaultNiche
-        defaultLanguage = store.defaultLanguage
         threshold = store.qualityThreshold
         autoApprove = store.autoApprove
         editing = false
@@ -456,26 +450,14 @@ fun SettingsScreen() {
             OutlinedButton(onClick = { vm.refreshAccounts() }) { Text("Reload") }
         }
 
-        // ---- defaults ----------------------------------------------------
-        SectionTitle("Defaults")
-        LabeledDropdown(
-            label = "Default niche",
-            value = defaultNiche,
-            options = NICHE_OPTIONS,
-            allowOther = true,
-            otherLabel = "Other topic…",
-            onValueChange = { defaultNiche = it },
-            enabled = editing,
-        )
-
-        LabeledDropdown(
-            label = "Default language",
-            value = defaultLanguage,
-            options = LANGUAGES.map { it.first },
-            display = { code -> LANGUAGES.firstOrNull { it.first == code }?.second ?: code },
-            onValueChange = { defaultLanguage = it },
-            enabled = editing,
-        )
+        // No "default niche" or "default language" here any more. Asked for:
+        // "from setting we can remove default niche and default language."
+        //
+        // They were a poor fit for how the screen is actually used. The
+        // Create tab already remembers the last group, topic and language
+        // across process death via rememberSaveable, so the defaults only
+        // ever applied to a first run - and having the same choice in two
+        // places invited them to disagree, with no indication which one won.
 
         // Timezone is fixed to Asia/Kolkata. It only affects when a scheduled
         // upload fires, and a list of switches for zones that will never be

@@ -774,13 +774,27 @@ class Pipeline:
         return job_dir / "voice.wav", total, offsets
 
     def _caption_language(self, request: AutomationRequest) -> str:
-        """The caption language, or "" to follow the narration."""
+        """The caption language, or "" to follow the narration.
+
+        DERIVED, not chosen. "why is it required? caption should be just what
+        is in audio" was about not having to pick one per automation, and the
+        standing rule is "for hindi voice it should be english caption and for
+        english voice hindi captions" - so languages.py decides and the Create
+        screen has no control for it.
+
+        An explicit `request.caption_language` still wins, because the field
+        is on stored automations and the API accepts it; it is just not
+        something the app asks for any more.
+        """
         if not bool(self.cfg.get("captions.translate", True)):
             return ""
+        from .core.languages import caption_for
+        from .content.translate import needs_translation
         wanted = (getattr(request, "caption_language", "") or "").strip()
         if not wanted:
             wanted = str(self.cfg.get("captions.language", "") or "").strip()
-        from .content.translate import needs_translation
+        if not wanted:
+            wanted = caption_for(request.language)
         return wanted if needs_translation(request.language, wanted) else ""
 
     def _translate_captions(self, job_dir: Path, request: AutomationRequest,
@@ -1182,7 +1196,8 @@ class Pipeline:
         # channel a video went to.
         channel_id = (getattr(request, "channel_id", "") or "").strip()
         if not channel_id:
-            mapped = self.auth.channels_store.for_niche(request.niche)
+            mapped = self.auth.channels_store.for_niche(
+                request.niche, getattr(request, "niche_group", ""))
             channel_id = mapped.channel_id if mapped else ""
         if channel_id:
             log_event("YOUTUBE", "publishing to a specific channel",

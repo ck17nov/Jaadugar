@@ -13,7 +13,10 @@ which should be linked to those brand accounts directly. And then below that I
 can select topics".
 
 So a group is the unit of channel mapping, and a topic is the unit of content.
-Six groups instead of twenty-two topics: one tick per channel.
+Three groups instead of twenty-five topics: one tick per channel, and the
+three groups are exactly the three channels - Kids, Financial and Technical
+Jaadugar. AI, science and programming were separate groups until asked to be
+folded into Technical.
 
 This module is the SINGLE SOURCE OF TRUTH. The Android app renders the same
 list, fetched from /niche-groups rather than hard-coded, because two hand-kept
@@ -37,6 +40,15 @@ class Group:
     # makes the dropdown recognisable rather than abstract.
     suggested_channel: str
     topics: tuple[str, ...] = field(default_factory=tuple)
+    # Words that mean "this group" in a topic somebody typed by hand.
+    #
+    # The fallback used to match the group KEY, which worked only while every
+    # subject was its own group. Merging AI, science and programming into
+    # "tech" broke it silently: "science of volcanoes" matched nothing, mapped
+    # to no channel, and published to the default one. Now that a custom topic
+    # is a first-class thing the Create screen offers, this list is what makes
+    # it land on the right channel.
+    keywords: tuple[str, ...] = field(default_factory=tuple)
     # Everything in this group is child-directed, whatever the topic. Kids is
     # the only one, and it is not a preference: it selects a stricter safety
     # profile and forces the Made-for-Kids classification.
@@ -57,6 +69,10 @@ GROUPS: tuple[Group, ...] = (
         label="Kids",
         suggested_channel="Kids Jaadugar",
         child_directed=True,
+        keywords=("kids", "kid", "child", "children", "toddler", "baby",
+                  "nursery", "bedtime", "rhyme", "rhymes", "story",
+                  "stories", "moral", "alphabet", "abc", "counting",
+                  "preschool", "kindergarten"),
         topics=(
             "kids bedtime stories",
             "kids moral stories",
@@ -73,40 +89,87 @@ GROUPS: tuple[Group, ...] = (
         key="finance",
         label="Finance",
         suggested_channel="Financial Jaadugar",
+        keywords=("finance", "financial", "money", "invest", "investing",
+                  "investment", "mutual", "fund", "funds", "sip", "stock",
+                  "stocks", "share", "shares", "tax", "taxes", "insurance",
+                  "loan", "loans", "emi", "ppf", "nps", "epf", "savings", "save",
+                  "saving", "budget", "budgeting", "credit", "debt",
+                  "retirement", "pension", "salary", "income", "upi",
+                  "banking", "bank", "gold", "inflation", "interest"),
         topics=("personal finance", "finance news"),
     ),
+    # AI, science and programming used to be four separate groups. Merged on
+    # request - "i also want to include AI, science and code in Technical. so
+    # all their niche/topics should come under technical" - which also puts
+    # the group list back in line with the three channels that actually exist:
+    # Financial Jaadugar, Kids Jaadugar, Technical Jaadugar.
     Group(
         key="tech",
-        label="Tech",
+        label="Technical",
         suggested_channel="Technical Jaadugar",
-        topics=("youtube tips and growth", "pc and laptop tech"),
-    ),
-    Group(
-        key="ai",
-        label="AI",
-        suggested_channel="AI Jaadugar",
-        topics=("AI explained", "AI news", "AI tools and courses"),
-    ),
-    Group(
-        key="science",
-        label="Science",
-        suggested_channel="Science Jaadugar",
-        topics=("science facts", "science experiments"),
-    ),
-    Group(
-        key="programming",
-        label="Programming",
-        suggested_channel="Code Jaadugar",
-        topics=("sql and databases", "programming and coding",
-                "developer tools"),
+        # Includes the three merged group names, so a topic typed as "science
+        # of volcanoes" or "python programming" still finds this channel.
+        keywords=("tech", "technical", "technology", "ai", "ml", "llm",
+                  "science", "scientific", "physics", "chemistry", "biology",
+                  "space", "astronomy", "programming", "program", "code",
+                  "coding", "coder", "developer", "software", "sql",
+                  "database", "databases", "python", "java", "javascript",
+                  "linux", "windows", "excel", "office", "word",
+                  "powerpoint", "spreadsheet", "computer", "pc", "laptop",
+                  "phone", "mobile", "gadget", "gadgets", "youtube",
+                  "channel", "app", "apps", "server", "cloud", "api"),
+        topics=(
+            "youtube tips and growth",
+            "pc and laptop tech",
+            # New phones and laptops. Deliberately NOT called "unboxing": an
+            # unboxing claims the presenter has the box, and this channel's
+            # narrator is synthetic and has no box. Publishing a fabricated
+            # unboxing is the kind of thing YouTube's inauthentic-content
+            # policy is aimed at, and it would be a lie about a real product.
+            # What IS honest, and covers the same search demand: what the
+            # device actually is, what changed, and who it suits.
+            "new phone and laptop launches",
+            "phone and laptop buying advice",
+            # Asked for by name. Screen-recordable, evergreen, and one of the
+            # few topics here where the video can show the real thing.
+            "excel tips and tricks",
+            "ms office tips and tricks",
+            "AI explained",
+            "AI news",
+            "AI tools and courses",
+            "science facts",
+            "science experiments",
+            "sql and databases",
+            "programming and coding",
+            "developer tools",
+        ),
     ),
 )
 
 BY_KEY: dict[str, Group] = {g.key: g for g in GROUPS}
 
+# Group keys that no longer exist, and where their topics went.
+#
+# A brand account's channel mapping is stored BY GROUP KEY, so dropping "ai",
+# "science" and "programming" outright would orphan any mapping already made
+# against them - the group would resolve to nothing and the video would
+# publish to the default channel instead of the technical one. Silent, and
+# only visible after the upload.
+MERGED_KEYS: dict[str, str] = {
+    "ai": "tech",
+    "science": "tech",
+    "programming": "tech",
+    "code": "tech",
+    "technical": "tech",
+}
+
 
 def group(key: str) -> Group | None:
-    return BY_KEY.get((key or "").strip().lower())
+    wanted = (key or "").strip().lower()
+    found = BY_KEY.get(wanted)
+    if found is not None:
+        return found
+    return BY_KEY.get(MERGED_KEYS.get(wanted, ""))
 
 
 def topics(key: str) -> list[str]:
@@ -133,12 +196,25 @@ def group_for_topic(topic: str) -> Group | None:
     for candidate in GROUPS:
         if any(wanted == t.lower() for t in candidate.topics):
             return candidate
-    # Free-text fallback: the group's own key or label appearing as a word.
+
+    # Free-text fallback, by keyword count rather than first match. A custom
+    # topic can name more than one group - "excel formulas for a home budget"
+    # hits both tech and finance - and taking whichever group is declared
+    # first in the file is arbitrary. The strongest match wins, and kids wins
+    # a tie, because misfiling a children's video as general content loses the
+    # stricter safety profile while the reverse only loses monetisation
+    # features.
     words = set(wanted.replace("-", " ").replace("/", " ").split())
+    best: Group | None = None
+    best_hits = 0
     for candidate in GROUPS:
-        if candidate.key in words or candidate.label.lower() in words:
-            return candidate
-    return None
+        pool = set(candidate.keywords) | {candidate.key,
+                                          candidate.label.lower()}
+        hits = len(words & pool)
+        if hits > best_hits or (hits == best_hits and hits > 0
+                                and candidate.child_directed):
+            best, best_hits = candidate, hits
+    return best
 
 
 def is_child_directed(topic: str) -> bool:

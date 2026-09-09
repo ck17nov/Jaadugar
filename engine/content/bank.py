@@ -126,7 +126,7 @@ class BankScene:
 class BankEntry:
     """One ready-to-render script."""
     entry_id: str = ""
-    group: str = ""                 # kids | finance | tech | ai | science | programming
+    group: str = ""                 # kids | finance | tech
     # Which topic WITHIN the group. The Create screen selects a group and then
     # topics under it, so without this a "kids bedtime stories" automation
     # would happily claim an alphabet drill.
@@ -251,7 +251,8 @@ class BankEntry:
         self.word_count = sum(len(split_words(s.narration))
                               for s in self.scenes)
         self.estimated_seconds = self.word_count / max(
-            words_per_second(self.group, self.made_for_kids), 0.5)
+            words_per_second(self.group, self.made_for_kids, self.topic),
+            0.5)
         self.content_hash = hashlib.blake2b(
             "\n".join(self.narrations()).encode("utf-8"),
             digest_size=16).hexdigest()
@@ -260,21 +261,40 @@ class BankEntry:
                             f"{self.content_hash[:10]}"
 
 
-def words_per_second(group: str, made_for_kids: bool = False) -> float:
-    """Narration pace for a group, so a word count implies a duration.
+# Pace by TOPIC, checked before the group. AI, science and programming were
+# separate groups with distinct paces - 2.7, 2.9 and 2.5 - and merging them
+# into "tech" would have flattened all three to one number, which is a real
+# loss: a science fact list is read faster than a SQL walkthrough, and getting
+# it wrong makes the estimated duration wrong for every entry in the group.
+_TOPIC_PACE: tuple[tuple[tuple[str, ...], float], ...] = (
+    (("science", "space", "physics", "biology"), 2.9),
+    (("ai ", "ai explained", "ai news", "ai tools"), 2.7),
+    (("youtube", "phone", "laptop", "pc and laptop", "unboxing"), 2.7),
+    (("sql", "database", "programming", "coding", "developer",
+      "excel", "office"), 2.5),
+)
 
-    Measured from the templates each group actually selects: kids 2.0,
-    finance and programming 2.5, tech and AI 2.7, science 2.9. This is why
-    the generation prompt asks for a WORD COUNT rather than a duration - the
-    word count is the thing that can be controlled, and it maps to seconds
+_GROUP_PACE: dict[str, float] = {"kids": 2.0, "finance": 2.5, "tech": 2.7}
+
+
+def words_per_second(group: str, made_for_kids: bool = False,
+                     topic: str = "") -> float:
+    """Narration pace, so a word count implies a duration.
+
+    Measured from the templates each group and topic actually select. This is
+    why the generation prompt asks for a WORD COUNT rather than a duration:
+    the word count is the thing an author can control, and it maps to seconds
     deterministically.
     """
-    table = {"kids": 2.0, "finance": 2.5, "programming": 2.5,
-             "tech": 2.7, "ai": 2.7, "science": 2.9}
+    if made_for_kids or (group or "").strip().lower() == "kids":
+        return 2.0
+    needle = (topic or "").strip().lower()
+    if needle:
+        for words, pace in _TOPIC_PACE:
+            if any(w in needle for w in words):
+                return pace
     key = (group or "").strip().lower()
-    if key in table:
-        return table[key]
-    return 2.0 if made_for_kids else 2.5
+    return _GROUP_PACE.get(key, 2.5)
 
 
 # ---------------------------------------------------------------------------

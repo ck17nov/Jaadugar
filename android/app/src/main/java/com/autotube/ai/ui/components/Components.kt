@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -275,14 +276,41 @@ fun LabeledDropdown(
     modifier: Modifier = Modifier,
     allowOther: Boolean = false,
     otherLabel: String = "Other…",
+    // Shown inside and under the free-text field. A blank box labelled
+    // "Topic (custom)" does not tell you that a whole sentence is allowed.
+    otherPlaceholder: String? = null,
+    otherHelp: String? = null,
     display: (String) -> String = { it },
     // Off means the value still SHOWS but cannot be changed. Used by the
     // Settings screen, where every field is read-only until Edit is tapped.
     enabled: Boolean = true,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val isOther = allowOther && value.isNotBlank() && value !in options
-    var customText by rememberSaveable(label) { mutableStateOf(if (isOther) value else "") }
+    var customText by rememberSaveable(label) { mutableStateOf("") }
+
+    // Whether "Other…" is the current selection.
+    //
+    // THE BUG THIS FIXES: picking "Other topic…" did nothing at all. The menu
+    // item signalled its choice by calling onValueChange(" ") - a single space,
+    // chosen to be "not empty" - and then this line read
+    // `value.isNotBlank()`. Kotlin's isNotBlank() is false for whitespace, so
+    // the space failed the very test it was meant to pass, isOther stayed
+    // false, and the free-text field never appeared. Reported as "when I
+    // select any channel group and then select topic as other, I'm not getting
+    // anything".
+    //
+    // Encoding a UI mode inside the value string was the mistake. It is state
+    // now, and a value that is simply not in `options` still counts, which is
+    // what round-trips a saved custom setting.
+    var otherPicked by rememberSaveable(label) { mutableStateOf(false) }
+    val valueIsCustom = value.isNotBlank() && value !in options
+    val isOther = allowOther && (otherPicked || valueIsCustom)
+
+    // Adopt a custom value that arrived from outside - a restored setting, or
+    // an automation being edited - so the field shows it instead of empty.
+    LaunchedEffect(value) {
+        if (valueIsCustom && value != customText) customText = value
+    }
     val shown = when {
         isOther -> otherLabel
         // Blank is only "nothing selected" when blank is not itself a choice.
@@ -319,6 +347,7 @@ fun LabeledDropdown(
                         text = { Text(display(option)) },
                         onClick = {
                             expanded = false
+                            otherPicked = false
                             onValueChange(option)
                         },
                     )
@@ -328,9 +357,10 @@ fun LabeledDropdown(
                         text = { Text(otherLabel) },
                         onClick = {
                             expanded = false
+                            otherPicked = true
                             // Keep whatever was typed before, so reopening the
                             // menu and picking Other again does not wipe it.
-                            onValueChange(customText.ifBlank { " " })
+                            onValueChange(customText)
                         },
                     )
                 }
@@ -342,7 +372,13 @@ fun LabeledDropdown(
                 value = customText,
                 onValueChange = { customText = it; onValueChange(it) },
                 label = { Text("$label (custom)") },
-                singleLine = true,
+                placeholder = otherPlaceholder?.let { hint -> { Text(hint) } },
+                supportingText = otherHelp?.let { help -> { Text(help) } },
+                // Not singleLine: a custom topic is often a sentence - "how a
+                // sinking fund works for school fees" - and a single line
+                // scrolls the start of it out of view while typing.
+                minLines = 1,
+                maxLines = 3,
                 modifier = Modifier.fillMaxWidth(),
             )
         }

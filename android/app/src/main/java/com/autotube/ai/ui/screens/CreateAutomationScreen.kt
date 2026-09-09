@@ -109,28 +109,26 @@ val LANGUAGES = listOf(
     "hi-Latn" to "Hinglish",
 )
 
-// How captions are burned in. "none" leaves the picture clean, which is what
-// the narration-only reference videos do - the SRT still goes to YouTube.
-val CAPTION_STYLES = listOf(
-    "" to "Default for this style",
-    "karaoke" to "Word by word (karaoke)",
-    "block" to "Whole phrase",
-    "none" to "None - clean picture",
+// Where the script comes from.
+//
+// "bank" refusing to fall back is deliberate and is the whole reason it is a
+// separate option from "bank_first": somebody who chose "only my reviewed
+// scripts" and silently got a freshly generated one has had the review
+// guarantee removed without being told.
+val SCRIPT_SOURCES = listOf(
+    "live" to "Write a new one each time",
+    "bank_first" to "Use my reviewed scripts, then write new ones",
+    "bank" to "Only my reviewed scripts",
 )
 
-// Subtitle language. The blank first entry follows the narration, which is
-// the default; anything else is translated per scene.
-val CAPTION_LANGUAGES = listOf(
-    "" to "Same as narration",
-    "en" to "English",
-    "hi" to "Hindi",
-    "en-IN" to "Indian English",
-    "ta" to "Tamil",
-    "te" to "Telugu",
-    "bn" to "Bengali",
-    "mr" to "Marathi",
-    "gu" to "Gujarati",
-)
+// Which language the captions come out in, for the one line of explanation
+// the Create screen shows. The rule itself lives in
+// engine/core/languages.py::caption_for - this only has to SAY it, and if the
+// two ever disagree the backend is right.
+fun captionNoteFor(language: String): String = when {
+    language.startsWith("hi") -> "English (your voice is Hindi)"
+    else -> "Hindi (your voice is English)"
+}
 
 val VOICES = listOf(
     "female" to "Female",
@@ -174,6 +172,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     val started by vm.started.collectAsStateWithLifecycle()
     val channels by vm.channels.collectAsStateWithLifecycle()
     val groups by vm.groups.collectAsStateWithLifecycle()
+    val bankReady by vm.bankReady.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
 
@@ -183,9 +182,9 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     // NavBackStackEntry - but plain `remember` is not part of that. Every
     // field reset to its default the moment you switched tab and came back,
     // silently discarding whatever had been filled in.
-    var niche by rememberSaveable { mutableStateOf(vm.store.defaultNiche) }
+    var niche by rememberSaveable { mutableStateOf("") }
     var audience by rememberSaveable { mutableStateOf("18-35") }
-    var language by rememberSaveable { mutableStateOf(vm.store.defaultLanguage) }
+    var language by rememberSaveable { mutableStateOf(LANGUAGES.first().first) }
     var isShort by rememberSaveable { mutableStateOf(true) }
     var lengthSeconds by rememberSaveable { mutableIntStateOf(45) }
     var style by rememberSaveable { mutableStateOf(STYLES.first()) }
@@ -213,8 +212,11 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     // video up straight away.
     var publishMode by rememberSaveable { mutableStateOf("scheduled") }
     var voiceGender by rememberSaveable { mutableStateOf("female") }
-    var captionLanguage by rememberSaveable { mutableStateOf("") }
-    var captionStyle by rememberSaveable { mutableStateOf("") }
+    // Where the script comes from. "live" writes one now; "bank_first" prefers
+    // a reviewed script from the bank and writes one when the bank is empty;
+    // "bank" refuses rather than falling back, so a batch that was reviewed
+    // is the only thing that can publish.
+    var scriptSource by rememberSaveable { mutableStateOf("live") }
 
     // Made for Kids follows the NICHE and the AGE BAND, and is cleared when
     // neither applies.
@@ -255,6 +257,16 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
         if (niche.trim().length >= 3) {
             delay(600)
             vm.previewNiche(niche.trim(), audience, style, lengthSeconds)
+        }
+    }
+
+    // Only when the bank is actually in play. Asking on every screen open
+    // would cost a request that the default "write a new one each time" has
+    // no use for.
+    LaunchedEffect(scriptSource, groupKey, language, isShort) {
+        if (scriptSource != "live") {
+            vm.loadBank(groupKey, language,
+                if (isShort) "SHORT" else "LONGFORM")
         }
     }
 
@@ -349,6 +361,16 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
             options = selectedGroup?.topics ?: NICHE_OPTIONS,
             allowOther = true,
             otherLabel = "Other topic…",
+            // Selecting "Other topic…" used to appear to do nothing at all -
+            // see LabeledDropdown for why. Now that it works, say what can go
+            // in the box: a whole subject, not just a category name.
+            otherPlaceholder = "e.g. how a sinking fund works for school fees",
+            otherHelp = if (selectedGroup != null) {
+                "Anything in ${selectedGroup.label}. Write it as a subject or " +
+                    "a question - the script is written from this."
+            } else {
+                "Write the subject or question the video should answer."
+            },
             onValueChange = { niche = it },
         )
         if (nicheIsKids) {
@@ -357,6 +379,40 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                     "the stricter safety profile applies.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        LabeledDropdown(
+            label = "Script",
+            value = scriptSource,
+            options = SCRIPT_SOURCES.map { it.first },
+            display = { key ->
+                SCRIPT_SOURCES.firstOrNull { it.first == key }?.second ?: key
+            },
+            onValueChange = { scriptSource = it },
+        )
+        if (scriptSource != "live") {
+            val ready = bankReady
+            Text(
+                when {
+                    ready == null -> "Checking how many reviewed scripts are left…"
+                    ready == 0 && scriptSource == "bank" ->
+                        "No reviewed scripts left. This automation will FAIL " +
+                            "rather than write one, which is the point of " +
+                            "this option - import a batch first."
+                    ready == 0 ->
+                        "No reviewed scripts left, so each video will be " +
+                            "written fresh until you import a batch."
+                    else -> "$ready reviewed script(s) ready. Each video uses " +
+                        "the next one and its own length, so the duration " +
+                        "above becomes a filter rather than a target."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (bankReady == 0 && scriptSource == "bank") {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
             )
         }
 
@@ -427,45 +483,23 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
             )
         }
 
-        LabeledDropdown(
-            label = "Captions",
-            value = captionStyle,
-            options = CAPTION_STYLES.map { it.first },
-            display = { key ->
-                CAPTION_STYLES.firstOrNull { it.first == key }?.second ?: key
-            },
-            onValueChange = { captionStyle = it },
+        // No caption controls. Asked for: "why is it required? caption should
+        // be just what is in audio. style should also be auto chosen based on
+        // niche/scripts."
+        //
+        // The LANGUAGE is derived - Hindi voice gets English captions and
+        // English voice gets Hindi captions, decided by
+        // engine/core/languages.py - and the STYLE comes from the niche
+        // profile and the style template, which already know whether karaoke
+        // or block reads better for this kind of video. Two fewer things to
+        // get wrong per automation, and they can no longer disagree with what
+        // the script bank stores.
+        Text(
+            "Captions: ${captionNoteFor(language)}. Style is chosen " +
+                "automatically for this niche.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (captionStyle == "none") {
-            Text(
-                "No text burned into the picture. A subtitle track is still " +
-                    "uploaded to YouTube, so viewers can turn captions on and " +
-                    "the video is still indexed on its words.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        LabeledDropdown(
-            label = "Caption language",
-            value = captionLanguage,
-            options = CAPTION_LANGUAGES.map { it.first },
-            display = { key ->
-                CAPTION_LANGUAGES.firstOrNull { it.first == key }?.second ?: key
-            },
-            onValueChange = { captionLanguage = it },
-        )
-        if (captionLanguage.isNotBlank() &&
-            captionLanguage.substringBefore("-") != language.substringBefore("-")
-        ) {
-            Text(
-                "Captions are translated and shown one line per scene rather " +
-                    "than word by word - the word timings come from the voice, " +
-                    "so they do not fit translated text.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
 
         LabeledDropdown(
             label = "Language",
@@ -740,8 +774,14 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                         durationSeconds = lengthSeconds,
                         style = style,
                         voiceGender = voiceGender,
-                        captionLanguage = captionLanguage,
-                        captionStyle = captionStyle,
+                        // Both derived by the backend now - the caption
+                        // language from the voice language, the style from
+                        // the niche. Sent blank rather than dropped, because
+                        // the API still accepts an explicit override.
+                        captionLanguage = "",
+                        captionStyle = "",
+                        scriptSource = scriptSource,
+                        nicheGroup = groupKey,
                         channelId = channelId,
                         count = count,
                         mode = if (autoMode) "AUTO" else "APPROVAL",
