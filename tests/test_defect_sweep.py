@@ -540,10 +540,22 @@ class TestKidsStoryPrompt:
         assert "rhetorical question" in text
         assert "Do NOT open with a question" in text
 
-    def test_a_word_floor_is_stated(self):
-        """The measured defect was 61 words across six scenes - an outline."""
-        text = self._instruction("kids bedtime stories")
-        assert "20 words per scene" in text
+    def test_a_word_floor_is_stated_and_derived(self):
+        """The measured defect was 61 words across six scenes - an outline.
+
+        The floor tracks the ACTUAL budget rather than a constant: a
+        hard-coded "20 words per scene" contradicted a 90-word budget split
+        six ways, and an impossible instruction is noise the model learns to
+        ignore.
+        """
+        from engine.content.script import _kids_instruction
+        from engine.core.niche import build_profile
+        profile = build_profile("kids bedtime stories", audience="5-7",
+                                made_for_kids=True)
+        assert "13 words per scene" in _kids_instruction(profile, 15)
+        assert "23 words per scene" in _kids_instruction(profile, 25)
+        # ...and never below a readable sentence, even with no budget passed.
+        assert "12 words per scene" in _kids_instruction(profile, 0)
 
     def test_rhymes_are_stories_not_drills(self):
         """A nursery rhyme is a performance, not a flashcard."""
@@ -559,11 +571,14 @@ class TestKidsStoryPrompt:
         assert self._instruction("personal finance", audience="25-44") == ""
 
     def test_both_prompt_builders_use_it(self):
+        """And both pass the word budget, not just the profile - the floor is
+        derived from it, so a builder that forgets falls back to 12."""
         import inspect
         from engine.content.script import ScriptGenerator
         joined = (inspect.getsource(ScriptGenerator._build_prompt)
                   + inspect.getsource(ScriptGenerator._section_prompt))
-        assert joined.count("_kids_instruction(profile)") == 2
+        assert joined.count("_kids_instruction(") == 2
+        assert "_kids_instruction(profile)" not in joined
 
     def test_the_learning_keywords_are_shared_with_the_templates(self):
         """Two copies of this list would drift."""

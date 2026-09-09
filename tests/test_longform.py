@@ -124,7 +124,7 @@ class FakeRouter:
         self.single_shot_calls = 0
 
     def complete_json(self, prompt, *, system="", temperature=0.8,
-                      max_tokens=4096, attempts=2):
+                      max_tokens=4096, attempts=2, category=""):
         self.calls.append(max_tokens)
         if "Write ONE SECTION" not in prompt and "Plan an original" not in prompt:
             # The single-shot path: one call for the whole script.
@@ -1111,7 +1111,7 @@ class TestWordFloor:
             self.saw_nudge = False
 
         def complete_json(self, prompt, *, system="", temperature=0.8,
-                          max_tokens=4096, attempts=2):
+                          max_tokens=4096, attempts=2, category=""):
             self.calls += 1
             if "TOO SHORT" in prompt:
                 self.saw_nudge = True

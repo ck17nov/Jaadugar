@@ -490,14 +490,40 @@ class LLMRouter:
     def has_real_llm(self) -> bool:
         return bool(self.usable)
 
+    # Providers that refuse a whole CATEGORY of request, whatever the wording.
+    #
+    # Measured against the live key: Gemini blocks children's-story generation
+    # outright. Five prompt shapes were tried, including the bare baseline
+    # "Write a two-sentence bedtime story for a young audience" with no
+    # constraints attached at all, and every one came back with no candidates
+    # and blockReason PROHIBITED_CONTENT. It is provider policy about content
+    # for minors, not something a rephrase gets around - positive framings of
+    # the agency and calm-mood instructions were tried and blocked too.
+    #
+    # Skipping it for those requests is worth doing rather than letting it
+    # fail: each attempt costs a round trip plus the transient-retry backoff
+    # on a guaranteed refusal, and it preserves Gemini's daily quota for the
+    # niches where it does work.
+    CATEGORY_REFUSALS: dict[str, tuple[str, ...]] = {
+        "gemini": ("kids_story",),
+    }
+
     def complete(self, prompt: str, *, system: str = "", json_mode: bool = False,
-                 temperature: float = 0.8, max_tokens: int = 4096) -> LLMResult:
+                 temperature: float = 0.8, max_tokens: int = 4096,
+                 category: str = "") -> LLMResult:
         errors: list[str] = []
         for provider in self.providers:
             if isinstance(provider, TemplateProvider):
                 continue
             if not provider.available():
                 errors.append(f"{provider.name}: not configured")
+                continue
+            if category and category in self.CATEGORY_REFUSALS.get(
+                    provider.name, ()):
+                errors.append(f"{provider.name}: refuses {category} content")
+                log_event("LLM", "skipping a provider that refuses this "
+                          "content category", provider=provider.name,
+                          category=category)
                 continue
             try:
                 result = self._with_backoff(
@@ -552,8 +578,14 @@ class LLMRouter:
 
     def complete_json(self, prompt: str, *, system: str = "",
                       temperature: float = 0.8, max_tokens: int = 4096,
-                      attempts: int = 2) -> tuple[dict[str, Any], str]:
-        """Completion that must yield JSON. Retries once with a stricter nudge."""
+                      attempts: int = 2, category: str = ""
+                      ) -> tuple[dict[str, Any], str]:
+        """Completion that must yield JSON. Retries with a stricter nudge.
+
+        `category` lets the caller name what KIND of request this is, so a
+        provider known to refuse that category is skipped rather than tried
+        and retried against a certain refusal.
+        """
         last: Exception | None = None
         for i in range(attempts):
             nudge = ("" if i == 0 else
@@ -562,7 +594,8 @@ class LLMRouter:
             try:
                 result = self.complete(prompt + nudge, system=system,
                                        json_mode=True, temperature=temperature,
-                                       max_tokens=max_tokens)
+                                       max_tokens=max_tokens,
+                                       category=category)
                 return extract_json(result.text), result.provider
             except LLMError as exc:
                 last = exc

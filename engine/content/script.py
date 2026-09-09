@@ -164,6 +164,16 @@ def _story_structure(is_short: bool) -> list[tuple[str, str, float]]:
     ]
 
 
+def llm_category(profile) -> str:
+    """What KIND of request this is, for provider routing.
+
+    Gemini refuses children's-story generation outright (measured - see
+    LLMRouter.CATEGORY_REFUSALS), so naming the category lets the router skip
+    it instead of spending a round trip and two retries on a certain refusal.
+    """
+    return "kids_story" if is_kids_story(profile) else ""
+
+
 def is_kids_story(profile) -> bool:
     """Child-directed NARRATIVE, as opposed to child-directed teaching.
 
@@ -274,7 +284,7 @@ def _language_line(language: str) -> str:
 
 
 
-def _kids_instruction(profile) -> str:
+def _kids_instruction(profile, words_per_scene: int = 0) -> str:
     """The child-directed block, and it has to distinguish the two jobs.
 
     The previous version told every child-directed request "no danger, no
@@ -345,8 +355,12 @@ def _kids_instruction(profile) -> str:
         "me.\" These are the only questions allowed anywhere in the "
         "script.\n"
         "\nLENGTH\n"
-        "- At least 20 words per scene, and at least 120 words in total for "
-        "a short. Six scenes of ten words each is an outline, not a story.\n"
+        # DERIVED from the real budget, never asserted against it. A
+        # hard-coded "at least 20 words per scene" contradicted a 90-word
+        # budget split six ways, and an impossible instruction is noise the
+        # model learns to ignore.
+        f"- At least {max(12, words_per_scene - 2)} words per scene. A scene "
+        "of ten words is an outline, not a story - finish the sentence.\n"
         "\nSimple words, one idea per sentence, calm. Nothing scary, no real "
         "danger, no romance.\n")
 
@@ -371,6 +385,23 @@ class ScriptGenerator:
             max_scenes=int(self.cfg.get("content.max_scenes", DEFAULT_MAX_SCENES)))
         structure = _structure(duration, is_short, profile)
 
+        # FOR A STORY, THE BEATS *ARE* THE SCENE LIST.
+        #
+        # The pacing model derived 9 scenes for a 45-second bedtime story
+        # while the beat table has 6 beats, and the model dutifully padded to
+        # 9 - inventing three extra scenes and mislabelling them, so a
+        # participation line came back tagged "obstacle" and the story
+        # resolved two scenes before the end. It also split a 90-word budget
+        # nine ways: 9.3 words per scene, which is an outline.
+        #
+        # One beat, one scene, one image. Six longer scenes read as a story
+        # and cost fewer images than nine truncated ones.
+        if is_kids_story(profile) and len(structure) != scene_count:
+            log_event("SCRIPT", "scene count aligned to the story beats",
+                      wanted=scene_count, using=len(structure),
+                      words_per_scene=f"{target_words / len(structure):.1f}")
+            scene_count = len(structure)
+
         # A single JSON response cannot carry a 3,000-word script: free-tier
         # per-minute token limits (6k-12k TPM) cut it off mid-array, and even
         # when it fits the model thins out the middle. Past this size the script
@@ -393,7 +424,8 @@ class ScriptGenerator:
             try:
                 data, provider = self.router.complete_json(
                     prompt, system=SYSTEM_PROMPT, temperature=self.temperature,
-                    max_tokens=4096 if is_short else 8192)
+                    max_tokens=4096 if is_short else 8192,
+                    category=llm_category(profile))
                 script = self._parse(data, idea, profile, language, provider)
             except LLMError as exc:
                 log_event("SCRIPT", "LLM unavailable, using deterministic builder",
@@ -512,7 +544,8 @@ class ScriptGenerator:
                                    target_words, scene_count, structure,
                                    research_context, strategy_hints) + nudge,
                 system=SYSTEM_PROMPT, temperature=self.temperature,
-                max_tokens=4096 if is_short else 8192)
+                max_tokens=4096 if is_short else 8192,
+                category=llm_category(profile))
             retried = self._parse(data, idea, profile, language, provider)
         except LLMError as exc:
             log_event("SCRIPT", "re-ask failed", error=str(exc)[:160])
@@ -758,7 +791,7 @@ Return this exact JSON shape and nothing else:
         already = ("\nSECTIONS ALREADY WRITTEN (do not repeat these):\n"
                    + "\n".join(f"  - {c}" for c in covered)) if covered else ""
         lang_line = _language_line(language)
-        kids_line = _kids_instruction(profile)
+        kids_line = _kids_instruction(profile, words // max(scenes, 1))
         # The role list has to agree with the beat table, or the model keeps
         # emitting "value" for a story because "value" is still on the menu.
         role_enum = STORY_ROLES if is_kids_story(profile) else EXPLAINER_ROLES
@@ -847,7 +880,12 @@ Return this exact JSON shape and nothing else:
             f"- {role.upper()} (~{int(frac * duration)}s): {purpose}"
             for role, purpose, frac in structure)
         lang_line = _language_line(language)
-        kids_line = _kids_instruction(profile)
+        # The floor is DERIVED from the budget, never asserted against it.
+        # A hard-coded "at least 20 words per scene" contradicted a 90-word
+        # budget split six ways, and an impossible instruction is noise the
+        # model learns to ignore.
+        kids_line = _kids_instruction(
+            profile, target_words // max(scene_count, 1))
         role_enum = STORY_ROLES if is_kids_story(profile) else EXPLAINER_ROLES
         return f"""Write an original {duration}-second {'YouTube Short' if is_short else 'YouTube video'} script.
 
