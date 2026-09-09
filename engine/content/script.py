@@ -1177,13 +1177,34 @@ def _trim_to_budget(scenes: list[Scene], budget: int) -> list[Scene]:
     total = sum(count_words(s.narration) for s in scenes)
     if total <= budget:
         return scenes
-    protected = {"hook", "payoff"}
+    # EVERY STORY BEAT IS PROTECTED, because deleting one is not trimming, it
+    # is removing part of the plot.
+    #
+    # This set was {"hook", "payoff"} - both EXPLAINER roles - so on a story
+    # nothing was protected at all. Measured: the model wrote a good 113-word
+    # story against a 90-word budget and the trimmer deleted the "turn"
+    # scene, which is the beat where the character has the idea. What shipped
+    # was want, attempt, obstacle, resolve: she struggles and then simply
+    # succeeds, with the reason removed. It also took the middle repetition
+    # of the refrain with it.
+    #
+    # A bedtime story that runs 56 seconds against a 45-second target is a
+    # far smaller defect than one missing its turn, so when every scene is
+    # protected this function now returns the script unchanged and says so.
+    protected = {"hook", "payoff"} | set(STORY_ROLES.split("|")) | {"attempt2"}
     candidates = [i for i, s in enumerate(scenes)
                   if s.role not in protected and i not in (0, len(scenes) - 1)]
     keep = [True] * len(scenes)
 
     # One region for a Short (preserving the original longest-first behaviour),
     # up to 12 for a long script.
+    if not candidates:
+        log_event("SCRIPT", "over budget but every scene is a required story "
+                            "beat; keeping the script long rather than "
+                            "deleting part of the plot",
+                  words=total, budget=budget, scenes=len(scenes))
+        return scenes
+
     regions = max(1, min(12, len(scenes) // 8))
     buckets: list[list[int]] = [[] for _ in range(regions)]
     for i in candidates:

@@ -156,6 +156,27 @@ def _is_transient_llm(message: str, *, retry_timeouts: bool = True) -> bool:
     return bool(_TRANSIENT_LLM.search(message))
 
 
+def _cannot_do_json(message: str) -> bool:
+    """True if this model cannot satisfy JSON mode for this prompt.
+
+    A DIFFERENT MODEL is the fix, which is why it belongs beside the
+    retirement check rather than in the transient one - waiting cannot help.
+
+    Measured on the live key: openai/gpt-oss-120b and gpt-oss-20b both answer
+    HTTP 400 json_validate_failed on the kids-story prompt, with an EMPTY
+    `failed_generation` so there is nothing to repair. Asked the same prompt
+    with JSON mode off, gpt-oss-120b returns 200 and zero characters of
+    content - it is a reasoning model putting everything in the reasoning
+    channel. qwen/qwen3.8-27b answers the identical prompt in JSON mode
+    correctly, 2,577 characters.
+
+    Before this, a 400 failed the whole PROVIDER, so the fallback list was
+    never consulted and kids-story generation fell through to the template -
+    the exact boilerplate the story work was undertaken to remove.
+    """
+    return "json_validate_failed" in message.lower()
+
+
 def _is_model_retired(message: str) -> bool:
     """True if the error means "that model ID is gone", not "you are throttled"."""
     if re.search(r"\b(429|rate limit|quota|401|403|invalid api key|"
@@ -172,11 +193,23 @@ class GroqProvider:
     ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
     # Tried in order. Hosted model IDs get decommissioned with little notice,
     # so a single hard-coded ID is a time bomb - see MODEL_RETIREMENT below.
+    # Verified against GET /openai/v1/models on the live key (2026-09-09):
+    # it serves 14 models and NEITHER llama-3.3-70b-versatile NOR
+    # llama-3.1-8b-instant is among them. Both were in this list, and
+    # llama-3.3-70b was FIRST - so every single Groq call spent a round trip
+    # collecting a 404 before reaching a model that exists. Two of the four
+    # entries were dead, which also meant the "fallback" list had one real
+    # member.
+    #
+    # The qwen pair replaces them because they are actually on the key. Query
+    # the endpoint before editing this list; hosted IDs get decommissioned
+    # with little notice, which is the whole reason MODEL_RETIREMENT exists
+    # below.
     FALLBACK_MODELS = [
-        "llama-3.3-70b-versatile",   # 131k context, best prose of the free set
         "openai/gpt-oss-120b",       # 200k tokens/day on the free tier
-        "openai/gpt-oss-20b",
-        "llama-3.1-8b-instant",      # 500k tokens/day, weakest prose
+        "qwen/qwen3.8-27b",          # real fallback, verified present
+        "qwen/qwen3.6-27b",
+        "openai/gpt-oss-20b",        # smallest, last resort
     ]
 
     def __init__(self, api_key: str = "", model: str = "", timeout: int = 120):
@@ -198,10 +231,17 @@ class GroqProvider:
                 result = self._call(model, prompt, system, json_mode,
                                     temperature, max_tokens)
             except LLMError as exc:
-                if not _is_model_retired(str(exc)):
+                text = str(exc)
+                if _cannot_do_json(text):
+                    log_event("LLM", "model cannot satisfy JSON mode, trying "
+                              "the next one", model=model,
+                              error=text[:120])
+                    last = exc
+                    continue
+                if not _is_model_retired(text):
                     raise
                 log_event("LLM", "groq model unavailable, trying next",
-                          model=model, error=str(exc)[:140])
+                          model=model, error=text[:140])
                 last = exc
                 continue
             self.model = model          # stick with what worked
