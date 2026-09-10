@@ -428,6 +428,37 @@ class Pipeline:
                         claim.entry.to_dict())
         return claim
 
+    # Scene roles a thumbnail may be cut from, in preference order. The hook
+    # is what the video is about and the payoff is where it lands; the middle
+    # is worked examples and boundaries, which illustrate a step rather than
+    # the subject.
+    THUMBNAIL_ROLES = ("hook", "payoff")
+
+    def _thumbnail_sources(self, script: Script) -> list[Path]:
+        """Which scene assets the thumbnail may be built from.
+
+        REPRESENTATIVE scenes, not all of them. `_frame_interest` scores
+        visual busyness - edge energy and colour - so scanning every scene of
+        a 72-scene explainer finds the busiest frame in the video rather than
+        the most relevant one. Measured: a finance explainer whose own briefs
+        asked for coins, jars and fact sheets got a thumbnail of men weaving
+        baskets in a village room, because that clip was the only crowded
+        frame among seventy clean desks.
+
+        Falls back to everything when no scene carries a preferred role, so a
+        shape whose beats map differently still gets a thumbnail.
+        """
+        scenes = [s for s in script.scene_objects()
+                  if s.asset_path and Path(s.asset_path).exists()]
+        preferred = [Path(s.asset_path) for s in scenes
+                     if s.role in self.THUMBNAIL_ROLES]
+        if preferred:
+            log_event("THUMBNAIL", "base restricted to representative scenes",
+                      considering=len(preferred), of=len(scenes),
+                      roles=",".join(self.THUMBNAIL_ROLES))
+            return preferred
+        return [Path(s.asset_path) for s in scenes]
+
     def _release_bank(self, claim, exc: BaseException,
                       job: VideoJob | None = None) -> None:
         """Return a claimed entry to the pool, never masking the real error.
@@ -1183,9 +1214,7 @@ class Pipeline:
                 # The scene assets, preferred over the rendered video: the
                 # render has the captions burnt into it, and a thumbnail cut
                 # from it carries the video's subtitle AND its own headline.
-                sources=[Path(s.asset_path)
-                         for s in script.scene_objects()
-                         if s.asset_path and Path(s.asset_path).exists()],
+                sources=self._thumbnail_sources(script),
                 video_format=request.video_format,
                 made_for_kids=profile.made_for_kids,
                 language=request.language)

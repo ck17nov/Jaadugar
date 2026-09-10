@@ -316,12 +316,35 @@ def _keyframes(video: Path, out_dir: Path, limit: int = 24) -> list[Path]:
     return sorted(out_dir.glob("kf_*.jpg"))
 
 
+# Below this, a frame is uniformly busy rather than busy in a place - noise,
+# heavy motion blur, or dense texture with no subject. A real photograph of a
+# subject on a background measures well above it.
+MIN_FRAME_STRUCTURE = 0.22
+
+# The least edge energy a frame may have and still be a picture of something.
+# Measured: a flat JPEG is 1.4, video noise is 50, and the usable
+# calendar-and-notebook base chosen for the finance explainer is 4.4.
+MIN_FRAME_DETAIL = 2.0
+
+
 def _frame_interest(path: Path) -> float:
     """How much a candidate frame has going on, and how well exposed it is.
 
     Deliberately simple and deliberately NOT the variant scorer: this picks
     between frames of the same video, so it wants detail and mid exposure. A
     near-black fade or a flat sky scores low.
+
+    STRUCTURE, not just detail. Detail alone was 70% of this score, and NOISE
+    HAS MAXIMAL DETAIL - every pixel is an edge. So a motion-blurred grey
+    frame out of a stock clip beat every clean, well-composed shot in a
+    72-scene finance explainer, and the chosen thumbnail was grey static.
+    Measured twice, on two different videos.
+
+    What separates a subject from noise is where the edges ARE: noise is
+    uniformly busy, so its per-cell edge energy barely varies, while a jar of
+    coins on a desk is busy in one region and calm elsewhere. The coefficient
+    of variation across a coarse grid measures exactly that, and it costs one
+    more pass over a thumbnail-sized image.
     """
     try:
         with Image.open(path) as raw:
@@ -330,9 +353,37 @@ def _frame_interest(path: Path) -> float:
         return -1.0
     from PIL import ImageStat
     stat = ImageStat.Stat(grey)
-    detail = ImageStat.Stat(grey.filter(ImageFilter.FIND_EDGES)).mean[0]
+    edges = grey.filter(ImageFilter.FIND_EDGES)
+    detail = ImageStat.Stat(edges).mean[0]
     exposure = 1.0 - abs(stat.mean[0] - 118) / 118.0
-    return clamp(detail / 24.0) * 0.7 + clamp(exposure) * 0.3
+
+    width, height = edges.size
+    grid = 8
+    cells = [ImageStat.Stat(edges.crop((
+        gx * width // grid, gy * height // grid,
+        (gx + 1) * width // grid, (gy + 1) * height // grid))).mean[0]
+        for gy in range(grid) for gx in range(grid)]
+    # An absolute floor BEFORE the structure test, because a coefficient of
+    # variation is unstable near a zero mean: a flat grey frame has almost no
+    # edges, so its cell-to-cell variation divided by its near-zero average
+    # comes out LARGE and it scored 0.62 as "highly structured". Measured on
+    # real frames - a flat JPEG is 1.4, noise is 50, and the usable
+    # calendar-and-notebook base is 4.4 - so 2.0 sits clear of compression
+    # artefacts and well under real content.
+    if detail < MIN_FRAME_DETAIL:
+        return 0.0                              # a fade, a wall, a black frame
+
+    average = sum(cells) / len(cells)
+    if average <= 0.5:
+        return 0.0
+    spread = (sum((c - average) ** 2 for c in cells) / len(cells)) ** 0.5
+    structure = clamp(spread / average / 0.75)
+
+    if structure < MIN_FRAME_STRUCTURE:
+        return 0.0                              # uniformly busy: noise, blur
+    return (clamp(detail / 24.0) * 0.40
+            + clamp(exposure) * 0.20
+            + structure * 0.40)
 
 
 # How much tighter the thumbnail crop is than the frame.
