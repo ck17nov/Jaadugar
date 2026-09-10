@@ -190,8 +190,17 @@ def unsafe(entry: BankEntry) -> list[tuple[str, str]]:
     if child:
         checks += KIDS_PROHIBITED
 
+    from ..quality.gate import violence_in
+
     hits: list[tuple[str, str]] = []
     for pattern, label in checks:
+        # The violence entry needs the gate's own helper, not a bare regex
+        # search: "the battery is dead" matches the pattern and is not
+        # violence. Import and the render-time gate MUST agree, or an entry
+        # imports cleanly and is then blocked after a six-minute render -
+        # which is the exact failure this whole check exists to prevent.
+        if label == "violence" and not violence_in(haystack):
+            continue
         match = re.search(pattern, haystack, re.I)
         if not match:
             continue

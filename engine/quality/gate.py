@@ -83,8 +83,60 @@ PROHIBITED_PATTERNS: list[tuple[str, str]] = [
      "dangerous challenge"),
 ]
 
+# The violence check, split by strength.
+#
+# "dead" and "die" carry far less signal than the rest. A real kids story was
+# rejected for "he finds a torch, but the battery is dead" - ordinary English,
+# not violent content. Dropping the words entirely would open the case that
+# actually matters ("the bird is dead"), so instead a weak-word match has to
+# survive the benign collocations below.
+_VIOLENCE_STRONG = (r"\b(kill|kills|killed|blood|bloody|death|dying|gun|guns|"
+                    r"knife|knives|weapon|weapons|war|murder|stab|shoot)\b")
+# "died" was missing from the original list entirely, so "the dog died" was
+# never flagged at all. It belongs among the WEAK words rather than the strong
+# ones, because a candle dies too.
+_VIOLENCE_WEAK = r"\b(dead|die|dies|died)\b"
+_VIOLENCE = _VIOLENCE_STRONG + "|" + _VIOLENCE_WEAK
+
+
+# Things that can be dead or die without anything having been harmed. Kept as
+# an explicit list rather than a cleverer rule, because the alternative -
+# guessing whether the subject is alive - is not something a regex can do and
+# a wrong guess here either censors a bedtime story or misses a real problem.
+_INANIMATE = (r"battery|batteries|torch|phone|light|lights|lamp|lantern|bulb|"
+              r"candle|flame|fire|screen|radio|clock|watch|engine|signal|"
+              r"line|music|sound|wind|breeze|echo")
+
+_BENIGN_DEAD = re.compile(
+    # "dead battery", "dead end", "dead silence"
+    r"\bdead\s+(battery|batteries|end|ends|line|lines|weight|leaf|leaves|"
+    r"air|calm|silence|pixel|zone|slow|stop)\b"
+    # "the battery is dead", "his phone went dead"
+    rf"|\b({_INANIMATE})\b[^.!?]{{0,24}}?"
+    r"\b(is|are|was|were|went|goes|going)\s+dead\b"
+    # "the flame dies", "the lantern died", "the music dies away"
+    rf"|\b({_INANIMATE})\b[^.!?]{{0,24}}?\b(dies|die|died)\b",
+    re.I)
+
+
+def violence_in(text: str) -> bool:
+    """Whether the violence pattern fires for a reason that is not benign.
+
+    A function rather than a cleverer regex because `re` has no
+    variable-width lookbehind, and "battery ... is dead" needs one.
+    """
+    if re.search(_VIOLENCE_STRONG, text, re.I):
+        return True                     # decisive on its own
+    benign = [(m.start(), m.end()) for m in _BENIGN_DEAD.finditer(text)]
+    for match in re.finditer(_VIOLENCE_WEAK, text, re.I):
+        if not any(lo <= match.start() and match.end() <= hi
+                   for lo, hi in benign):
+            return True                 # a weak word nothing explains
+    return False
+
+
 KIDS_PROHIBITED: list[tuple[str, str]] = [
-    (r"\b(kill|blood|die|dead|death|gun|knife|weapon|war)\b", "violence"),
+    (_VIOLENCE, "violence"),
     (r"\b(scary|terrifying|horror|nightmare|monster attack)\b", "frightening"),
     (r"\b(damn|hell|stupid|idiot|shut up)\b", "inappropriate language"),
     (r"\b(sexy|kiss|dating|girlfriend|boyfriend)\b", "romance"),
@@ -315,7 +367,8 @@ class QualityGate:
         # ---- kids compliance ---------------------------------------------
         if profile.made_for_kids or metadata.made_for_kids:
             kid_hits = [label for pattern, label in KIDS_PROHIBITED
-                        if re.search(pattern, haystack, re.I)]
+                        if (violence_in(haystack) if label == "violence"
+                            else re.search(pattern, haystack, re.I))]
             consistent = profile.made_for_kids == metadata.made_for_kids
             if not consistent:
                 kid_hits.append("madeForKids flag does not match the niche profile")
