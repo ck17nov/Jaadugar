@@ -179,6 +179,20 @@ STOPWORDS = {
     "into", "out", "up", "down", "more", "most", "some", "all", "any", "every",
     "video", "shorts", "youtube", "subscribe", "like", "watch", "new", "best",
     "top", "vs", "part", "full", "official", "episode",
+    # HINDI FUNCTION WORDS.
+    #
+    # The list was English-only, so every Hindi connective counted as a
+    # content word. The visible cost: the spoiler check on a title rejected
+    # "गेंद फिर भी वहीं छिपी रही" because "फिर" ("even so") also appears
+    # later in the story - a conjunction read as a plot giveaway. Keyword
+    # extraction and every overlap measure had the same blind spot.
+    "और", "या", "पर", "मगर", "लेकिन", "फिर", "भी", "ही", "तो", "का", "के",
+    "की", "को", "में", "से", "पे", "है", "हैं", "था", "थी", "थे", "हो",
+    "यह", "वह", "ये", "वे", "इस", "उस", "जो", "कि", "क्या", "कब", "कहाँ",
+    "कैसे", "क्यों", "नहीं", "ना", "अब", "तब", "वहीं", "यहीं", "वहाँ",
+    "यहाँ", "एक", "बहुत", "कुछ", "सब", "अपना", "अपनी", "उसने", "उसकी",
+    "उसका", "मैं", "तुम", "आप", "हम", "गया", "गई", "गए", "रहा", "रही",
+    "रहे", "लगा", "लगी", "दिया", "दी", "कर", "करने", "साथ",
 }
 
 
