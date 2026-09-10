@@ -216,8 +216,29 @@ NUMERIC_CLAIM = re.compile(
     r"\b\d[\d,\.]*\s*(%|percent|million|billion|trillion|years?|km|miles|"
     r"kg|tons?|degrees|light[- ]years?|bce?|ad|ce)\b", re.I)
 NAMED_STUDY = re.compile(
-    r"\b(study|studies|research|researchers?|scientists?|survey|report|paper|"
+    r"\b(study|studies|research|researchers?|scientists?|survey|"
     r"trial|experiment)\b", re.I)
+
+# "paper" and "report" only count when they read as citations.
+#
+# Bare "paper" is overwhelmingly stationery: a finance explainer saying "one
+# sheet of paper is enough to run it" was flagged as referencing unsourced
+# research, which is the sort of false positive that teaches an operator to
+# ignore the check. A research paper is nearly always introduced - "a 2019
+# paper", "the paper found", "a paper published in" - so that is what is
+# matched.
+_CITED_PAPER = re.compile(
+    r"\b(?:a|the|this|that|one|another|recent|new|\d{4})\s+"
+    r"(?:\w+\s+){0,2}(paper|report)\b"
+    r"(?=[^.!?]{0,40}\b(found|finds|shows?|showed|says?|said|published|"
+    r"concludes?|argues?|estimates?|suggests?|by)\b)"
+    r"|\b(paper|report)s?\s+(?:found|finds|shows?|showed|published|"
+    r"concluded|argued|estimated|suggested)\b", re.I)
+
+
+def cites_research(text: str) -> bool:
+    """Whether the text points at research it has not sourced."""
+    return bool(NAMED_STUDY.search(text) or _CITED_PAPER.search(text))
 
 
 @dataclass
@@ -289,7 +310,7 @@ class FactChecker:
                     result.flagged.append({
                         "type": "numeric claim not declared in claims array",
                         "severity": "medium", "excerpt": sentence.strip()[:200]})
-            if NAMED_STUDY.search(text) and not script.sources:
+            if cites_research(text) and not script.sources:
                 result.flagged.append({
                     "type": "references research but lists no sources",
                     "severity": "medium",

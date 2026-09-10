@@ -151,6 +151,19 @@ class BankEntry:
     emotional_register: str = ""
 
     characters: list[dict[str, str]] = field(default_factory=list)
+    # Numbers the script asserts, declared so the fact checker can tell an
+    # illustrative figure from an unverified claim.
+    #
+    # Without this every finance entry is flagged medium-risk: the prompt
+    # tells authors to use "round illustrative figures and say they are
+    # illustrative", and the fact checker then flags all twelve of them as
+    # "numeric claim not declared in claims array" - measured on a real
+    # 72-scene expense-ratio explainer. Correct as far as it goes, but it
+    # made risk=medium permanent noise rather than a signal, and forced
+    # approval on every finance video for a reason nobody could act on.
+    #
+    # Shape matches Script.claims: {"claim", "confidence", "basis"}.
+    claims: list[dict[str, str]] = field(default_factory=list)
     scenes: list[BankScene] = field(default_factory=list)
 
     provenance: dict[str, Any] = field(default_factory=dict)
@@ -192,6 +205,7 @@ class BankEntry:
             "protagonist_type": self.protagonist_type,
             "emotional_register": self.emotional_register,
             "characters": [dict(c) for c in self.characters],
+            "claims": [dict(c) for c in self.claims],
             "scenes": [s.to_dict() for s in self.scenes],
             "provenance": dict(self.provenance), "human": dict(self.human),
             "word_count": self.word_count, "scene_count": self.scene_count,
@@ -226,6 +240,11 @@ class BankEntry:
                          "description": str(c.get("description", "")).strip()}
                         for c in (raw.get("characters") or [])
                         if isinstance(c, dict)],
+            claims=[{"claim": str(c.get("claim", "")).strip(),
+                     "confidence": str(c.get("confidence", "medium")).strip(),
+                     "basis": str(c.get("basis", "")).strip()}
+                    for c in (raw.get("claims") or [])
+                    if isinstance(c, dict) and str(c.get("claim", "")).strip()],
             scenes=[BankScene.from_dict(s) for s in (raw.get("scenes") or [])
                     if isinstance(s, dict)],
             provenance=dict(raw.get("provenance") or {}),
@@ -367,6 +386,18 @@ def validate(entry: BankEntry, *, expect_group: str = "") -> list[Problem]:
                 "must be in ENGLISH - it is sent to an image generator")
 
     # ---- captions: the whole point of carrying them ----
+    #
+    # CHECKED PER SCENE, and that matters. The test used to compare all
+    # narrations joined against all captions joined, and only when EVERY
+    # scene had a caption - so two very likely authoring mistakes walked
+    # through it. One English caption among five Hindi ones still left the
+    # joined caption text predominantly Devanagari, so the aggregate passed;
+    # and if some scenes had no caption at all the language comparison was
+    # skipped entirely. Verified on a shipped entry: setting scene 1's
+    # caption to its own English narration produced not even a warning, and
+    # the English text was then burned onto an English-narrated frame. That
+    # is the reported "captions aren't correct" defect reaching the render
+    # through the gate built to stop it.
     with_caption = sum(1 for s in entry.scenes if s.caption.strip())
     if with_caption == 0:
         bad("scenes[].caption", "no scene has a caption; the pipeline would "
@@ -375,15 +406,22 @@ def validate(entry: BankEntry, *, expect_group: str = "") -> list[Problem]:
         bad("scenes[].caption",
             f"only {with_caption} of {entry.scene_count} scenes have one",
             fatal=False)
-    else:
-        # Captions must be in the OTHER language, or they are pointless.
-        narration_non_latin = _looks_non_latin(" ".join(entry.narrations()))
-        caption_non_latin = _looks_non_latin(
-            " ".join(s.caption for s in entry.scenes))
-        if narration_non_latin == caption_non_latin:
-            bad("scenes[].caption",
-                "appears to be the SAME language as the narration; the point "
-                "is Hindi captions on English narration and vice versa")
+
+    # The narration language is the entry's own declaration, not a guess from
+    # the text: a Hindi story can contain an English loanword and an English
+    # one can name a person in Devanagari.
+    narration_is_devanagari = entry.language.strip().lower().startswith("hi") \
+        and not entry.language.strip().lower().startswith("hi-latn")
+    for index, scene in enumerate(entry.scenes):
+        if not scene.caption.strip():
+            continue
+        caption_is_devanagari = _bears_devanagari(scene.caption)
+        if caption_is_devanagari == narration_is_devanagari:
+            wanted = "English" if narration_is_devanagari else "Hindi"
+            bad(f"scenes[{index}].caption",
+                f"is in the SAME script as the narration; this entry is "
+                f"{entry.language!r} so its captions must be {wanted}. "
+                f"Got: {scene.caption[:56]!r}")
 
     # ---- arc shapes carry the variety axes ----
     if entry.shape in ARC_SHAPES:
@@ -423,10 +461,41 @@ def _looks_non_latin(text: str) -> bool:
     Counting both alphabets rather than testing for any non-Latin character:
     a Hindi narration legitimately contains digits and the odd loanword, and
     an English caption of a Hindi story legitimately contains a name.
+
+    Used for IMAGE BRIEFS, where "must be English" has to tolerate a
+    Devanagari character name - the prompt asks authors to name characters as
+    the narration does, and for a Hindi story those names are Devanagari.
     """
     latin = len(_LATIN.findall(text or ""))
     other = len(_NON_LATIN.findall(text or ""))
     return other > latin
+
+
+# How much Devanagari makes a CAPTION a Hindi caption.
+#
+# Majority is the wrong test here. An alphabet drill teaching the letter B to
+# Hindi speakers must print "B" in its caption - "B कहता है buh, buh, B।" is
+# eight Latin characters against six Devanagari, so a majority test calls a
+# perfectly good Hindi caption English and rejects the entry. Measured on a
+# shipped drill.
+#
+# Presence with a share instead: enough Devanagari to be deliberate, and
+# enough of the text to be the caption's language rather than a name inside
+# an English one. "Meera saw Grandmother's slipper" - the correct English
+# caption for a Hindi story - is 0%, and a Devanagari name inside an English
+# caption lands around 14%.
+_DEVANAGARI_MIN_LETTERS = 3
+_DEVANAGARI_MIN_SHARE = 0.20
+
+
+def _bears_devanagari(text: str) -> bool:
+    """True when this text is written IN Devanagari, not merely near it."""
+    other = len(_NON_LATIN.findall(text or ""))
+    if other < _DEVANAGARI_MIN_LETTERS:
+        return False
+    latin = len(_LATIN.findall(text or ""))
+    total = latin + other
+    return total > 0 and (other / total) >= _DEVANAGARI_MIN_SHARE
 
 
 # ---------------------------------------------------------------------------

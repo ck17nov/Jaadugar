@@ -263,6 +263,10 @@ def to_script(entry: BankEntry, *, language: str = "",
         cta=(entry.scenes[-1].narration if entry.scenes else ""),
         estimated_duration=round(entry.estimated_seconds, 2),
         language=language or entry.language,
+        # Declared numbers, so the fact checker can tell an illustrative
+        # figure from an unverified assertion. Without them a finance entry
+        # is flagged medium-risk on every one of its own figures.
+        claims=[dict(c) for c in (entry.claims or [])],
         provider=f"bank:{entry.entry_id}",
         chapters=_chapters(entry),
     )

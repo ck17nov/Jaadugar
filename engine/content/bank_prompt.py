@@ -421,6 +421,25 @@ TEACHING RULES
 - Repeat the thing being taught in EVERY scene.
 - Nothing scary, no danger, no competition, no losing.""")
 
+    # ---- declared numbers ----
+    #
+    # Only for the shapes that actually carry figures. A bedtime story has no
+    # claims and asking for an empty array on every one of them is noise.
+    if shape in ("explainer", "procedure"):
+        parts.append("""
+NUMBERS - declare every one
+- "claims" lists each figure the narration states, so the fact checker can
+  tell an illustrative example from an unverified assertion. Without it every
+  number you write is flagged, and the video is held for manual review on a
+  reason nobody can act on.
+- One entry per figure: {"claim": "the text as narrated", "confidence":
+  "high" | "medium" | "low", "basis": "why this number is defensible"}.
+- For an ILLUSTRATIVE figure say so in the basis: "round illustrative
+  assumption, stated as such in the narration". That is the honest label and
+  it is what most of these will be.
+- Use "high" only for arithmetic that follows from the figures you already
+  stated. Never for a market return, a rate, or anything that changes.""")
+
     # ---- captions, the thing that was broken ----
     other = "English" if language.startswith("hi") else "Hindi (Devanagari)"
     narration_language = "Hindi (Devanagari script)" if language.startswith("hi") \
