@@ -19,6 +19,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -183,6 +184,11 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     val channels by vm.channels.collectAsStateWithLifecycle()
     val groups by vm.groups.collectAsStateWithLifecycle()
     val bankReady by vm.bankReady.collectAsStateWithLifecycle()
+    // Failed, as opposed to not answered yet. Rendering the two the same way
+    // is what left "Checking..." on screen for ever with the backend down.
+    val bankFailed by vm.bankFailed.collectAsStateWithLifecycle()
+    // Whether the LIVE topic catalogue could be fetched at all.
+    val catalogueFailed by vm.catalogueFailed.collectAsStateWithLifecycle()
     // Which group that count was taken over - not always the one
     // asked for, because a blank group is resolved from the topic.
     val bankGroup by vm.bankGroup.collectAsStateWithLifecycle()
@@ -337,6 +343,30 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
         // stories" replaces scrolling twenty-one topics looking for the nine
         // that start with "kids".
         val selectedGroup = groups.firstOrNull { it.key == groupKey }
+
+        // AN EMPTY CATALOGUE IS NOT A DESIGN, IT IS A FAILURE - say which.
+        //
+        // The selector simply hid itself and the Topic dropdown fell back to
+        // the list built into the app, so a backend that was not running
+        // looked identical to "there are no groups". The built-in list is
+        // also older than the backend's by definition, which is how the
+        // retired AI, science and code sections went on appearing after they
+        // had been merged into Technical.
+        if (groups.isEmpty() && catalogueFailed) {
+            Text(
+                "Cannot reach the backend, so the live topic list is not " +
+                    "available. The topics below are the copy built into " +
+                    "this app and may be out of date - channel groups, and " +
+                    "anything added recently, will not appear until the " +
+                    "backend answers.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            OutlinedButton(onClick = { vm.loadGroups() }) {
+                Text("Retry")
+            }
+        }
+
         if (groups.isNotEmpty()) {
             LabeledDropdown(
                 label = "Channel group",
@@ -446,6 +476,13 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
             val ready = bankReady
             Text(
                 when {
+                    // FIRST, because a failed check also leaves `ready` null
+                    // and "Checking..." then stayed on screen indefinitely.
+                    bankFailed ->
+                        "Cannot reach the backend, so the number of reviewed " +
+                            "scripts is unknown. Start it and tap Retry - " +
+                            "the automation will still run if the backend is " +
+                            "up by then."
                     ready == null -> "Checking how many reviewed scripts are left…"
                     ready == 0 && scriptSource == "bank" ->
                         "No reviewed scripts left. This automation will FAIL " +
@@ -466,12 +503,25 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                         "above becomes a filter rather than a target."
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = if (bankReady == 0 && scriptSource == "bank") {
+                color = if (bankFailed ||
+                    (bankReady == 0 && scriptSource == "bank")) {
                     MaterialTheme.colorScheme.error
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
+            if (bankFailed) {
+                OutlinedButton(onClick = {
+                    vm.loadBank(groupKey, language,
+                        if (isShort) "SHORT" else "LONGFORM", niche.trim())
+                    // The catalogue almost certainly failed for the same
+                    // reason, so retry both rather than making the user find
+                    // two buttons.
+                    vm.loadGroups()
+                }) {
+                    Text("Retry")
+                }
+            }
         }
 
         // How the backend interpreted it - transparency about what will be made.

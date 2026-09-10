@@ -89,6 +89,56 @@ Then start the backend the app talks to:
 .venv/Scripts/python -m backend.cli serve --host 0.0.0.0 --port 8099
 ```
 
+On Windows PowerShell that is one statement, not two - `&&` is a parser error
+in PowerShell 5.1:
+
+```powershell
+cd "C:\path\to\Vid App"; .\.venv\Scripts\python.exe -m backend.cli serve --host 0.0.0.0 --port 8099
+```
+
+### Keeping it running (Windows)
+
+The app talking to nothing does not look like the backend being down - it
+looks like the app being broken. The topic list falls back to the copy built
+into the APK, which is older than the backend by construction, so topics that
+were merged away go on appearing; and the reviewed-script count cannot answer,
+so it reads "checking..." indefinitely. Both were reported as app bugs when
+the backend simply was not running.
+
+`scripts/serve.cmd` runs the backend with a restart loop and logs to
+`workspace/logs/backend.log`. `scripts/serve-hidden.vbs` runs that with no
+console window. To start it at every logon:
+
+```powershell
+$vbs = "C:\path\to\Vid App\scripts\serve-hidden.vbs"
+$action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument ('"' + $vbs + '"')
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User (whoami).Trim()
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName "Jaadugar Backend" -Action $action -Trigger $trigger -Settings $settings -Force
+```
+
+`ExecutionTimeLimit ([TimeSpan]::Zero)` matters: the default is three days,
+after which Task Scheduler would kill a perfectly healthy backend.
+
+Managing it afterwards:
+
+```powershell
+Start-ScheduledTask   -TaskName "Jaadugar Backend"   # start now
+Get-ScheduledTaskInfo -TaskName "Jaadugar Backend"   # last run and result
+Disable-ScheduledTask -TaskName "Jaadugar Backend"   # stop starting at logon
+Unregister-ScheduledTask -TaskName "Jaadugar Backend" -Confirm:$false
+```
+
+To stop a RUNNING one, kill the `cmd.exe` running `serve.cmd` as well as the
+`python.exe` under it - killing python alone just makes the restart loop bring
+it back fifteen seconds later.
+
+The phone needs the machine's LAN address, not `localhost`: find it with
+`ipconfig` and set the backend URL in the app to `http://<that-ip>:8099`.
+Windows must also allow inbound connections for whichever `python.exe`
+actually binds the socket, on the profile the Wi-Fi is using (`Public` for
+most home networks, confusingly).
+
 Full instructions: [docs/SETUP.md](docs/SETUP.md).
 Run it without your laptop: [deploy/oracle/README.md](deploy/oracle/README.md)
 — including an honest assessment of whether the free tier can keep up.

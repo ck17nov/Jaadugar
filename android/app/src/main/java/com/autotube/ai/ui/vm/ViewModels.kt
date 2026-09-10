@@ -308,9 +308,29 @@ class CreateViewModel(
     private val _groups = MutableStateFlow<List<NicheGroupDto>>(emptyList())
     val groups: StateFlow<List<NicheGroupDto>> = _groups.asStateFlow()
 
+    /**
+     * Whether the LIVE catalogue could be fetched.
+     *
+     * This matters more than it looks. When the fetch failed, the group
+     * selector hid itself and the Topic dropdown fell back to the app's
+     * built-in list - so an unreachable backend looked exactly like a
+     * deliberate design, and the fallback list (which still had AI, science
+     * and code as separate sections, and none of the Excel or phone/laptop
+     * topics) was presented as the truth. Reported as "I still see
+     * science/code/AI in channel group", when the merge had shipped and the
+     * backend simply was not running.
+     */
+    private val _catalogueFailed = MutableStateFlow(false)
+    val catalogueFailed: StateFlow<Boolean> = _catalogueFailed.asStateFlow()
+
     fun loadGroups() {
         viewModelScope.launch {
-            repo.nicheGroups().onSuccess { _groups.value = it.groups }
+            repo.nicheGroups()
+                .onSuccess {
+                    _groups.value = it.groups
+                    _catalogueFailed.value = false
+                }
+                .onFailure { _catalogueFailed.value = true }
         }
     }
 
@@ -325,6 +345,17 @@ class CreateViewModel(
     private val _bankReady = MutableStateFlow<Int?>(null)
     val bankReady: StateFlow<Int?> = _bankReady.asStateFlow()
 
+    /**
+     * Whether the last check FAILED, as opposed to not having answered yet.
+     *
+     * Without this the two were the same state - null - and the screen
+     * rendered both as "Checking how many reviewed scripts are left...". With
+     * the backend down that message stayed on screen for ever, which is how
+     * it was reported: "it shows checking but never gives a response".
+     */
+    private val _bankFailed = MutableStateFlow(false)
+    val bankFailed: StateFlow<Boolean> = _bankFailed.asStateFlow()
+
     /** Which group the last count was actually taken over, for the label. */
     private val _bankGroup = MutableStateFlow("")
     val bankGroup: StateFlow<String> = _bankGroup.asStateFlow()
@@ -337,6 +368,7 @@ class CreateViewModel(
             // screen, labelled as the current one - so switching from a
             // group with scripts to one without still read "3 ready".
             _bankReady.value = null
+            _bankFailed.value = false
             // ASK THE BACKEND, do not compute it here.
             //
             // This used to fold language dialects and sum the matching slots
@@ -354,14 +386,16 @@ class CreateViewModel(
                     // same way the claim does, so this is not always the
                     // group that was asked for.
                     _bankGroup.value = bank.query?.resolvedGroup ?: group
+                    _bankFailed.value = false
                 }
                 .onFailure {
-                    // Stays null, which the screen renders as "checking"
-                    // rather than as zero. Telling somebody they have no
-                    // scripts because a request failed is how they end up
-                    // importing a batch they already have.
+                    // NOT zero - telling somebody they have no scripts
+                    // because a request failed is how they end up importing
+                    // a batch they already have. But not "checking" either:
+                    // the screen has to say the check could not be made.
                     _bankReady.value = null
                     _bankGroup.value = ""
+                    _bankFailed.value = true
                 }
         }
     }

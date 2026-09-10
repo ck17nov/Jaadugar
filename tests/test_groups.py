@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from engine.core.groups import (GROUPS, all_topics, dump, group,
                                 group_for_topic, is_child_directed, topics)
 from engine.youtube.channels import Channel, ChannelStore
@@ -168,3 +170,53 @@ class TestChannelResolution:
         than guessing."""
         store = _store(self._channel("kids-ch", ["kids"]))
         assert store.for_niche("personal finance") is None
+
+
+class TestWhatTheAppIsOffered:
+    """The catalogue the Create screen renders, as served.
+
+    Reported as "I still see science/code/AI in channel group" - which was
+    the app's OFFLINE fallback, shown because the backend was not running.
+    These pin the served list, so if the retired groups ever reappear there
+    it is a real regression rather than a connectivity symptom.
+    """
+
+    def test_exactly_three_groups_are_offered(self):
+        served = dump()
+        assert [g["key"] for g in served] == ["kids", "finance", "tech"]
+
+    def test_no_retired_group_is_offered(self):
+        """`MERGED_KEYS` must resolve them without LISTING them."""
+        from engine.core.groups import MERGED_KEYS
+
+        offered = {g["key"] for g in dump()}
+        for retired in MERGED_KEYS:
+            if retired == "tech":
+                continue
+            assert retired not in offered, f"{retired} is still offered"
+            # Still resolvable, so a saved automation does not break.
+            assert group(retired) is not None
+
+    @pytest.mark.parametrize("topic", [
+        "AI explained", "AI news", "AI tools and courses",
+        "science facts", "science experiments",
+        "sql and databases", "programming and coding", "developer tools",
+    ])
+    def test_every_ai_science_and_code_topic_sits_under_technical(self, topic):
+        served = {g["key"]: g["topics"] for g in dump()}
+        assert topic in served["tech"], f"{topic} is not under Technical"
+
+    @pytest.mark.parametrize("topic", [
+        "excel tips and tricks",
+        "ms office tips and tricks",
+        "new phone and laptop launches",
+        "phone and laptop buying advice",
+    ])
+    def test_the_requested_additions_are_offered(self, topic):
+        """Asked for: Excel/MS Office tips, and phone/laptop launches."""
+        served = {g["key"]: g["topics"] for g in dump()}
+        assert topic in served["tech"], f"{topic} is missing from Technical"
+
+    def test_the_technical_label_is_what_the_screen_shows(self):
+        served = {g["key"]: g for g in dump()}
+        assert served["tech"]["label"] == "Technical"
