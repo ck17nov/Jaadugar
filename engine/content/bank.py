@@ -442,6 +442,29 @@ def validate(entry: BankEntry, *, expect_group: str = "") -> list[Problem]:
     # one can name a person in Devanagari.
     narration_is_devanagari = entry.language.strip().lower().startswith("hi") \
         and not entry.language.strip().lower().startswith("hi-latn")
+
+    # But the declaration has to be TRUE of the text, which was never
+    # checked. Two things came through that gap. An honest mislabel sends a
+    # Devanagari script to an English voice, which reads it as gibberish or
+    # silence. And a deliberate one is a way past the variety gate: peers are
+    # matched on group AND language, so relabelling `language` on an
+    # otherwise identical entry leaves it with no peers to be compared
+    # against, and the byte-identical check never runs.
+    #
+    # A MAJORITY test, matching `_looks_non_latin`, so the loanwords and
+    # names the comment above describes are still fine either way.
+    joined = " ".join(entry.narrations())
+    if joined.strip():
+        looks_devanagari = _looks_non_latin(joined)
+        if narration_is_devanagari and not looks_devanagari:
+            bad("language",
+                f"declared {entry.language!r} but the narration is not in "
+                f"Devanagari - a Hindi voice cannot read it")
+        elif not narration_is_devanagari and looks_devanagari:
+            bad("language",
+                f"declared {entry.language!r} but the narration is in "
+                f"Devanagari. Set language to 'hi', or write it in Latin "
+                f"letters for 'hi-Latn'")
     for index, scene in enumerate(entry.scenes):
         if not scene.caption.strip():
             continue

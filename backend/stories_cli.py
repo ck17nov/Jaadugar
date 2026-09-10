@@ -54,6 +54,10 @@ def stories_prompt(
                               help="narrative | poem | drill | explainer | "
                                    "procedure"),
     out: str = typer.Option("", "--out", help="write to a file instead"),
+    viral: bool = typer.Option(
+        False, "--viral",
+        help="include real high-performing titles from the niche as SHAPE "
+             "input. Spends YouTube quota and needs YOUTUBE_API_KEY."),
 ) -> None:
     """Print the prompt to paste into Claude or ChatGPT."""
     found = get_group(group)
@@ -72,6 +76,11 @@ def stories_prompt(
     try:
         context = bank_prompt.context_from_bank(db, group_key=group,
                                                 language=language)
+        if viral:
+            # Behind a flag because it costs quota and needs a key. Without
+            # it the prompt is the same prompt it has always been.
+            context["viral_titles"] = bank_prompt.viral_titles_for(
+                load_config(), db, group_key=group, video_format=fmt)
     finally:
         db.close()
 

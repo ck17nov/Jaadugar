@@ -33,6 +33,7 @@ import json
 from typing import Any, Sequence
 
 from ..core.groups import group as get_group
+from ..core.logging import log_event
 from . import variety
 from .bank import ARC_VARIANTS, OUTCOME_CLASSES, words_per_second
 
@@ -624,6 +625,59 @@ own.""")
     parts.append(f"\nNow write {count} scripts. Count the words in each one "
                  f"before you output it.")
     return "\n".join(parts)
+
+
+def viral_titles_for(cfg, db, *, group_key: str, video_format: str = "SHORT",
+                     limit: int = 10) -> list[str]:
+    """Real high-performing titles from this group's niche, or [].
+
+    `build` has taken a `viral_titles` argument since the bank existed and
+    nothing ever supplied one, so the batch prompt never actually saw what
+    performs in the niche - which is the "get ideas from the most-watched
+    videos" half of the bank workflow.
+
+    Ranked by VIEWS PER DAY rather than views, so a five-year-old video with
+    a large lifetime count does not crowd out what is working now.
+
+    Costs YouTube quota, so the caller has to ask for it. Returns [] on
+    anything going wrong - no key, no quota left, no network - because a
+    prompt without the shape hints is still a usable prompt.
+    """
+    found = get_group(group_key)
+    if found is None or not found.topics:
+        return []
+    try:
+        from ..core.niche import build_profile
+        from ..research.youtube import YouTubeResearch
+
+        researcher = YouTubeResearch(cfg, db)
+        if not researcher.configured:      # a property, not a call
+            log_event("BANK", "no YouTube key, so the batch prompt gets no "
+                              "title patterns")
+            return []
+        niche = found.topics[0]
+        profile = build_profile(niche, made_for_kids=found.child_directed)
+        videos = researcher.research_channels(niche, profile)
+        if not videos:
+            videos = researcher.research(niche, profile,
+                                         video_format=video_format)
+    except Exception as exc:                    # noqa: BLE001
+        log_event("BANK", "could not fetch title patterns for the prompt",
+                  error=str(exc)[:160])
+        return []
+
+    ranked = sorted(videos, key=lambda v: (v.view_velocity, v.views),
+                    reverse=True)
+    titles: list[str] = []
+    for video in ranked:
+        title = (video.title or "").strip()
+        if title and title not in titles:
+            titles.append(title)
+        if len(titles) >= limit:
+            break
+    log_event("BANK", "title patterns for the batch prompt",
+              group=group_key, titles=len(titles), corpus=len(videos))
+    return titles
 
 
 def context_from_bank(db, *, group_key: str, language: str) -> dict[str, Any]:

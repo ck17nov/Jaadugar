@@ -13,6 +13,7 @@ import json
 import pytest
 
 from engine.content import bank, bank_import, bank_prompt, bank_use, variety
+from engine.core.config import load_config
 from engine.core.db import Database
 
 
@@ -1112,3 +1113,180 @@ def test_the_signature_cache_does_not_change_a_verdict(db):
     peers[0].recompute()
     third = [str(i) for i in variety.check_new(candidate, peers)]
     assert third != first
+
+
+# ---------------------------------------------------------------------------
+# The declared language has to be true of the narration
+# ---------------------------------------------------------------------------
+def _relabelled(language: str) -> bank.BankEntry:
+    """The same narration, declared as another language.
+
+    The id is cleared first because that is how an AUTHORED file arrives -
+    it states no entry_id, so one is derived from group, language and the
+    narration hash, and the relabelled copy therefore gets a different id
+    from the original. Which is what lets it be stored beside it.
+    """
+    entry = kids_entry()
+    entry.language = language
+    entry.entry_id = ""
+    entry.recompute()
+    return entry
+
+
+def test_an_english_narration_cannot_be_labelled_hindi(db):
+    """It was never checked, and two things came through the gap.
+
+    An honest mislabel sends the script to the wrong voice. A deliberate one
+    is a way past the variety gate: peers are matched on group AND language,
+    so relabelling this field leaves an otherwise identical entry with no
+    peers to be compared against, and the byte-identical check never runs.
+    """
+    original = kids_entry()
+    db.save_bank_entry(original)
+
+    relabelled = _relabelled("hi")
+    assert relabelled.entry_id != original.entry_id      # the id carries it
+    assert variety.check_new(relabelled, [original]) == []   # no peers
+
+    problems = [str(p) for p in bank.validate(relabelled, expect_group="kids")]
+    assert any("language" in p and "not in Devanagari" in p
+               for p in problems), problems
+
+
+def test_a_devanagari_narration_cannot_be_labelled_english():
+    entry = kids_entry()
+    entry.language = "en"
+    for scene in entry.scenes:
+        scene.narration = "मीरा ने छत की ओर देखा और वहीं रुक गई।"
+        scene.caption = "Meera looked towards the roof and stopped there."
+    entry.recompute()
+    problems = [str(p) for p in bank.validate(entry, expect_group="kids")]
+    assert any("language" in p and "is in Devanagari" in p
+               for p in problems), problems
+
+
+def test_hinglish_must_be_written_in_latin_letters():
+    """"hi-Latn" is Hindi in LATIN letters - that is the whole distinction."""
+    entry = kids_entry()
+    entry.language = "hi-latn"
+    for scene in entry.scenes:
+        scene.narration = "मीरा ने छत की ओर देखा और वहीं रुक गई।"
+        scene.caption = "Meera looked towards the roof."
+    entry.recompute()
+    problems = [str(p) for p in bank.validate(entry, expect_group="kids")]
+    assert any("language" in p and "hi-Latn" in p for p in problems), problems
+
+
+def test_a_loanword_does_not_make_a_hindi_entry_english():
+    """A majority test, so the odd English word is still allowed."""
+    entry = kids_entry()
+    entry.language = "hi"
+    for scene in entry.scenes:
+        scene.narration = ("मीरा की school bag छत पर रह गई और वह वापस "
+                           "सीढ़ियाँ चढ़ने लगी।")
+        scene.caption = "Meera left her school bag on the roof."
+    entry.recompute()
+    problems = [str(p) for p in bank.validate(entry, expect_group="kids")
+                if "language" in str(p)]
+    assert problems == []
+
+
+def test_every_banked_file_declares_its_language_truthfully():
+    """The rule has to hold for the real catalogue, not just a fixture."""
+    from pathlib import Path
+
+    for path in sorted(Path("banks").glob("*.jsonl")):
+        entries, problems = bank.load_jsonl(path)
+        assert not [p for p in problems if p.fatal], \
+            f"{path.name}: {[str(p) for p in problems]}"
+        for entry in entries:
+            wrong = [str(p) for p in bank.validate(entry)
+                     if "language" in str(p)]
+            assert wrong == [], f"{path.name} / {entry.entry_id}: {wrong}"
+
+
+# ---------------------------------------------------------------------------
+# Title patterns from the niche, for the batch prompt
+# ---------------------------------------------------------------------------
+class _FakeVideo:
+    def __init__(self, title, velocity, views):
+        self.title, self.view_velocity, self.views = title, velocity, views
+
+
+class _FakeResearch:
+    """Stands in for YouTubeResearch. `configured` is a PROPERTY there."""
+    corpus: list = []
+    ready = True
+
+    def __init__(self, cfg, db=None):
+        pass
+
+    @property
+    def configured(self):
+        return type(self).ready
+
+    def research_channels(self, niche, profile, **kwargs):
+        return list(type(self).corpus)
+
+    def research(self, niche, profile, **kwargs):   # pragma: no cover
+        return []
+
+
+@pytest.fixture()
+def fake_research(monkeypatch):
+    from engine.research import youtube
+
+    monkeypatch.setattr(youtube, "YouTubeResearch", _FakeResearch)
+    _FakeResearch.ready = True
+    _FakeResearch.corpus = []
+    return _FakeResearch
+
+
+def test_title_patterns_are_ranked_by_views_per_day(db, fake_research):
+    """`build` has taken `viral_titles` since the bank existed and nothing
+    ever supplied one, so the batch prompt never saw what performs.
+
+    Ranked on velocity, not lifetime views: a five-year-old video with a big
+    total should not crowd out what is working now.
+    """
+    fake_research.corpus = [
+        _FakeVideo("Old But Huge Bedtime Story", 10, 9_000_000),
+        _FakeVideo("Working Right Now", 5_000, 100_000),
+        _FakeVideo("Second Best", 900, 50_000)]
+    titles = bank_prompt.viral_titles_for(load_config(), db, group_key="kids")
+    assert titles == ["Working Right Now", "Second Best",
+                      "Old But Huge Bedtime Story"]
+
+
+def test_a_repeated_title_is_listed_once(db, fake_research):
+    fake_research.corpus = [_FakeVideo("The Same Title", 10, 10),
+                            _FakeVideo("The Same Title", 9, 9),
+                            _FakeVideo("", 8, 8)]
+    assert bank_prompt.viral_titles_for(load_config(), db,
+                                        group_key="kids") == ["The Same Title"]
+
+
+def test_no_key_means_no_patterns_and_no_error(db, fake_research):
+    fake_research.ready = False
+    fake_research.corpus = [_FakeVideo("Never Reached", 10, 10)]
+    assert bank_prompt.viral_titles_for(load_config(), db,
+                                        group_key="kids") == []
+
+
+def test_research_failing_does_not_cost_the_prompt(db, monkeypatch):
+    """A prompt without the shape hints is still a usable prompt."""
+    from engine.research import youtube
+
+    class _Broken(_FakeResearch):
+        def research_channels(self, niche, profile, **kwargs):
+            raise RuntimeError("quota exceeded")
+
+    monkeypatch.setattr(youtube, "YouTubeResearch", _Broken)
+    assert bank_prompt.viral_titles_for(load_config(), db,
+                                        group_key="kids") == []
+
+
+def test_an_unknown_group_asks_for_nothing(db, fake_research):
+    fake_research.corpus = [_FakeVideo("Never Reached", 10, 10)]
+    assert bank_prompt.viral_titles_for(load_config(), db,
+                                        group_key="dog grooming") == []
