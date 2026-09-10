@@ -124,6 +124,19 @@ class AutomationBody(BaseModel):
     upload_time: str = Field(default="", max_length=5)
     timezone: str = Field(default="Asia/Kolkata", max_length=64)
     made_for_kids: bool = False
+    # THE AUTOMATION THIS RUN BELONGS TO, when it is not a new one.
+    #
+    # Every Start used to mint a fresh id, including the recurring runs the
+    # phone fires on a schedule - so one daily automation became a new
+    # automation every day. Three things broke on that: the Schedule tab
+    # listed one row per RUN instead of one per schedule, Stop cancelled a
+    # row that would never fire again while the real schedule kept going,
+    # and the Made-for-Kids confirmation - which is deliberately needed once
+    # per automation - was needed every single time, so a kids automation
+    # set to publish automatically never did.
+    #
+    # Blank means "a new automation", which is what the Create screen sends.
+    id: str = Field(default="", max_length=64)
     keywords: list[str] = Field(default_factory=list, max_length=10)
     # "immediate" uploads on approval; "scheduled" hands YouTube a publishAt.
     publish_mode: Literal["scheduled", "immediate"] = "scheduled"
@@ -181,7 +194,12 @@ class AutomationBody(BaseModel):
         return v
 
     def to_request(self) -> AutomationRequest:
-        return AutomationRequest(**self.model_dump())
+        data = self.model_dump()
+        # An empty id must fall back to the dataclass's own generator rather
+        # than being written through as "".
+        if not str(data.get("id") or "").strip():
+            data.pop("id", None)
+        return AutomationRequest(**data)
 
 
 class TokenBody(BaseModel):

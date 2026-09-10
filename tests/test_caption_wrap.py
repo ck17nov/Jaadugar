@@ -116,11 +116,13 @@ def test_a_block_caption_is_smaller_than_a_karaoke_one(engine):
 # ---------------------------------------------------------------------------
 # The rendered ASS
 # ---------------------------------------------------------------------------
-def test_the_ass_carries_real_line_breaks(engine, tmp_path):
-    r"""Escaped per line, then joined - not joined then escaped.
+def test_a_translated_caption_is_one_line_per_cue(engine, tmp_path):
+    """One line at a time, not a scene's worth of text in a stack.
 
-    `_escape` doubles backslashes, so escaping the joined string would print
-    a literal "\N" in the middle of the caption instead of breaking the line.
+    It used to emit ONE cue per scene - six to nine seconds of narration
+    wrapped into three lines that sat there for the whole shot. Reported as
+    "captions are still coming all together like the full sentence shows on
+    screen together in 3 lines. i wanted it to be just 1 line".
     """
     out_ass, out_srt = tmp_path / "c.ass", tmp_path / "c.srt"
     engine.build_translated(
@@ -128,9 +130,27 @@ def test_the_ass_carries_real_line_breaks(engine, tmp_path):
         out_ass, out_srt, 1080, 1920, language="en")
     body = out_ass.read_text(encoding="utf-8")
     dialogue = [ln for ln in body.splitlines() if ln.startswith("Dialogue:")]
-    assert len(dialogue) == 1
-    assert "\\N" in dialogue[0]
-    assert "\\\\N" not in dialogue[0], "the break got escaped into a literal"
+
+    assert len(dialogue) > 1, "the sentence was not split into lines"
+    for line in dialogue:
+        text = line.split(",", 9)[9]
+        assert "\\N" not in text, (
+            "a cue still carries a hard line break, so it is not one line")
+
+
+def test_a_line_too_long_to_shrink_wraps_rather_than_losing_its_tail(
+        engine, tmp_path):
+    """The old guarantee, kept: nothing is ever dropped.
+
+    A single word longer than the whole line budget cannot be split at a
+    space, so the renderer has to wrap it rather than truncate.
+    """
+    monster = "Antidisestablishmentarianism " * 3
+    out_ass, out_srt = tmp_path / "c.ass", tmp_path / "c.srt"
+    engine.build_translated([(0.0, 6.0, monster.strip())],
+                            out_ass, out_srt, 1080, 1920, language="en")
+    rendered = out_ass.read_text(encoding="utf-8")
+    assert rendered.count("Antidisestablishmentarianism") == 3
 
 
 def test_the_srt_has_no_ass_markup(engine, tmp_path):
@@ -142,4 +162,9 @@ def test_the_srt_has_no_ass_markup(engine, tmp_path):
     srt = out_srt.read_text(encoding="utf-8")
     assert "\\N" not in srt
     assert "{" not in srt
-    assert "Grandmother's slipper still up on the terrace." in srt
+    # Split across cues now, one line each - so check that NOTHING was lost
+    # rather than that the sentence survives as one block.
+    spoken = " ".join(
+        ln for ln in srt.splitlines()
+        if ln.strip() and not ln.strip().isdigit() and "-->" not in ln)
+    assert spoken == "Meera saw Grandmother's slipper still up on the terrace."

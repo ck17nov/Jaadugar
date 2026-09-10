@@ -64,6 +64,13 @@ data class AutomationRequestDto(
     // slider at 95, and one scoring 72 stayed blocked with it at 50.
     // 0 means "use the backend's configured minimum".
     @SerialName("min_quality_score") val minQualityScore: Int = 0,
+    // Which automation this run belongs to. Blank = a new one, which is what
+    // the Create screen sends. A RECURRING run sends the id it already has,
+    // so a daily automation stays ONE automation instead of becoming a new
+    // one every day - which is what made the Schedule tab list a row per run
+    // and the Made-for-Kids confirmation reappear on every single video,
+    // so a kids automation set to publish automatically never did.
+    val id: String = "",
 )
 
 @Serializable

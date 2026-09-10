@@ -201,6 +201,8 @@ class AutomationWorker(appContext: Context, params: WorkerParameters) :
             timezone = automation.timezone,
             madeForKids = automation.madeForKids,
             minQualityScore = automation.minQualityScore,
+            // THE SAME automation, not a new one shaped like it.
+            id = automation.id,
         )
         val result = app.repository.startAutomation(request)
         return if (result.isSuccess) {

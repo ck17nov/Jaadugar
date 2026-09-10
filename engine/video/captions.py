@@ -219,6 +219,21 @@ class CaptionEngine:
         self.max_words = int(cfg.get("captions.max_words_on_screen", 3))
         self.max_chars = int(cfg.get("captions.max_chars_on_screen", 20))
         self.uppercase = bool(cfg.get("captions.uppercase", True))
+        # ONE LINE PER CUE for cross-language captions, rather than a whole
+        # scene's narration wrapped into three. Asked for directly: "i wanted
+        # it to be just 1 line and cover 80% of video in width".
+        self.single_line = bool(cfg.get("captions.single_line", True))
+        # How much of the frame width a single line should span. The type is
+        # scaled per cue to hit this, so a four-word line and an eight-word
+        # line come out the same width instead of one looking lost.
+        self.line_width_fraction = float(
+            cfg.get("captions.line_width_fraction", 0.80))
+        # Bounds on that scaling, as a multiple of the configured size. A
+        # two-word caption blown up to fill the frame is a billboard.
+        self.single_line_min_scale = float(
+            cfg.get("captions.single_line_min_scale", 0.55))
+        self.single_line_max_scale = float(
+            cfg.get("captions.single_line_max_scale", 1.06))
 
     # ------------------------------------------------------------------
     def srt_only(self, clips: list[tuple[float, SceneAudio]]) -> str:
@@ -254,6 +269,35 @@ class CaptionEngine:
         """
         groups: list[CaptionGroup] = []
         floor = float(self.cfg.get("captions.min_block_seconds", 0.85))
+
+        # ONE LINE AT A TIME, not one scene at a time.
+        #
+        # A scene is six to nine seconds of narration, and putting all of it
+        # on screen at once produced a three-line paragraph that sat there
+        # for the whole shot. Reported as "captions are still coming all
+        # together like the full sentence shows on screen together in 3
+        # lines. i wanted it to be just 1 line".
+        #
+        # So the scene's text is split into single-line chunks and the
+        # scene's own span is shared between them by length. The timing
+        # stays exact at the scene boundary - chunks divide a span that was
+        # measured, they do not estimate one.
+        if self.single_line:
+            # The TARGET line, measured at the size a single-line cue is
+            # actually rendered at - not the maximum that would fit.
+            target = self._target_chars(width, height, language)
+            groups = self._single_line_groups(spans, target, floor)
+            if groups:
+                ass_text = self._render_ass(groups, width, height,
+                                            "single", language)
+                out_ass.parent.mkdir(parents=True, exist_ok=True)
+                out_ass.write_text(ass_text, encoding="utf-8")
+                out_srt.write_text(self._render_srt(groups), encoding="utf-8")
+                log_event("CAPTION", "translated captions built",
+                          blocks=len(groups), language=language,
+                          mode="one line per cue",
+                          scenes=len([s for s in spans if (s[2] or "").strip()]))
+                return out_ass, out_srt, len(groups)
         # LINE WRAPPING happens in `_block_events`, which is where escaping
         # happens - see the note there. It has to, because a translated block
         # is a whole sentence and nothing was breaking it: the ASS header sets
@@ -363,7 +407,9 @@ class CaptionEngine:
         ]
 
         events: list[str] = []
-        if style == "block":
+        if style == "single":
+            events = self._single_line_events(groups, width, size, language)
+        elif style == "block":
             events = self._block_events(
                 groups,
                 per_line=self._chars_per_line(width, height, language,
@@ -544,6 +590,122 @@ class CaptionEngine:
                   note="rendering it taller rather than cutting it")
         return self._balance(text, lines, widest), self.MIN_BLOCK_SCALE
 
+    # ------------------------------------------------------------------
+    # One line at a time
+    # ------------------------------------------------------------------
+    def _single_line_groups(self, spans: list[tuple[float, float, str]],
+                            per_line: int,
+                            floor: float) -> list["CaptionGroup"]:
+        """Split each scene into one-line cues, sharing the scene's span.
+
+        Time is divided by CHARACTER COUNT rather than evenly: "He lay down
+        there" and "and slid his hand in, and the ball met his palm" are one
+        chunk each, and giving them the same time makes the short one linger
+        and the long one flash.
+
+        A chunk is never held for less than `floor`. If the scene is too
+        short to give every chunk that, the chunks are merged back until
+        they fit - a caption nobody can read is worse than a longer one.
+        """
+        groups: list[CaptionGroup] = []
+        for start, end, text in spans:
+            clean = (text or "").strip()
+            if not clean:
+                continue
+            span = max(end - start, floor)
+            chunks = self._split_line_chunks(clean, per_line)
+            # PER CHUNK, not on average. Time is shared by length, so an
+            # average that clears the floor still hides a short chunk that
+            # does not - which is how a two-word tail got 0.44s.
+            def shortest_hold(items: list[str]) -> float:
+                total = sum(max(len(c), 1) for c in items)
+                return min(span * (max(len(c), 1) / total) for c in items)
+
+            while len(chunks) > 1 and shortest_hold(chunks) < floor:
+                chunks = self._merge_shortest(chunks)
+            total = sum(max(len(c), 1) for c in chunks)
+            cursor = start
+            for index, chunk in enumerate(chunks):
+                share = span * (max(len(chunk), 1) / total)
+                # The last chunk absorbs any rounding so the final cue ends
+                # exactly on the scene boundary.
+                stop = (start + span) if index == len(chunks) - 1 else cursor + share
+                groups.append(CaptionGroup(
+                    words=[CaptionWord(start=cursor, end=max(stop, cursor + 0.2),
+                                       text=chunk)]))
+                cursor = stop
+        return groups
+
+    @staticmethod
+    def _merge_shortest(chunks: list[str]) -> list[str]:
+        """Join the shortest adjacent pair, so merging costs the least."""
+        best, where = None, 0
+        for i in range(len(chunks) - 1):
+            length = len(chunks[i]) + len(chunks[i + 1])
+            if best is None or length < best:
+                best, where = length, i
+        return (chunks[:where]
+                + [f"{chunks[where]} {chunks[where + 1]}"]
+                + chunks[where + 2:])
+
+    def _split_line_chunks(self, text: str, target: int) -> list[str]:
+        """Break a sentence into lines of roughly `target` characters.
+
+        Aiming for a TARGET rather than filling to a maximum, because the
+        renderer scales each line to a fixed width: uneven chunks come out
+        at wildly different sizes, and the type appears to jump about
+        between cues. Even chunks all land near the same scale.
+
+        Two rules beyond that, both about where a line ENDS:
+
+        - Break after punctuation when the line is already reasonably full.
+          "His hand went in;" is a phrase; "Aarav was tossing his ball in
+          the" is a sentence someone chopped.
+        - Never leave a stub. A trailing "heavy cot." on its own is a flash
+          nobody reads, so a short tail is folded back into the line before
+          it even if that line ends up over target.
+        """
+        target = max(10, target)
+        words = (text or "").split()
+        if not words:
+            return []
+
+        enders = (".", "!", "?", ",", ";", ":", "।")
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            candidate = word if not current else f"{current} {word}"
+            if len(candidate) > target and current:
+                lines.append(current)
+                current = word
+                continue
+            current = candidate
+            # A natural pause, and enough on the line to be worth holding.
+            if current.endswith(enders) and len(current) >= target * 0.78:
+                lines.append(current)
+                current = ""
+        if current:
+            lines.append(current)
+
+        # Fold a stub tail back. Allowed to exceed target - the renderer
+        # shrinks the line to fit, and one slightly smaller line beats a
+        # two-word flash.
+        if len(lines) > 1 and len(lines[-1]) < target * 0.45:
+            lines[-2:] = [f"{lines[-2]} {lines[-1]}"]
+        return lines
+
+    def _target_chars(self, width: int, height: int, language: str) -> int:
+        """Characters that fill `line_width_fraction` of the frame.
+
+        Measured at the SINGLE-line size, which is the full configured font
+        size - the block scale exists to squeeze three lines in and has no
+        business setting the length of a one-line cue.
+        """
+        size = self._scaled_font_size(width, height, "single")
+        per_char = (size * self._glyph_ratio(language, size)
+                    + self._letter_spacing(language))
+        return max(10, int((width * self.line_width_fraction) / max(per_char, 1.0)))
+
     def _chars_per_line(self, width: int, height: int,
                         language: str = "", style: str = "") -> int:
         """How many characters fit on ONE line inside the side margins."""
@@ -643,6 +805,50 @@ class CaptionEngine:
             events.append(
                 f"Dialogue: 0,{_ts(group.start)},{_ts(group.end + 0.14)},"
                 f"Main,,0,0,0,,{prefix}{body}")
+        return events
+
+    def _single_line_events(self, groups: list[CaptionGroup], width: int,
+                            size: int, language: str) -> list[str]:
+        """One line per cue, scaled so the line spans the target width.
+
+        The font size is chosen PER CUE. A fixed size makes a short caption
+        occupy a third of the frame and a long one the whole of it, which
+        reads as the type jumping about; scaling each line to the same
+        target width makes them look like one deliberate design.
+
+        Clamped both ways: a two-word line is not blown up into a billboard,
+        and a stubbornly long one is not shrunk past legibility - it wraps
+        to a second line instead, because losing the tail of a caption is
+        the one outcome worse than an ugly one.
+        """
+        target = width * self.line_width_fraction
+        spacing = self._letter_spacing(language)
+        events: list[str] = []
+        for group in groups:
+            text = " ".join(w.text for w in group.words).strip()
+            if not text:
+                continue
+            # Never uppercase here: these are whole phrases, several scripts
+            # have no case at all, and shouting is not emphasis.
+            per_char = size * self._glyph_ratio(language, size) + spacing
+            natural = max(per_char * len(text), 1.0)
+            scale = target / natural
+            scale = max(self.single_line_min_scale,
+                        min(self.single_line_max_scale, scale))
+            cue_size = max(20, int(size * scale))
+
+            # Would it still overflow at that size? Then wrap rather than
+            # shrink further.
+            fitted_per_char = cue_size * self._glyph_ratio(
+                language, cue_size) * 1.06 + spacing
+            usable = width * (1.0 - 2 * self.margin_fraction)
+            budget = max(8, int(usable / fitted_per_char))
+            lines = ([text] if len(text) <= budget
+                     else self._break_lines(text, budget))
+            body = "\\N".join(_escape(line) for line in lines)
+            events.append(
+                f"Dialogue: 0,{_ts(group.start)},{_ts(group.end + 0.08)},"
+                f"Main,,0,0,0,,{{\\fad(70,60)\\fs{cue_size}}}{body}")
         return events
 
     @staticmethod
