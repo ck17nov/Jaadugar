@@ -185,6 +185,98 @@ def stories_review(
                   f"by {by}{mark}")
 
 
+@stories_app.command("export")
+def stories_export(
+    out: str = typer.Argument(..., help="the .jsonl file to write"),
+    group: str = typer.Option("", "--group", "-g"),
+    language: str = typer.Option("", "--language"),
+    used: bool = typer.Option(False, "--include-used",
+                              help="also export entries already published"),
+) -> None:
+    """Write banked entries back out as JSONL, WITH their ids.
+
+    This is what makes an entry correctable. An entry_id is derived from a
+    hash of the narration only when the file does not carry one - so an
+    authored file, which never does, gets a fresh id on every import, and
+    editing a line therefore produces a SECOND entry that the variety gate
+    then rejects as a near-duplicate of the first.
+
+    Export keeps the id. Edit the exported file and re-import, and the entry
+    is updated in place: the variety gate skips its own id, and its used
+    state survives so a correction cannot republish something already out.
+    """
+    import json as _json
+
+    from engine.content.bank import BankEntry, write_jsonl
+
+    db = _db()
+    try:
+        rows = db.bank_entries(group=group, language=language, limit=5000)
+    finally:
+        db.close()
+
+    entries, unreadable = [], 0
+    for row in rows:
+        if row["used_at"] and not used:
+            continue
+        try:
+            entries.append(BankEntry.from_dict(_json.loads(row["payload"])))
+        except Exception:                       # noqa: BLE001
+            unreadable += 1
+
+    if not entries:
+        console.print("[yellow]nothing to export[/yellow] for that filter")
+        raise typer.Exit(code=1)
+
+    written = write_jsonl(entries, Path(out))
+    console.print(f"[green]{written}[/green] entries -> [cyan]{out}[/cyan]")
+    if unreadable:
+        console.print(f"[red]{unreadable} rows would not parse[/red] and were "
+                      f"skipped")
+    console.print("[dim]Edit it and re-import: the ids are in the file, so "
+                  "each entry is updated in place rather than added "
+                  "again.[/dim]")
+
+
+@stories_app.command("remove")
+def stories_remove(
+    entry_id: str = typer.Argument(...),
+    force: bool = typer.Option(
+        False, "--force",
+        help="remove even if it has already become a video"),
+) -> None:
+    """Retire an entry, so a corrected version can be imported.
+
+    An entry_id is a hash of its narration, so editing a line produces a
+    NEW id - and the variety gate then compares the correction against the
+    original still in the table and rejects it as a near-duplicate. Retire
+    the old one first.
+
+    Refuses a used entry without --force: `used_job_id` is the only record of
+    which script became which published video, and losing it means an
+    originality question about a live video can no longer be answered.
+    """
+    db = _db()
+    try:
+        row = next((r for r in db.bank_entries(limit=5000)
+                    if r["entry_id"] == entry_id), None)
+        if row is None:
+            console.print(f"[red]no entry[/red] {entry_id}")
+            raise typer.Exit(code=2)
+        if row["used_at"] and not force:
+            console.print(
+                f"[yellow]{entry_id} has already become a video[/yellow] "
+                f"(job {row['used_job_id'] or 'unknown'}). "
+                f"Removing it loses the link between that video and its "
+                f"script. Pass --force if you mean it.")
+            raise typer.Exit(code=1)
+        title = row["title"]
+        db.delete_bank_entry(entry_id)
+    finally:
+        db.close()
+    console.print(f"[green]removed[/green] {entry_id}  {title[:60]}")
+
+
 @stories_app.command("status")
 def stories_status(
     group: str = typer.Option("", "--group", "-g"),

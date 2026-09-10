@@ -397,7 +397,7 @@ that breaks one is rejected without being read
 - No moral, no "and that is why". The last line is what the character feels.""")
 
     if finance:
-        parts.append(f"""
+        parts.append("""
 FINANCE RULES - these are compliance requirements, not style
 - NO HOST PERSONA. Never "I", never "we", never "my advice", never "trust me".
   There is no presenter in this channel and no expert character. Explain the
@@ -406,8 +406,11 @@ FINANCE RULES - these are compliance requirements, not style
   Explain how a KIND of thing works, never which one to choose.
 - NO NUMBERS THAT EXPIRE. No current rates, prices, tax slabs, limits or
   returns. Use round illustrative figures and say they are illustrative.
-- Scene 1 must OPEN with this sentence, verbatim, as its own first sentence:
-  "{FINANCE_DISCLAIMER_HI if language.startswith('hi') else FINANCE_DISCLAIMER_EN}"
+- DO NOT WRITE A DISCLAIMER. The renderer prepends its own as a separate
+  opening scene, narrated, captioned and burned on screen, in the right
+  language and inside the duration budget. Writing one here produces TWO
+  disclaimers back to back - measured, on a real entry - so scene 1 is the
+  first line of the actual content.
 - Indian context is welcome as CONCEPTS - what an SIP is, what PPF is for, how
   UPI settles - never as current figures.""")
 

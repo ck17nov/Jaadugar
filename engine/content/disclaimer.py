@@ -122,15 +122,41 @@ def seconds_for(profile, language: str = "") -> float:
         getattr(profile, "words_per_second", 2.5), 1.2)
 
 
+# The shortest phrase that identifies each family's disclaimer in prose,
+# whoever wrote it. Deliberately a FRAGMENT rather than the full sentence, so
+# a reworded or translated disclaimer is still recognised.
+_MARKERS: tuple[str, ...] = (
+    "not investment advice", "not financial advice", "not medical advice",
+    "general education", "general information",
+    "निवेश सलाह नहीं", "वित्तीय सलाह नहीं", "चिकित्सकीय सलाह नहीं",
+    "सामान्य जानकारी",
+)
+
+
 def has_disclaimer(script: Script) -> bool:
     """True when this script already opens with one.
 
-    Read from the scene, not by string-matching narration, so a reworded
-    disclaimer is still recognised and applying twice is impossible.
+    Checks the on-screen text AND the narration prose, because the two ways a
+    disclaimer can arrive look nothing alike. `apply()` sets the on-screen
+    marker; a BANKED entry whose author wrote a disclaimer into scene 1 sets
+    no marker at all - and the on-screen check alone therefore missed it and
+    prepended a second one. Measured: a finance entry that followed the batch
+    prompt opened with two different disclaimer sentences in a row.
+
+    Now only one thing writes a disclaimer - this module - and the batch
+    prompt tells authors not to. This stays as the belt to that braces, for
+    entries banked before the prompt changed.
     """
     scenes = script.scene_objects()
-    return bool(scenes) and scenes[0].on_screen_text in {
-        value for table in ON_SCREEN.values() for value in table.values()}
+    if not scenes:
+        return False
+    if scenes[0].on_screen_text in {
+            value for table in ON_SCREEN.values() for value in table.values()}:
+        return True
+    # Only the OPENING scene counts. A video may legitimately mention "not
+    # financial advice" in its closing line without that being an opener.
+    opening = (scenes[0].narration or "").lower()
+    return any(marker in opening for marker in _MARKERS)
 
 
 def apply(script: Script, profile, *, language: str = "",

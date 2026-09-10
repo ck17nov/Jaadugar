@@ -490,6 +490,22 @@ class Database:
                 "WHERE entry_id=?", (entry_id,))
             self._conn.commit()
 
+    def delete_bank_entry(self, entry_id: str) -> bool:
+        """Remove an entry. Returns whether there was one to remove.
+
+        Needed because an entry cannot otherwise be CORRECTED. The entry_id is
+        derived from a hash of the narration, so fixing a line produces a new
+        id - and the variety gate then compares the fix against the original
+        still sitting in the table and rejects it as a near-duplicate at 62%
+        4-gram overlap. Measured, while removing a policy violation from a
+        story. Retire the old entry, import the fix.
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM bank_entries WHERE entry_id=?", (entry_id,))
+            self._conn.commit()
+        return cur.rowcount > 0
+
     def bank_counts(self) -> list[dict]:
         """Per group/language/format: how many entries, how many left."""
         rows = self.query(

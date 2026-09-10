@@ -130,7 +130,22 @@ def _gate(entry: BankEntry, existing: list[BankEntry], *, expect_group: str,
     for issue in variety.check_new(entry, existing):
         (fatal if issue.fatal else report.warnings).append(str(issue))
 
-    # ---- 4. review ----
+    # ---- 4. content safety, at the cheapest possible moment ----
+    #
+    # The SAME patterns the quality gate applies to a finished video, run at
+    # import instead. Found the hard way: a hand-written kids story said
+    # "there was a knife in the kitchen", which is a real kids-policy problem
+    # and the gate was right to block it - but it blocked it after a
+    # six-minute render, and the entry had already been consumed from the
+    # pool. So a story that can never publish burned a claim and a render.
+    #
+    # Text only, so this cannot replace the render-time gate, which also sees
+    # the generated title, description and thumbnail. It just moves the cheap
+    # half of the check to where a rejection costs nothing.
+    for hit in unsafe(entry):
+        fatal.append(f"REJECT {entry.entry_id} [safety:{hit[0]}] {hit[1]}")
+
+    # ---- 5. review ----
     #
     # The same test the claim gate uses, so "importable" and "claimable"
     # cannot drift apart: a REJECTED entry counts as unapproved, not as
@@ -145,6 +160,45 @@ def _gate(entry: BankEntry, existing: list[BankEntry], *, expect_group: str,
             f"has approved must not publish")
 
     return fatal
+
+
+def unsafe(entry: BankEntry) -> list[tuple[str, str]]:
+    """Policy patterns this entry's own text trips. (label, detail) pairs.
+
+    Checks the AUTHORED text - narration, titles, on-screen words, the
+    description hook - against the same lists the quality gate uses on a
+    finished video. The kids list applies only when the entry is
+    child-directed, because "knife" in a cooking explainer is a knife and in
+    a children's story it is a policy problem.
+
+    Captions are checked too. They are burned into the picture, so a caption
+    is on-screen text whatever language it is in.
+    """
+    import re
+
+    from ..core.groups import group as get_group
+    from ..quality.gate import KIDS_PROHIBITED, PROHIBITED_PATTERNS
+
+    parts = [entry.title, entry.description_hook, *entry.title_alts]
+    for scene in entry.scenes:
+        parts += [scene.narration, scene.caption, scene.on_screen_text]
+    haystack = " \n".join(p for p in parts if p)
+
+    found = get_group(entry.group)
+    child = bool(entry.made_for_kids or (found and found.child_directed))
+    checks = list(PROHIBITED_PATTERNS)
+    if child:
+        checks += KIDS_PROHIBITED
+
+    hits: list[tuple[str, str]] = []
+    for pattern, label in checks:
+        match = re.search(pattern, haystack, re.I)
+        if not match:
+            continue
+        start = max(0, match.start() - 48)
+        context = haystack[start:match.end() + 48].replace("\n", " ")
+        hits.append((label, f"{match.group(0)!r} in …{context}…"))
+    return hits
 
 
 def _load_existing(db) -> list[BankEntry]:
@@ -175,6 +229,11 @@ def review(db, entry_id: str, *, reviewer: str, verdict: str = "approve",
     insights", so this field is the thing that answers it, and it is worth
     keeping as data rather than as a claim.
     """
+    # Stripped, because an id arrives pasted from a table or piped from
+    # another command, and on Windows that carries a trailing carriage
+    # return - which produced a bare "no entry" for an id that plainly
+    # existed, with nothing on screen to show why.
+    entry_id = (entry_id or "").strip()
     rows = db.bank_entries(limit=5000)
     row = next((r for r in rows if r["entry_id"] == entry_id), None)
     if row is None:

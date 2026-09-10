@@ -456,21 +456,52 @@ def test_long_form_sections_are_weighted_not_even():
     assert min(spread.values()) >= 1
 
 
-def test_finance_prompts_carry_the_disclaimer_and_forbid_a_persona():
+def test_finance_prompts_forbid_a_persona_and_a_written_disclaimer():
+    """The RENDERER owns the disclaimer, so the prompt must not ask for one.
+
+    It used to instruct the author to open scene 1 with the disclaimer
+    verbatim, while `disclaimer.apply()` also prepends its own scene - so a
+    banked finance entry opened with two different disclaimers in a row.
+    Measured on a real entry.
+    """
     text = bank_prompt.build(group_key="finance", language="en",
                              video_format="LONG", target_seconds=300, count=1)
-    assert bank_prompt.FINANCE_DISCLAIMER_EN in text
+    assert "DO NOT WRITE A DISCLAIMER" in text
+    assert bank_prompt.FINANCE_DISCLAIMER_EN not in text
     assert "NO HOST PERSONA" in text
     # An explainer has no cast, and asking for one is how a finance video
     # ends up illustrated with a presenter at a desk.
     assert "no presenter in this channel" in text
 
 
-def test_hindi_finance_prompts_use_the_hindi_disclaimer():
-    text = bank_prompt.build(group_key="finance", language="hi",
-                             video_format="LONG", target_seconds=300, count=1)
-    assert bank_prompt.FINANCE_DISCLAIMER_HI in text
-    assert bank_prompt.FINANCE_DISCLAIMER_EN not in text
+def test_no_finance_prompt_contains_a_disclaimer_in_any_language():
+    for language in ("en", "hi"):
+        text = bank_prompt.build(group_key="finance", language=language,
+                                 video_format="LONG", target_seconds=300,
+                                 count=1)
+        assert bank_prompt.FINANCE_DISCLAIMER_HI not in text
+        assert bank_prompt.FINANCE_DISCLAIMER_EN not in text
+        assert "DO NOT WRITE A DISCLAIMER" in text
+
+
+def test_a_banked_disclaimer_is_not_doubled():
+    """Belt to the prompt's braces, for entries banked before it changed."""
+    from engine.content import bank_use, disclaimer
+    from engine.core.niche import build_profile
+
+    entry = kids_entry()
+    entry.group = "finance"
+    entry.made_for_kids = False
+    entry.topic = "personal finance"
+    entry.scenes[0].narration = (
+        bank_prompt.FINANCE_DISCLAIMER_EN
+        + " A one percent fee sounds small. Over twenty years it is not.")
+    entry.recompute()
+
+    script = bank_use.to_script(entry, language="en", caption_language="hi")
+    profile = build_profile("personal finance", duration_seconds=60)
+    assert disclaimer.has_disclaimer(script) is True
+    assert disclaimer.apply(script, profile, language="en") is False
 
 
 def test_the_prompt_asks_for_captions_in_the_other_language():
@@ -627,3 +658,136 @@ def test_import_and_claim_agree_on_what_approved_means(tmp_path, db):
                                      require_review=True)
     assert report.stored == 0
     assert any("[review]" in r and "reject" in r for r in report.rejected)
+
+
+# ---------------------------------------------------------------------------
+# Content safety at import, and correcting an entry
+# ---------------------------------------------------------------------------
+def test_a_knife_in_a_kids_story_is_caught_at_import(tmp_path, db):
+    """Found the hard way: it was caught, but after a six-minute render.
+
+    A hand-written kids story said "there was a knife in the kitchen". The
+    quality gate blocked it correctly - and by then the entry had been
+    consumed from the pool and the video rendered. Text checks belong where a
+    rejection costs nothing.
+    """
+    entry = kids_entry()
+    entry.scenes[3].narration = (
+        "Then Milo saw the low wall, and there was a knife in the kitchen. "
+        "Slow and slow, up we go.")
+    entry.recompute()
+    hits = bank_import.unsafe(entry)
+    assert any(label == "violence" for label, _ in hits), hits
+
+    report = bank_import.import_file(_write(tmp_path, entry), db,
+                                     expect_group="kids")
+    assert report.stored == 0
+    assert any("[safety:violence]" in r for r in report.rejected)
+
+
+def test_the_kids_list_only_applies_to_kids(tmp_path, db):
+    """"knife" in a cooking explainer is a knife.
+
+    The child-directed list is stricter than the universal one on purpose, so
+    applying it to every group would reject legitimate adult content.
+    """
+    entry = kids_entry()
+    entry.group = "tech"
+    entry.made_for_kids = False
+    entry.topic = "pc and laptop tech"
+    entry.scenes[3].narration = ("Then Milo used a knife to strip the cable. "
+                                 "Slow and slow, up we go.")
+    entry.recompute()
+    labels = [label for label, _ in bank_import.unsafe(entry)]
+    assert "violence" not in labels, labels
+
+
+def test_captions_are_checked_too(tmp_path):
+    """A caption is burned into the picture, so it is on-screen text."""
+    entry = kids_entry()
+    entry.scenes[2].caption = "यहाँ एक gun रखी थी।"
+    entry.recompute()
+    assert any(label == "violence"
+               for label, _ in bank_import.unsafe(entry))
+
+
+def test_a_clean_entry_trips_nothing():
+    assert bank_import.unsafe(kids_entry()) == []
+
+
+def test_an_entry_that_keeps_its_id_is_corrected_in_place(tmp_path, db):
+    """This is why `stories export` writes the ids out.
+
+    The variety gate skips an entry's own id, and save_bank_entry preserves
+    used state - so an edited entry that KEEPS its id updates the same
+    record. Correcting a story that has already published therefore cannot
+    republish it.
+    """
+    original = kids_entry()
+    bank_import.import_file(_write(tmp_path, original), db,
+                            expect_group="kids")
+    assert db.claim_bank_entry(group="kids", language="en",
+                               video_format="SHORT", job_id="job1") is not None
+
+    fixed = kids_entry()
+    fixed.entry_id = original.entry_id          # what export gives you
+    fixed.scenes[3].narration = ("Then Milo spotted the low garden wall and "
+                                 "climbed it. Slow and slow, up we go.")
+    fixed.recompute()
+    assert fixed.entry_id == original.entry_id
+    assert fixed.content_hash != original.content_hash
+
+    report = bank_import.import_file(_write(tmp_path, fixed), db,
+                                     expect_group="kids")
+    assert report.stored == 1
+    assert len(db.bank_entries()) == 1, "it forked instead of updating"
+    assert db.bank_entries()[0]["used_at"] > 0, "lost the used state"
+
+
+def test_an_authored_file_forks_and_remove_is_the_way_back(tmp_path, db):
+    """An authored file carries NO id, so every import derives a fresh one.
+
+    Editing such a file therefore produces a SECOND entry, which the variety
+    gate rejects as a near-duplicate of the first - measured at 62% overlap
+    while taking a policy violation out of a story. Either export first, or
+    retire the original.
+    """
+    original = kids_entry()
+    original.entry_id = ""
+    original.recompute()
+    bank_import.import_file(_write(tmp_path, original), db,
+                            expect_group="kids")
+
+    fixed = kids_entry()
+    fixed.entry_id = ""
+    fixed.scenes[3].narration = ("Then Milo spotted the low garden wall and "
+                                 "climbed it. Slow and slow, up we go.")
+    fixed.recompute()
+    assert fixed.entry_id != original.entry_id
+
+    blocked = bank_import.import_file(_write(tmp_path, fixed), db,
+                                      expect_group="kids")
+    assert blocked.stored == 0
+    assert any("wording" in r for r in blocked.rejected)
+
+    assert db.delete_bank_entry(original.entry_id) is True
+    accepted = bank_import.import_file(_write(tmp_path, fixed), db,
+                                       expect_group="kids")
+    assert accepted.stored == 1
+
+
+def test_removing_something_that_is_not_there_says_so(db):
+    assert db.delete_bank_entry("no-such-entry") is False
+
+
+def test_an_entry_id_with_stray_whitespace_still_resolves(db):
+    """Ids get pasted from a table and piped between commands.
+
+    On Windows a piped id carries a trailing carriage return, which produced
+    a bare "no entry" for an id that plainly existed.
+    """
+    entry = kids_entry()
+    entry.human = {}
+    db.save_bank_entry(entry)
+    assert bank_import.review(db, f"  {entry.entry_id}\r\n",
+                              reviewer="chandan") is True
