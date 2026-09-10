@@ -104,8 +104,13 @@ def _headline(title: str, max_words: int = 4) -> str:
     # pattern returned zero words for Indic text. Category "M" is the whole
     # fix and it is script-general.
     raw = "".join(
+        # % ₹ $ + are KEPT. A percentage or a price is the most specific
+        # thing a finance title has, and stripping it changes the meaning:
+        # "What 1% Expense Ratio Does to Your Gains" produced the headline
+        # "WHAT 1 EXPENSE RATIO", measured on a real render. "1" and "1%" are
+        # not the same claim.
         ch if (ch.isalnum() or unicodedata.category(ch).startswith("M")
-               or ch in " '-")
+               or ch in " '-%₹$+")
         else " "
         for ch in (title or "")
     ).split()
@@ -394,6 +399,62 @@ def _subject_box(img: Image.Image,
     return (left, top, left + new_w, top + new_h)
 
 
+def _base_from_sources(sources, out: Path, *,
+                       zoom: float = DEFAULT_ZOOM) -> Path | None:
+    """Pick a base from the SCENE ASSETS rather than the rendered video.
+
+    WHY THIS EXISTS. The base used to be cut from the finished video, which
+    has the captions burnt into it - so a real thumbnail came out carrying the
+    video's Hindi subtitle AND the thumbnail's own headline, two competing
+    blocks of text on one image. The scene assets are the same footage before
+    any of that was drawn.
+
+    The keyframe interest scoring is kept: it is the thing that stopped the
+    base being "whatever was on screen at 0.6 seconds", which on an
+    illustrated video is usually a wide establishing shot or a fade.
+    """
+    frames: list[Path] = []
+    scratch = out.parent / "keyframes"
+    for index, source in enumerate(sources):
+        candidate = Path(source)
+        if not candidate.exists():
+            continue
+        if candidate.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+            frames.append(candidate)
+            continue
+        # A clip: take its own keyframes, into a per-source folder so two
+        # sources cannot overwrite each other's kf_000.jpg.
+        frames.extend(_keyframes(candidate, scratch / f"s{index:03d}"))
+    if not frames:
+        return None
+
+    best = max(frames, key=_frame_interest)
+    try:
+        with Image.open(best) as raw:
+            img = raw.convert("RGB")
+            img.crop(_subject_box(img, zoom=zoom)).save(
+                out, "JPEG", quality=94, subsampling=1)
+        log_event("THUMBNAIL", "base chosen from the scene assets",
+                  sources=len(list(sources)), frames=len(frames),
+                  picked=best.name, zoom=f"{zoom:.1f}x",
+                  note="no burnt-in captions on these")
+    except Exception as exc:                    # noqa: BLE001
+        log_event("THUMBNAIL", "asset crop failed", error=str(exc)[:140])
+        return None
+    finally:
+        # Only the frames WE extracted; a source image is the job's asset and
+        # deleting it would remove a frame the video needs.
+        for stale in frames:
+            if scratch in stale.parents:
+                stale.unlink(missing_ok=True)
+        for folder in sorted(scratch.glob("*"), reverse=True):
+            with suppress(OSError):
+                folder.rmdir()
+        with suppress(OSError):
+            scratch.rmdir()
+    return out if out.exists() and out.stat().st_size > 2000 else None
+
+
 def _base_from_video(video: Path, out: Path, at_seconds: float = 0.6,
                     *, zoom: float = DEFAULT_ZOOM) -> Path | None:
     """Choose the best keyframe and crop in on its subject.
@@ -582,10 +643,18 @@ class ThumbnailGenerator:
     def generate(self, *, title: str, out_dir: Path,
                  source_image: Path | None = None,
                  video: Path | None = None,
+                 sources=(),
                  video_format: str = "SHORT",
                  made_for_kids: bool = False,
                  language: str = "",
                  variants: int = 3) -> tuple[Path, list[ThumbnailVariant]]:
+        """Build and score thumbnail variants, and return the best.
+
+        `sources` is the SCENE ASSETS and is preferred over `video`, because
+        the rendered video has the captions burnt into it - see
+        `_base_from_sources`. `video` remains the fallback so a caller that
+        has only the finished file still works.
+        """
         out_dir.mkdir(parents=True, exist_ok=True)
         # Same tofu problem as captions: the headline comes from the title, so
         # a Hindi title needs a face with Devanagari glyphs.
@@ -593,7 +662,9 @@ class ThumbnailGenerator:
         headline = _headline(title, max_words=3 if video_format == "SHORT" else 4)
 
         base_path: Path | None = None
-        if video is not None and video.exists():
+        if sources:
+            base_path = _base_from_sources(sources, out_dir / "thumb_base.jpg")
+        if base_path is None and video is not None and video.exists():
             base_path = _base_from_video(video, out_dir / "thumb_base.jpg")
         if base_path is None and source_image is not None and source_image.exists():
             base_path = source_image

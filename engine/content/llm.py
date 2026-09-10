@@ -700,6 +700,40 @@ class LLMRouter:
         self.retry_backoff = float(
             cfg.get("content.retry_backoff_seconds", 25) if cfg else 25)
 
+        # Provider name -> the monotonic time it is worth trying again.
+        #
+        # WHY THIS EXISTS, measured on a real long-form run. Gemini's free
+        # tier was exhausted for the day, and every single call still paid its
+        # full backoff before falling through: "attempt 1/3 wait 25s",
+        # "attempt 2/3 wait 50s", "provider failed, falling back" - 75 seconds
+        # of sleeping, per call, for a provider that could not answer any of
+        # them. It happened five times in one job.
+        #
+        # It also corrupted the long-form section estimate. The outline call
+        # is timed and multiplied by the section count to decide whether
+        # sectioned generation fits its budget; with 75s of dead waiting
+        # inside that measurement, an 87-second "per call" cost projected to
+        # 12 minutes, sectioning was refused, and the fallback single shot
+        # produced a 75-second script for a 300-second video.
+        self._cooldown: dict[str, float] = {}
+        # Seconds the most recent complete() spent sleeping on providers that
+        # then failed anyway. See resting_seconds().
+        self._wasted = 0.0
+        self.cooldown_seconds = float(
+            cfg.get("content.provider_cooldown_seconds", 900) if cfg else 900)
+
+    def resting_seconds(self) -> float:
+        """How long the last call spent waiting on providers that had run out.
+
+        Read by the long-form section estimator, which times the outline call
+        and multiplies it by the section count. That measurement includes any
+        backoff paid discovering an exhausted provider - a cost the following
+        calls will not pay, because that provider is now resting - so
+        projecting it across every section refuses sectioning for a reason
+        that no longer applies.
+        """
+        return self._wasted
+
     @property
     def usable(self) -> list[LLMProvider]:
         return [p for p in self.providers
@@ -730,11 +764,17 @@ class LLMRouter:
                  temperature: float = 0.8, max_tokens: int = 4096,
                  category: str = "") -> LLMResult:
         errors: list[str] = []
+        self._wasted = 0.0
         for provider in self.providers:
             if isinstance(provider, TemplateProvider):
                 continue
             if not provider.available():
                 errors.append(f"{provider.name}: not configured")
+                continue
+            resting = self._cooldown.get(provider.name, 0.0)
+            if resting > time.monotonic():
+                errors.append(f"{provider.name}: resting for "
+                              f"{resting - time.monotonic():.0f}s")
                 continue
             if category and category in self.CATEGORY_REFUSALS.get(
                     provider.name, ()):
@@ -748,9 +788,25 @@ class LLMRouter:
                     provider, prompt, system, json_mode, temperature, max_tokens)
             except Exception as exc:
                 errors.append(f"{provider.name}: {str(exc)[:180]}")
+                # Rest a provider that ran out, so the next call does not pay
+                # its backoff again. Only for a rate limit or a quota: a
+                # malformed prompt or a 400 is this call's problem and says
+                # nothing about the next one.
+                self._wasted += getattr(provider, "_slept", 0.0)
+                rest = 0.0
+                if _is_transient_llm(str(exc),
+                                     retry_timeouts=getattr(
+                                         provider, "retry_timeouts", True)):
+                    rest = max(float(getattr(exc, "retry_after", 0.0) or 0.0),
+                               self.cooldown_seconds)
+                    self._cooldown[provider.name] = time.monotonic() + rest
                 log_event("LLM", "provider failed, falling back",
-                          provider=provider.name, error=str(exc)[:180])
+                          provider=provider.name, error=str(exc)[:180],
+                          resting=f"{rest:.0f}s" if rest else "no")
                 continue
+            # A success clears the rest: the limit was per-minute after all,
+            # or a new key arrived. Never let a cooldown outlive the condition.
+            self._cooldown.pop(provider.name, None)
             log_event("LLM", "completion ok", provider=provider.name,
                       model=result.model, chars=len(result.text))
             return result
@@ -776,6 +832,7 @@ class LLMRouter:
         attempts = max(1, self.transient_retries)
         delay = self.retry_backoff
         last: Exception | None = None
+        provider._slept = 0.0
         for attempt in range(1, attempts + 1):
             try:
                 return provider.complete(
@@ -796,6 +853,7 @@ class LLMRouter:
                 # small floor stops a near-zero reset becoming a hot loop.
                 reported = getattr(exc, "retry_after", 0.0) or 0.0
                 wait = max(0.5, min(reported, delay)) if reported else delay
+                provider._slept = getattr(provider, "_slept", 0.0) + wait
                 log_event("LLM", "transient, waiting rather than downgrading",
                           provider=provider.name, attempt=f"{attempt}/{attempts}",
                           wait=f"{wait:.1f}s",

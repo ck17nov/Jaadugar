@@ -723,16 +723,47 @@ class ScriptGenerator:
         # ruinous for CPU-only ollama, which was measured at over 10 minutes
         # per call on this project's dev machine - 14 sections would be hours.
         # The outline call is timed and used as the estimate.
+        # SCALED BY THE VIDEO'S OWN LENGTH, not a flat ten minutes. A
+        # 20-minute video already spends longer than that in ffmpeg, so
+        # refusing to spend twelve on its script - and then shipping a
+        # 75-second script instead, measured - is the wrong trade. The floor
+        # still protects the case the budget was written for: CPU-only ollama
+        # at over ten minutes per call, where 14 sections would be hours.
         budget = float(self.cfg.get("content.section_time_budget_seconds", 600))
+        budget = max(budget, duration * 3.0)
+
         started = time.monotonic()
         outline, provider = self._outline(
             idea, profile, duration, language, target_words, section_count,
             structure, research_context, strategy_hints)
         outline_seconds = time.monotonic() - started
-        projected = outline_seconds * section_count
+
+        # The outline is the FIRST call of the job, so it is the one that pays
+        # to discover which providers are exhausted - a failing provider's
+        # backoff lands inside this measurement and has nothing to do with
+        # what a section costs. The router now rests an exhausted provider, so
+        # subsequent calls skip it; the estimate has to assume that rather
+        # than projecting the discovery cost across every section.
+        #
+        # Measured: an outline that took 87 seconds spent 75 of them sleeping
+        # on a Gemini quota that was gone for the day, and 4 actually
+        # generating. Projected at 87s, sectioning was refused.
+        # getattr, because reporting this is a diagnostic refinement rather
+        # than part of the router contract - a router that does not offer it
+        # simply reports no waste, which is the old behaviour.
+        report = getattr(self.router, "resting_seconds", None)
+        rested = float(report()) if callable(report) else 0.0
+        per_call = max(1.0, outline_seconds - rested)
+        projected = per_call * section_count
+        if rested > 1.0:
+            log_event("SCRIPT", "discounting provider failover from the "
+                                "section estimate",
+                      outline=f"{outline_seconds:.0f}s",
+                      waiting=f"{rested:.0f}s",
+                      per_section=f"{per_call:.0f}s")
         if projected > budget:
             raise LLMError(
-                f"{provider} takes {outline_seconds:.0f}s per call; "
+                f"{provider} takes {per_call:.0f}s per call; "
                 f"{section_count} sections would need ~{projected / 60:.0f} "
                 f"minutes (budget {budget / 60:.0f}). Set GROQ_API_KEY or "
                 f"GEMINI_API_KEY for long-form, or raise "

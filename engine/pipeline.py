@@ -1137,6 +1137,12 @@ class Pipeline:
                 raise _ThumbnailNotApplicable
             thumbnail, variants = self.thumbnail_engine.generate(
                 title=meta.title, out_dir=job_dir / "thumbnails", video=video,
+                # The scene assets, preferred over the rendered video: the
+                # render has the captions burnt into it, and a thumbnail cut
+                # from it carries the video's subtitle AND its own headline.
+                sources=[Path(s.asset_path)
+                         for s in script.scene_objects()
+                         if s.asset_path and Path(s.asset_path).exists()],
                 video_format=request.video_format,
                 made_for_kids=profile.made_for_kids,
                 language=request.language)
