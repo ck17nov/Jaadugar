@@ -325,20 +325,23 @@ class CreateViewModel(
     private val _bankReady = MutableStateFlow<Int?>(null)
     val bankReady: StateFlow<Int?> = _bankReady.asStateFlow()
 
-    fun loadBank(group: String, language: String, videoFormat: String) {
+    fun loadBank(group: String, language: String, videoFormat: String,
+                 topic: String = "") {
         viewModelScope.launch {
-            repo.scriptBank().onSuccess { bank ->
-                _bankReady.value = bank.slots
-                    .filter { slot ->
-                        // An empty group means "any", which is what the
-                        // screen shows before a group is chosen.
-                        (group.isBlank() || slot.group == group) &&
-                            slot.language.substringBefore("-") ==
-                            language.substringBefore("-") &&
-                            slot.videoFormat == videoFormat
-                    }
-                    .sumOf { it.ready }
-            }
+            // ASK THE BACKEND, do not compute it here.
+            //
+            // This used to fold language dialects and sum the matching slots
+            // itself, and disagreed with the claim twice over: it ignored
+            // the topic filter, and it treated "en-IN" as "en" while the
+            // claim matched exactly. Pick Indian English plus "Only my
+            // reviewed scripts" and the screen said fifteen scripts were
+            // ready while the automation failed with a full bank.
+            repo.scriptBank(group, language, videoFormat, topic)
+                .onSuccess { bank ->
+                    _bankReady.value = bank.query?.ready
+                        ?: bank.slots.filter { it.group == group }
+                            .sumOf { it.ready }
+                }
         }
     }
 

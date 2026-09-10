@@ -518,12 +518,21 @@ class Database:
         reviewer kind, whether the payload parses - and then claims the one
         it picked with `claim_specific_bank_entry`.
         """
-        clauses = ["grp=?", "language=?", "video_format=?", "used_at<=0"]
-        params: list = [group.lower(), language.lower(), video_format.upper()]
+        # Language is matched on the COMPATIBLE set, not the exact string.
+        # A request for "en-IN" found none of fifteen banked "en" entries
+        # before this - see languages.claimable for why base language alone
+        # is not the right rule either.
+        from .languages import claimable
+
+        langs = [c.lower() for c in claimable(language)] or [language.lower()]
+        marks = ",".join("?" for _ in langs)
+        clauses = ["grp=?", f"language IN ({marks})", "video_format=?",
+                   "used_at<=0"]
+        params: list = [group.lower(), *langs, video_format.upper()]
         wanted = [t.strip().lower() for t in topics if t and t.strip()]
         if wanted:
-            marks = ",".join("?" for _ in wanted)
-            clauses.append(f"(topic='' OR topic IN ({marks}))")
+            topic_marks = ",".join("?" for _ in wanted)
+            clauses.append(f"(topic='' OR topic IN ({topic_marks}))")
             params += wanted
         if near_seconds > 0:
             clauses.append("est_seconds BETWEEN ? AND ?")

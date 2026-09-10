@@ -1097,7 +1097,9 @@ def list_languages() -> dict[str, Any]:
 
 
 @app.get("/script-bank", dependencies=[Depends(require_api_key)])
-def script_bank_status() -> dict[str, Any]:
+def script_bank_status(group: str = "", language: str = "",
+                       video_format: str = "",
+                       topic: str = "") -> dict[str, Any]:
     """How many reviewed scripts are left, per group / language / format.
 
     The Create screen needs this to say something honest next to the "use my
@@ -1111,38 +1113,83 @@ def script_bank_status() -> dict[str, Any]:
 
     db = _db()
     try:
-        return _bank_status(db, _json)
+        return _bank_status(db, _json, group=group, language=language,
+                            video_format=video_format, topic=topic)
     finally:
         db.close()
 
 
-def _bank_status(db, _json) -> dict[str, Any]:
-    reviewed: dict[str, int] = {}
+def _bank_status(db, _json, *, group: str = "", language: str = "",
+                 video_format: str = "", topic: str = "") -> dict[str, Any]:
+    from engine.content.bank import BankEntry
+    from engine.content.bank_use import approved, reviewed_by_human
+
+    def parse(row):
+        try:
+            return BankEntry.from_dict(_json.loads(row["payload"]))
+        except Exception:                       # noqa: BLE001
+            return None
+
+    # `ready` is counted with the SAME test the claim gate applies.
+    #
+    # It used to check only that `human.reviewer` was non-empty, so an entry
+    # explicitly REJECTED counted as ready - the screen offered scripts a
+    # render would refuse to take.
+    ready: dict[str, list[int]] = {}
     for row in db.bank_entries(limit=5000):
         if row["used_at"]:
             continue
-        try:
-            payload = _json.loads(row["payload"])
-        except Exception:                       # noqa: BLE001
-            continue
-        if not (payload.get("human") or {}).get("reviewer"):
+        entry = parse(row)
+        if entry is None or not approved(entry):
             continue
         key = f"{row['grp']}|{row['language']}|{row['video_format']}"
-        reviewed[key] = reviewed.get(key, 0) + 1
+        slot = ready.setdefault(key, [0, 0])
+        slot[0] += 1
+        if reviewed_by_human(entry):
+            slot[1] += 1
 
     slots = []
     for row in db.bank_counts():
         key = f"{row['grp']}|{row['language']}|{row['video_format']}"
+        claimable, by_human = ready.get(key, [0, 0])
         slots.append({
             "group": row["grp"], "language": row["language"],
             "video_format": row["video_format"],
             "total": int(row["total"] or 0),
             "unused": int(row["unused"] or 0),
-            "ready": reviewed.get(key, 0),
+            "ready": claimable,
+            "human_reviewed": by_human,
         })
-    return {"slots": slots,
-            "ready_total": sum(s["ready"] for s in slots),
-            "sources": ["live", "bank_first", "bank"]}
+
+    out: dict[str, Any] = {
+        "slots": slots,
+        "ready_total": sum(s["ready"] for s in slots),
+        "sources": ["live", "bank_first", "bank"],
+    }
+
+    # An EXACT answer for one automation, when the caller says which one.
+    #
+    # The app used to fold language dialects itself and sum the matching
+    # slots, which disagreed with the backend twice over: it ignored the
+    # topic filter a claim applies, and it treated "en-IN" as "en" while the
+    # claim matched exactly - so the screen said fifteen scripts were ready
+    # and the automation failed with a full bank. Asking the same code that
+    # does the claiming is the only way the two cannot drift.
+    if group or language or video_format:
+        rows = db.bank_candidates(
+            group=group, language=language or "en",
+            video_format=video_format or "SHORT",
+            topics=[topic] if topic else (), limit=5000)
+        entries = [e for e in (parse(r) for r in rows) if e is not None]
+        out["query"] = {
+            "group": group, "language": language,
+            "video_format": video_format, "topic": topic,
+            "ready": sum(1 for e in entries if approved(e)),
+            "human_reviewed": sum(1 for e in entries
+                                  if reviewed_by_human(e)),
+            "unused": len(rows),
+        }
+    return out
 
 
 @app.delete("/youtube/accounts/{channel_id}",

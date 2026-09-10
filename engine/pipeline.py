@@ -423,6 +423,26 @@ class Pipeline:
                       requested=request.duration_seconds, using=entry_seconds,
                       entry=claim.entry_id)
             request.duration_seconds = entry_seconds
+
+        # THE ENTRY'S OWN CLASSIFICATION WINS, and this one is a safety
+        # setting rather than a preference.
+        #
+        # A group-wide kids entry could be claimed by a request that did not
+        # say made_for_kids - a custom topic like "little tales" resolves to
+        # the kids group and claims a child-directed script, while the
+        # request's flag stayed False. The niche profile was then built as
+        # general-audience education, so the video lost the stricter kids
+        # safety profile AND published without the Made-for-Kids
+        # classification. Confirmed by probe.
+        #
+        # Only ever tightened here. An entry that is not child-directed must
+        # not clear a flag the operator set deliberately.
+        if claim.entry.made_for_kids and not request.made_for_kids:
+            log_event("BANK", "classification taken from the banked script",
+                      entry=claim.entry_id, made_for_kids=True,
+                      note="the entry is child-directed, so this video is")
+            request.made_for_kids = True
+
         job.request = request.to_dict()
         safe_write_json(Path(job.dir) / "bank_entry.json",
                         claim.entry.to_dict())

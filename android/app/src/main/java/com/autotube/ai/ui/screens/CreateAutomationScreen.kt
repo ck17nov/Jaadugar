@@ -263,10 +263,12 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     // Only when the bank is actually in play. Asking on every screen open
     // would cost a request that the default "write a new one each time" has
     // no use for.
-    LaunchedEffect(scriptSource, groupKey, language, isShort) {
+    LaunchedEffect(scriptSource, groupKey, language, isShort, niche) {
         if (scriptSource != "live") {
+            // The topic goes too: a claim filters on it, so a count that
+            // ignores it promises scripts the render will not take.
             vm.loadBank(groupKey, language,
-                if (isShort) "SHORT" else "LONGFORM")
+                if (isShort) "SHORT" else "LONGFORM", niche.trim())
         }
     }
 

@@ -31,7 +31,12 @@ interface ApiService {
     suspend fun nicheGroups(): NicheGroupListDto
 
     @GET("script-bank")
-    suspend fun scriptBank(): ScriptBankDto
+    suspend fun scriptBank(
+        @Query("group") group: String = "",
+        @Query("language") language: String = "",
+        @Query("video_format") videoFormat: String = "",
+        @Query("topic") topic: String = "",
+    ): ScriptBankDto
 
     @POST("youtube/accounts/{channelId}/niches")
     suspend fun setAccountNiches(

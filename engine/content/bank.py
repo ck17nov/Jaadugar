@@ -93,6 +93,36 @@ MIN_SCENES = 3
 MAX_SCENES = 400
 
 
+def _text(value: Any) -> str:
+    """A field's text, or "" when the value is not text at all.
+
+    `str(value)` was used here, and it turned a shape the author plausibly
+    writes into a Python repr that then got NARRATED. A narration written as
+    ["He jumped high.", "He missed."] became the literal string
+    "['He jumped high.', 'He missed.']" - brackets, quotes and commas, read
+    aloud by edge-tts - and an image_brief written as {"subject": "a boy"}
+    went to the generator as "{'subject': 'a boy'}". validate() saw non-empty
+    strings and reported nothing, and the bank path has no later LLM rewrite
+    to launder it.
+
+    A list of strings IS recoverable - the author meant consecutive lines -
+    so it is joined. Anything else returns empty, which the existing "empty"
+    check rejects as fatal, and `load_jsonl` names the offending type.
+    """
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        parts = [v.strip() for v in value if isinstance(v, str) and v.strip()]
+        return " ".join(parts) if len(parts) == len(value) else ""
+    return ""
+
+
+# Scene fields that must be text, checked by `load_jsonl` where the line
+# number is still known.
+_SCENE_TEXT_FIELDS = ("beat", "narration", "caption", "image_brief",
+                      "on_screen_text")
+
+
 @dataclass
 class BankScene:
     """One scene: what is said, what is shown, and what is captioned."""
@@ -115,11 +145,11 @@ class BankScene:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> BankScene:
-        return cls(beat=str(raw.get("beat", "")).strip(),
-                   narration=str(raw.get("narration", "")).strip(),
-                   caption=str(raw.get("caption", "")).strip(),
-                   image_brief=str(raw.get("image_brief", "")).strip(),
-                   on_screen_text=str(raw.get("on_screen_text", "")).strip())
+        return cls(beat=_text(raw.get("beat")),
+                   narration=_text(raw.get("narration")),
+                   caption=_text(raw.get("caption")),
+                   image_brief=_text(raw.get("image_brief")),
+                   on_screen_text=_text(raw.get("on_screen_text")))
 
 
 @dataclass
@@ -528,12 +558,71 @@ def load_jsonl(path: Path) -> tuple[list[BankEntry], list[Problem]]:
             problems.append(Problem("", f"line {number}",
                                     "is not a JSON object"))
             continue
+        # SHAPE problems are reported HERE, where the line number is still
+        # known. `from_dict` can only return empty for a value that is not
+        # text, which validate() then rejects as "empty" - true but useless
+        # to the author, who wrote something and wants to know what was wrong
+        # with it.
+        #
+        # A fatal shape problem skips the line entirely rather than yielding a
+        # partial entry. Otherwise the importer reported it as rejected AND
+        # stored it, which is the worst of both: a scene silently missing from
+        # a video the report said was refused.
+        shape = _shape_problems(raw, number)
+        problems.extend(shape)
+        if any(p.fatal for p in shape):
+            continue
         try:
             entries.append(BankEntry.from_dict(raw))
         except Exception as exc:                # noqa: BLE001
             problems.append(Problem("", f"line {number}",
                                     f"could not be read: {exc}"))
     return entries, problems
+
+
+def _shape_problems(raw: dict[str, Any], number: int) -> list[Problem]:
+    """Fields whose JSON type is wrong, named precisely."""
+    out: list[Problem] = []
+    scenes = raw.get("scenes")
+    if scenes is not None and not isinstance(scenes, list):
+        out.append(Problem("", f"line {number}.scenes",
+                           f"is a {type(scenes).__name__}, not a list"))
+        return out
+    for index, scene in enumerate(scenes or []):
+        if not isinstance(scene, dict):
+            # Silently dropped before this: from_dict filters on isinstance
+            # and recompute() then derives scene_count from the survivors, so
+            # a 6-scene entry imported as 5 with nothing reported and one
+            # beat - its narration, its authored caption, its brief - simply
+            # gone from the video.
+            out.append(Problem(
+                "", f"line {number}.scenes[{index}]",
+                f"is a {type(scene).__name__}, not an object; it would be "
+                f"dropped and the entry would render a scene short"))
+            continue
+        for name in _SCENE_TEXT_FIELDS:
+            value = scene.get(name)
+            if value is None or isinstance(value, str):
+                continue
+            if _text(value):
+                continue                    # a list of strings, recoverable
+            out.append(Problem(
+                "", f"line {number}.scenes[{index}].{name}",
+                f"is a {type(value).__name__}, not text; as a string it would "
+                f"read {str(value)[:48]!r} - which the voice would narrate"))
+    for name in ("characters", "claims", "title_alts"):
+        value = raw.get(name)
+        if value is not None and not isinstance(value, list):
+            out.append(Problem("", f"line {number}.{name}",
+                               f"is a {type(value).__name__}, not a list"))
+    for index, person in enumerate(raw.get("characters") or []):
+        if not isinstance(person, dict):
+            out.append(Problem(
+                "", f"line {number}.characters[{index}]",
+                f"is a {type(person).__name__}, not an object; it would be "
+                f"dropped, and the variety gate needs the cast to detect a "
+                f"renamed duplicate"))
+    return out
 
 
 def write_jsonl(entries: Iterable[BankEntry], path: Path) -> int:

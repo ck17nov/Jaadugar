@@ -402,6 +402,24 @@ data class BankSlotDto(
     val total: Int = 0,
     val unused: Int = 0,
     val ready: Int = 0,
+    @SerialName("human_reviewed") val humanReviewed: Int = 0,
+)
+
+/**
+ * The backend's answer for ONE automation, computed by the same code that
+ * does the claiming.
+ *
+ * The app used to fold language dialects and sum the matching slots itself,
+ * which disagreed with the backend twice: it ignored the topic filter a claim
+ * applies, and it treated "en-IN" as "en" while the claim matched exactly -
+ * so the screen said fifteen scripts were ready and the automation failed
+ * with a full bank.
+ */
+@Serializable
+data class BankQueryDto(
+    val ready: Int = 0,
+    @SerialName("human_reviewed") val humanReviewed: Int = 0,
+    val unused: Int = 0,
 )
 
 @Serializable
@@ -409,4 +427,5 @@ data class ScriptBankDto(
     val slots: List<BankSlotDto> = emptyList(),
     @SerialName("ready_total") val readyTotal: Int = 0,
     val sources: List<String> = emptyList(),
+    val query: BankQueryDto? = null,
 )

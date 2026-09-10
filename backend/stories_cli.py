@@ -22,6 +22,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from engine.content import bank_import, bank_prompt
@@ -127,10 +128,16 @@ def stories_import(
     console.print(f"\n[bold]{report.summary()}[/bold]"
                   + ("  [yellow](dry run - nothing stored)[/yellow]"
                      if dry_run else ""))
+    # escape(), because a report line names the field in SQUARE BRACKETS and
+    # Rich reads those as markup tags and deletes them. "REJECT (no id)
+    # [line 7] is not valid JSON" printed as "REJECT (no id)  is not valid
+    # JSON" - losing the line number, which is the only way to find the bad
+    # line in a 300-entry file. Saving a model reply with its ```jsonl fence
+    # still attached printed three identical, unlocatable rejections.
     for line in report.rejected:
-        console.print(f"  [red]{line}[/red]")
+        console.print(f"  [red]{escape(line)}[/red]")
     for line in report.warnings[:40]:
-        console.print(f"  [yellow]{line}[/yellow]")
+        console.print(f"  [yellow]{escape(line)}[/yellow]")
     if len(report.warnings) > 40:
         console.print(f"  [dim]... and {len(report.warnings) - 40} more "
                       f"warnings[/dim]")
@@ -146,7 +153,10 @@ def stories_import(
             f"[yellow]{report.unreviewed} entries have no human reviewer.[/yellow] "
             f"They will not be claimed for rendering until reviewed:\n"
             f"  autotube stories review <entry_id> --by <name>")
-    if report.rejected and not dry_run:
+    # A dry run that rejected everything used to exit 0, so a CI step or a
+    # shell `&&` chain read "nothing is importable" as success. The exit code
+    # reflects the REPORT, not whether anything was written.
+    if report.rejected:
         raise typer.Exit(code=1)
 
 

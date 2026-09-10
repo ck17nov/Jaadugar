@@ -100,6 +100,34 @@ def script_of(code: str) -> str:
     return found.script if found else "latin"
 
 
+def claimable(code: str) -> tuple[str, ...]:
+    """Which banked languages a request in `code` may draw from.
+
+    THE BUG THIS FIXES. The claim filter matched the language string exactly,
+    so a request for "en-IN" found none of fifteen banked "en" entries and
+    "hi-Latn" found none of five banked "hi" ones - while the app's own count
+    folded dialects and cheerfully said fifteen were ready. Pick Indian
+    English plus "Only my reviewed scripts" and the automation failed with a
+    full bank.
+
+    Base language is not enough on its own, though. "hi-Latn" is Hindi in
+    LATIN letters, so a Devanagari script read by a Hinglish voice would be
+    wrong - and folding on base language alone would match them. The rule is
+    same base language AND same script, which pairs en-IN with en and keeps
+    hi-Latn away from hi.
+    """
+    me = voice(code)
+    if me is None:
+        wanted = (code or "").strip().lower()
+        return (wanted,) if wanted else ()
+    base = me.code.split("-")[0]
+    out = [lang.code for lang in VOICES
+           if lang.code.split("-")[0] == base and lang.script == me.script]
+    # Its own code first, so an exact match is preferred when both exist.
+    out.sort(key=lambda c: (c != me.code, c))
+    return tuple(out)
+
+
 def default_voice() -> str:
     return VOICES[0].code
 

@@ -207,8 +207,10 @@ class AutoTubeRepository(
     suspend fun nicheGroups(): Result<NicheGroupListDto> =
         call { api.service().nicheGroups() }
 
-    suspend fun scriptBank(): Result<ScriptBankDto> =
-        call { api.service().scriptBank() }
+    suspend fun scriptBank(group: String = "", language: String = "",
+                           videoFormat: String = "",
+                           topic: String = ""): Result<ScriptBankDto> =
+        call { api.service().scriptBank(group, language, videoFormat, topic) }
 
     suspend fun setDefaultAccount(channelId: String): Result<Unit> =
         call { api.service().setDefaultAccount(channelId) }
