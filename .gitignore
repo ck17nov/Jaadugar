@@ -43,3 +43,4 @@ android/.kotlin/
 # write the response into the project root; one such file (an OVH API error)
 # was committed by a "git add -A".
 *.bin
+_e2e*.py
