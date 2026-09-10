@@ -97,6 +97,59 @@ _OPENING_QUESTION = re.compile(
     r"|^\s*क्या ",
     re.I)
 
+# A TURN THAT IS ONLY A PERCEPTION.
+#
+# 14 of our 17 kids narratives resolve with the child LOOKING somewhere
+# else: "Then Aarav peeked at the far end of the cot", "तभी विवान ने ...
+# देखा". Nothing is invented, combined, traded or reframed - the camera
+# simply pans. The test is: if the turn can be restated as "they looked
+# somewhere else", it is not a turn, and a five-year-old cannot copy it
+# tomorrow.
+_PERCEPTION_TURN = re.compile(
+    r"^\s*(then\s+|so\s+|at last\s+|suddenly\s+)?"
+    r"[\w']+\s+(just\s+|then\s+|finally\s+)?"
+    r"(noticed|saw|spotted|looked|peeked|peered|glanced|remembered|"
+    r"realised|realized|heard|listened|watched|found)\b"
+    # `\s`, NOT `\b`, after the Devanagari word. A vowel sign such as the
+    # final "ी" of "तभी" is a combining mark, and Python does not count
+    # combining marks as word characters - so there is no word boundary
+    # between "तभी" and the space after it, and `\b` silently killed the
+    # whole Hindi branch. Same family of bug as the Latin-only tokeniser
+    # that gave every Hindi script a perfect hook score.
+    r"|^\s*तभी\s.*?(देखा|देखी|सुना|झाँका|झांका|दिखा|दिखी|सूझा|याद आया)",
+    re.I)
+
+# AN OBSTACLE THAT IS ONLY A FEELING IN THE BODY.
+#
+# Every one of the 17 puts an ache in the obstacle beat, and "throat went
+# tight" appears verbatim in three different stories. A body sensation is
+# a fine SECOND sentence; on its own it is not a complication, because
+# nothing about the situation has changed.
+_BODY_ONLY = re.compile(
+    r"\b(ache[ds]?|aching|sore|tight|tired|heavy|throbb\w*|sting\w*|"
+    r"burn\w*|trembl\w*|shiver\w*|wobbl\w* knees|out of breath)\b"
+    r"|दुखने|दुख रह|थक|भारी लग|साँस फूल|काँप",
+    re.I)
+
+# Something that CHANGES THE SITUATION: another person who wants the same
+# thing, a limit appearing, or the attempt breaking something.
+_COMPLICATION = re.compile(
+    r"\b(another|someone else|too\b.*\b(also|as well)|now (also|both)|"
+    r"broke|broken|snapped|cracked|spilled|spilt|tore|torn|ran out|"
+    r"last one|only one|before (the|it)|had to choose|started to cry|"
+    r"began to cry|crying|shouted|called out)\b"
+    r"|और भी|दूसरा भी|टूट|फट|गिर पड़|रोने लग|चिल्ला|आख़िरी|बस एक ही",
+    re.I)
+
+# Refrains made of ideas rather than things. A child cannot point at
+# "kindness" or chant "patience"; they can point at a ball and chant a
+# count.
+_ABSTRACT_REFRAIN = re.compile(
+    r"\b(sharing|share|kindness|kind|quiet|calm|enough|brave|bravery|"
+    r"patience|patient|happy|happiness|love|friendship|sorry|proud)\b"
+    r"|हिम्मत|सब्र|दया|प्यार|खुशी|शांति|अच्छा बनो",
+    re.I)
+
 # Half the scenes, not 60%.
 #
 # A six-beat story that names the character in three scenes and uses a
@@ -283,8 +336,14 @@ def _find_refrain(narrations: list[str]) -> tuple[str, int]:
 
 
 def evaluate(narrations: list[str], *, words_per_scene_floor: int = 12,
-             total_floor: int = 0) -> StoryReport:
-    """Check a child-directed narrative for the shape of a story."""
+             total_floor: int = 0,
+             beats: list[str] | None = None) -> StoryReport:
+    """Check a child-directed narrative for the shape of a story.
+
+    `beats` are the entry's own beat names, when the caller has them. They
+    let the craft checks look at the RIGHT scene - the turn, the obstacle -
+    instead of guessing by position.
+    """
     report = StoryReport()
     narrations = [n for n in (narrations or []) if (n or "").strip()]
     if not narrations:
@@ -371,4 +430,69 @@ def evaluate(narrations: list[str], *, words_per_scene_floor: int = 12,
          f"the child - the winning idea must be the child's own")
         if not ok else "the child resolves it"))
 
+    # ---- 9. the turn is an IDEA, not a glance -------------------- advisory
+    #
+    # Advisory for now DELIBERATELY. 14 of the 17 entries already banked
+    # fail this, and making it blocking today would make the existing bank
+    # un-importable - including the re-import that carries a corrected
+    # title. `stories craft-report` lists the failures; enforcement comes
+    # when they have been rewritten.
+    turn = _turn_scene(narrations, beats)
+    perception = bool(turn and _PERCEPTION_TURN.match(turn.strip()))
+    report.findings.append(Finding(
+        "turn_is_an_idea", not perception, False,
+        (f"the turn is a perception, not an idea: {turn.strip()[:60]!r} - "
+         f"the child should invent, combine, trade or reframe something a "
+         f"five-year-old could copy tomorrow, not just look elsewhere")
+        if perception else "the turn is an idea"))
+
+    # ---- 10. the obstacle is more than an ache ------------------- advisory
+    cost = _obstacle_scene(narrations, beats)
+    body_only = bool(cost and _BODY_ONLY.search(cost)
+                     and not _COMPLICATION.search(cost))
+    report.findings.append(Finding(
+        "obstacle_is_more_than_a_feeling", not body_only, False,
+        (f"the obstacle is only a body feeling: {cost.strip()[:60]!r} - "
+         f"something must get measurably WORSE: a second person who wants "
+         f"the same thing, a limit appearing, or the attempt breaking "
+         f"something")
+        if body_only else "the obstacle complicates something"))
+
+    # ---- 11. a refrain a child can point at ---------------------- advisory
+    abstract = bool(refrain and _ABSTRACT_REFRAIN.search(refrain))
+    report.findings.append(Finding(
+        "refrain_is_concrete", not abstract, False,
+        (f"the refrain {refrain!r} is an idea rather than a thing - every "
+         f"content word should be something a child can point at, do or "
+         f"count")
+        if abstract else "the refrain is concrete"))
+
     return report
+
+
+def _beat_scene(narrations: list[str], beats: list[str] | None,
+                wanted: tuple[str, ...], fallback: float) -> str:
+    """The narration of a named beat, or the scene at `fallback` through.
+
+    `evaluate` is given narrations alone by some callers, so the beat names
+    are a hint rather than a requirement - positional inference is close
+    enough for a six-to-eight beat story and wrong for nothing that matters.
+    """
+    if beats and len(beats) == len(narrations):
+        for index, beat in enumerate(beats):
+            if (beat or "").strip().lower() in wanted:
+                return narrations[index]
+    if not narrations:
+        return ""
+    return narrations[min(len(narrations) - 1,
+                          max(0, int(len(narrations) * fallback)))]
+
+
+def _turn_scene(narrations: list[str], beats: list[str] | None = None) -> str:
+    return _beat_scene(narrations, beats, ("turn", "idea", "twist"), 0.62)
+
+
+def _obstacle_scene(narrations: list[str],
+                    beats: list[str] | None = None) -> str:
+    return _beat_scene(narrations, beats,
+                       ("obstacle", "cost", "setback"), 0.45)

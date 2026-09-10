@@ -200,3 +200,133 @@ class TestWiring:
         from engine.content.script import ScriptGenerator
         source = inspect.getsource(ScriptGenerator._ensure_story_shape)
         assert "keeping the first draft" in source
+
+
+# ---------------------------------------------------------------------------
+# Craft, not just shape
+# ---------------------------------------------------------------------------
+class TestTheTurnIsAnIdea:
+    """A story where the child just looks somewhere else is not a story.
+
+    Measured across the bank: 7 of 19 narratives turn on a perception -
+    "Then Aarav peeked at the far end of the cot", "तभी ... देखा". Nothing
+    is invented, combined, traded or reframed; the camera pans. Advisory
+    for now, because the entries that fail are already banked.
+    """
+
+    def _story(self, turn: str) -> list[str]:
+        return [
+            "Aarav wanted his red ball more than anything this morning.",
+            "The ball rolled under the heavy wooden cot and stopped.",
+            "He pushed his hand in but his fingers fell short again.",
+            turn,
+            "He worked at it until the ball came free at last.",
+            "Aarav hugged the ball and laughed out loud.",
+        ]
+
+    def _finding(self, narrations, check):
+        from engine.content.story_gate import evaluate
+        report = evaluate(narrations)
+        return next(f for f in report.findings if f.check == check)
+
+    def test_a_glance_is_not_a_turn(self):
+        finding = self._finding(
+            self._story("Then Aarav noticed the far end of the cot."),
+            "turn_is_an_idea")
+        assert finding.passed is False
+        assert "perception" in finding.detail
+
+    def test_a_hindi_glance_is_not_a_turn_either(self):
+        narrations = [
+            "आरव को अपनी लाल गेंद बहुत पसंद थी और वह खेलना चाहता था।",
+            "गेंद लुढ़ककर भारी खाट के नीचे चली गई और रुक गई।",
+            "उसने हाथ अंदर डाला पर उँगलियाँ गेंद तक नहीं पहुँचीं।",
+            "तभी आरव ने खाट के दूसरे सिरे पर झाँका।",
+            "उसने वहाँ से हाथ डाला और गेंद बाहर आ गई।",
+            "आरव ने गेंद को सीने से लगाया और हँस पड़ा।",
+        ]
+        assert self._finding(narrations, "turn_is_an_idea").passed is False
+
+    def test_an_invention_is_a_turn(self):
+        finding = self._finding(
+            self._story("Aarav slid his kite stick along the floor to sweep "
+                        "the ball out."),
+            "turn_is_an_idea")
+        assert finding.passed is True
+
+    def test_the_beat_names_pick_the_right_scene(self):
+        """Position is a fallback; the entry's own beats are better."""
+        from engine.content.story_gate import evaluate
+
+        narrations = self._story("Aarav tied two sticks together to reach it.")
+        # Put a perception in a scene that is NOT the turn.
+        narrations[1] = "Then Aarav saw the cot in the middle of the room."
+        beats = ["want", "attempt", "obstacle", "turn", "resolve", "refrain"]
+        report = evaluate(narrations, beats=beats)
+        finding = next(f for f in report.findings
+                       if f.check == "turn_is_an_idea")
+        assert finding.passed is True, finding.detail
+
+
+class TestTheObstacleComplicatesSomething:
+    """An ache is a feeling, not a complication - nothing has changed.
+
+    "throat went tight" appears verbatim in three different banked stories.
+    """
+
+    def _finding(self, obstacle: str):
+        from engine.content.story_gate import evaluate
+
+        narrations = [
+            "Tara wanted the blue ribbon for the school race today.",
+            "She reached for it on the shelf but it sat too high.",
+            obstacle,
+            "Tara dragged the wooden stool across and climbed up carefully.",
+            "The ribbon was hers and she tied it in her hair.",
+            "Tara ran to the race, ribbon flying behind her.",
+        ]
+        report = evaluate(narrations,
+                          beats=["want", "attempt", "obstacle", "turn",
+                                 "resolve", "refrain"])
+        return next(f for f in report.findings
+                    if f.check == "obstacle_is_more_than_a_feeling")
+
+    def test_a_body_ache_alone_fails(self):
+        finding = self._finding("Her shoulder ached and her throat went tight.")
+        assert finding.passed is False
+        assert "body feeling" in finding.detail
+
+    def test_an_ache_with_a_real_complication_passes(self):
+        finding = self._finding(
+            "Her shoulder ached, and then another girl asked for the same "
+            "ribbon.")
+        assert finding.passed is True
+
+    def test_a_plain_complication_passes(self):
+        finding = self._finding(
+            "The shelf wobbled and the last ribbon slipped further back.")
+        assert finding.passed is True
+
+
+class TestTheRefrainIsSomethingYouCanPointAt:
+    def _finding(self, refrain: str):
+        from engine.content.story_gate import evaluate
+
+        narrations = [
+            f"Devi wanted the last guava on the plate. {refrain}",
+            f"She reached out slowly for it. {refrain}",
+            "Her little cousin Nanu started to cry for it too.",
+            "Devi broke the guava into two halves instead.",
+            f"They ate together on the step. {refrain}",
+        ]
+        report = evaluate(narrations)
+        return next(f for f in report.findings
+                    if f.check == "refrain_is_concrete")
+
+    def test_an_abstract_refrain_fails(self):
+        assert self._finding("Sharing is caring, sharing is kind.").passed \
+            is False
+
+    def test_a_concrete_refrain_passes(self):
+        assert self._finding("One guava, two hands, one guava, two hands.") \
+            .passed is True
