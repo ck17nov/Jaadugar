@@ -47,8 +47,17 @@ class RetentionReport:
 
 
 def _hook_delay(text: str) -> tuple[float, int]:
-    """Words before the first curiosity marker, and an approximate delay."""
-    tokens = re.findall(r"[A-Za-z']+", (text or "").lower())
+    """Words before the first curiosity marker, and an approximate delay.
+
+    Tokenised on WHITESPACE, not on [A-Za-z]. The Latin-only pattern
+    returned an empty list for any Devanagari opening line, so the loop
+    never ran, `len(tokens)` was 0 and the delay came out at 0.0 seconds -
+    a perfect hook score for every Hindi script ever written, however slow
+    its opening actually was.
+    """
+    from ..core.util import words as split_words
+
+    tokens = split_words(text or "")
     for i, tok in enumerate(tokens):
         if tok in CURIOSITY_MARKERS:
             return i / 2.6, i          # ~2.6 words/second

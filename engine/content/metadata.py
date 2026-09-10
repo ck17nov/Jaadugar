@@ -23,10 +23,41 @@ YOUTUBE_TAGS_TOTAL_CHARS = 460          # 500 with separators; stay safely under
 # no documented chapter ceiling; 30 keeps the description readable.
 MAX_CHAPTERS = 30
 
+def _visible_title(text: str) -> str:
+    """The title minus its furniture: emoji, gloss and hashtag tail.
+
+    Length and word count are measures of what a viewer READS. A leading
+    emoji, a trailing " | English gloss" on a Devanagari title and a
+    "#shorts #kahani" tail are all conventions the best performers in this
+    niche use - and counting them as words made every title that followed
+    the convention score worse than a bare four-word plot label.
+    """
+    import re as _re
+
+    out = (text or "").strip()
+    out = _re.sub(r"(?:\s*#[^\s#]+)+\s*$", "", out)      # hashtag tail
+    out = _re.split(r"\s+\|\s+", out)[0]                  # " | gloss"
+    # One leading emoji or symbol, plus the space after it.
+    out = _re.sub(r"^[^\wऀ-ॿ(\[\"']+\s*", "", out)
+    return out.strip()
+
+
 CURIOSITY_WORDS = {
     "why", "how", "what", "who", "actually", "really", "hidden", "secret",
     "nobody", "strange", "stranger", "unexpected", "wrong", "mistake", "myth",
     "found", "discovered", "revealed", "until", "before", "almost", "never",
+    # Devanagari. Without these, 22 of the 100 points were UNREACHABLE for a
+    # Hindi title however good it was - curiosity is weighted 0.20 and
+    # emotional pull 0.10, and neither set had a single Devanagari word in
+    # it. A Hindi title asking "अब वो क्या करेगा?" scored zero curiosity.
+    "क्या", "क्यों",
+    "कैसे", "कहाँ",
+    "कौन", "कब",
+    "आख़िर", "असल",
+    "छिपा", "छिपी",
+    "राज़", "रहस्य",
+    "ग़लती", "कभी",
+    "फिर",
 }
 # What a human-reviewed authored title is worth, on the 0-1 scale before the
 # x100. Enough to lift a specific, concrete title over a formulaic one of
@@ -37,6 +68,12 @@ EMOTION_WORDS = {
     "shocking", "incredible", "terrifying", "beautiful", "brutal", "insane",
     "amazing", "unbelievable", "wild", "crazy", "stunning", "haunting",
     "dangerous", "impossible", "extraordinary",
+    # Devanagari, for the same reason.
+    "डर", "डरा", "ख़ुश",
+    "रो", "रोया", "हँस",
+    "प्यार", "अकेला",
+    "चुप", "हिम्मत",
+    "मज़ा", "अजीब",
 }
 # Overpromises we refuse to ship (spec section 17).
 MISLEADING_PATTERNS = [
@@ -174,8 +211,18 @@ class MetadataGenerator:
         if (script.provider or "").startswith("bank:"):
             authored = {t.strip().lower()
                         for t in (script.title_ideas or []) if t.strip()}
+        # Child-directed STORIES are judged on withholding: a bedtime story
+        # is chosen from a promise, not found by matching its own words.
+        # Explainers are the opposite and keep the search weighting.
+        # A story has beats and a payoff to protect; a drill or a list does
+        # not. `story_report` is only filled for narrative shapes, which is
+        # exactly the distinction, and a kids profile without one (an
+        # alphabet drill) keeps the ordinary search weighting.
+        withhold = bool(getattr(profile, "made_for_kids", False)
+                        and len(script.scene_objects()) >= 3)
         scored = [self.score_title(t, script, idea,
-                                   authored=t.strip().lower() in authored)
+                                   authored=t.strip().lower() in authored,
+                                   withhold=withhold)
                   for t in candidates]
         scored.sort(key=lambda c: c["score"], reverse=True)
         best = scored[0] if scored else {"title": idea.working_title, "score": 50.0}
@@ -311,7 +358,8 @@ Return JSON: {{"titles": ["...", "..."]}}"""
 
     # ------------------------------------------------------------------
     def score_title(self, title: str, script: Script,
-                    idea: ContentIdea, *, authored: bool = False) -> dict[str, Any]:
+                    idea: ContentIdea, *, authored: bool = False,
+                    withhold: bool = False) -> dict[str, Any]:
         """Score 0-100 across the spec's eight dimensions.
 
         `authored` marks a title that came with a human-reviewed banked
@@ -321,9 +369,20 @@ Return JSON: {{"titles": ["...", "..."]}}"""
         bad authored title should still be able to lose.
         """
         text = title.strip()
-        lowered = text.lower()
+        # THE VISIBLE TITLE - what a viewer reads - separated from the
+        # furniture. A leading emoji, a " | English gloss" for a Devanagari
+        # title, and a hashtag tail are all things the niche's own top
+        # performers carry (50% emoji, 83% hashtags in our cached research),
+        # and every one of them was being counted as length and as words. One
+        # trailing emoji cost an identical Hindi sentence 6.4 points.
+        visible = _visible_title(text)
+        # Everything downstream reads the VISIBLE text. Scoring the hashtag
+        # tail as vocabulary made "#shorts #kahani" count towards search
+        # relevance and specificity, so decoration nudged the score on its
+        # own - 57.8 against 57.2 for the same sentence.
+        lowered = visible.lower()
         toks = set(words(lowered))
-        length = len(text)
+        length = len(visible)
 
         # Words the video is ACTUALLY about.
         #
@@ -348,13 +407,21 @@ Return JSON: {{"titles": ["...", "..."]}}"""
         names_something = (any(c.isdigit() for c in text)
                            or len(toks & subject_words) >= 2)
         curiosity = clamp(len(toks & CURIOSITY_WORDS) / 2.0)
-        if text.endswith("?") and names_something:
+        if visible.endswith(("?", "…")) and names_something:
             curiosity = clamp(curiosity + 0.25)
 
         # Clarity: readable length, not too many words, no jargon pileup.
-        word_count = len(text.split())
-        clarity = clamp(1.0 - abs(word_count - 9) / 11.0)
-        if length > 80:
+        # A no-penalty BAND rather than a single ideal length. The researched
+        # top thirty in this niche run 8-14 words at a 66.5-character median;
+        # scoring a peak at 9 words made every one of them lose to a
+        # four-word plot label.
+        word_count = len(visible.split())
+        if 8 <= word_count <= 14:
+            clarity = 1.0
+        else:
+            miss = (8 - word_count) if word_count < 8 else (word_count - 14)
+            clarity = clamp(1.0 - miss / 8.0)
+        if length > 95:
             clarity *= 0.75
 
         emotional = clamp(len(toks & EMOTION_WORDS) / 2.0 + 0.25)
@@ -389,7 +456,8 @@ Return JSON: {{"titles": ["...", "..."]}}"""
                         - sum(1 for t in formulaic if lowered.startswith(t)) * 0.5)
 
         # Search relevance: shares vocabulary with the actual content.
-        search = clamp(token_overlap(text, f"{idea.topic} {script.script[:600]}") * 1.5)
+        search = clamp(token_overlap(visible,
+                                     f"{idea.topic} {script.script[:600]}") * 1.5)
 
         # Click potential: front-loaded interest.
         #
@@ -404,7 +472,7 @@ Return JSON: {{"titles": ["...", "..."]}}"""
         # Will Not Sail" opens on a character and a problem; "What happens
         # when" opens on nothing. The curiosity credit stays but is now
         # smaller than the specific one.
-        opening = text.split()[:3]
+        opening = visible.split()[:3]
         opening_toks = set(words(" ".join(opening).lower()))
         opens_specific = (bool(opening_toks & subject_words)
                           or any(c.isdigit() for w in opening for c in w))
@@ -427,6 +495,48 @@ Return JSON: {{"titles": ["...", "..."]}}"""
             risk += 0.22
             reasons.append("title vocabulary barely appears in the script")
 
+        # A STORY TITLE MUST NOT ANSWER ITS OWN QUESTION.
+        #
+        # This is the inversion that mattered. Search relevance and
+        # specificity both reward vocabulary the script uses - so for a
+        # story, the highest-scoring title was the one that described the
+        # ENDING. Measured: "आरव, गेंद और खाट का दूसरा सिरा" scored 75.8
+        # while a version that stops at the problem scored 50.2, and
+        # "दूसरा सिरा" IS the turn. The pipeline was picking spoilers on
+        # purpose, so writing better titles would have changed nothing.
+        #
+        # Words introduced in the last two scenes are the payoff. Words from
+        # the opening are the premise and stay fair game, which is what
+        # keeps the character's name and the object out of the penalty.
+        spoilers: set[str] = set()
+        if withhold:
+            scenes = script.scene_objects()
+            if len(scenes) >= 3:
+                # THE PAYOFF IS THE LAST ~40%, which is where the turn sits.
+                # The last two scenes alone were too narrow: in a 7-scene
+                # story the turn is scene 5, so "दूसरा सिरा" - literally the
+                # idea the story turns on - fell outside the window and the
+                # spoiler went unpunished.
+                tail = max(2, round(len(scenes) * 0.4))
+                opening = " ".join(s.narration for s in scenes[:-tail]).lower()
+                ending = " ".join(s.narration for s in scenes[-tail:]).lower()
+                # STEMS, not exact tokens. Hindi inflects: the narration says
+                # "दूसरे सिरे" and the title says "दूसरा सिरा", which never
+                # match as strings even though they are the same spoiler.
+                # A four-character prefix catches the inflection without
+                # colliding across unrelated words.
+                def stems(text: str) -> set[str]:
+                    # Three letters, because "far end" is the whole giveaway
+                    # in "the far end of the cot" and a four-letter floor
+                    # drops both words. STOPWORDS keeps the noise out.
+                    return {w[:4] for w in words(text)
+                            if len(w) >= 3 and w not in STOPWORDS}
+
+                spoiled = stems(ending) - stems(opening)
+                spoilers = {w for w in toks
+                            if len(w) >= 3 and w not in STOPWORDS
+                            and w[:4] in spoiled}
+
         parts = {
             "curiosity": curiosity, "clarity": clarity, "emotional_pull": emotional,
             "specificity": specificity, "novelty": novelty,
@@ -435,7 +545,17 @@ Return JSON: {{"titles": ["...", "..."]}}"""
         weights = {"curiosity": 0.20, "clarity": 0.16, "emotional_pull": 0.10,
                    "specificity": 0.14, "novelty": 0.10,
                    "search_relevance": 0.14, "click_potential": 0.16}
+        if withhold:
+            # A story is not found by matching its own words - it is chosen
+            # from a thumbnail and a promise. The weight moves to curiosity
+            # rather than being dropped, so the scale still tops out at 100.
+            weights = {**weights, "search_relevance": 0.06, "curiosity": 0.28}
         base = sum(parts[k] * weights[k] for k in parts)
+        if spoilers:
+            risk += min(0.25, 0.09 * len(spoilers))
+            reasons.append(
+                "gives away the ending: "
+                + ", ".join(sorted(spoilers)[:4]))
         score = clamp(base - risk + (AUTHORED_BONUS if authored else 0.0)) * 100
         return {"title": text, "score": round(score, 1), "authored": authored,
                 "breakdown": {k: round(v, 3) for k, v in parts.items()},
