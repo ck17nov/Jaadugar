@@ -44,3 +44,6 @@ android/.kotlin/
 # was committed by a "git add -A".
 *.bin
 _e2e*.py
+
+# Scratch probes written by audit subagents mid-investigation.
+_probe_*.py
