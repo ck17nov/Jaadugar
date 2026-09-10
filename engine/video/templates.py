@@ -267,6 +267,17 @@ TEMPLATES: dict[str, StyleTemplate] = {
         motion_cycle=["zoom_in", "zoom_out", "zoom_in", "zoom_out"],
         contrast=1.02, saturation=1.06,
         flashcards=True,
+        # Drawn, not photographed - like KIDS_STORY, and for stronger reasons.
+        #
+        # This was False while the style suffix asked for "bright friendly
+        # cartoon illustration" and `flashcards` asked for a letter drawn on a
+        # card, so the visual engine fetched STOCK PHOTOGRAPHY and then
+        # appended an art direction no photograph can honour. It also
+        # suppressed the character bible, which the pipeline skips entirely
+        # when prefer_ai is off - so the child on the flashcard changed
+        # appearance between scenes in the one group where a recurring face
+        # matters most.
+        prefer_ai=True,
         visual_style_suffix=("bright friendly cartoon illustration, rounded "
                              "shapes, soft primary colours, nothing scary"),
         music_mood="playful",
