@@ -130,10 +130,19 @@ def _gate(entry: BankEntry, existing: list[BankEntry], *, expect_group: str,
     for issue in variety.check_new(entry, existing):
         (fatal if issue.fatal else report.warnings).append(str(issue))
 
-    # ---- 4. human review ----
-    if require_review and not (entry.human or {}).get("reviewer"):
-        fatal.append(f"REJECT {entry.entry_id} [review] no human.reviewer - "
-                     f"an entry nobody has read must not publish")
+    # ---- 4. review ----
+    #
+    # The same test the claim gate uses, so "importable" and "claimable"
+    # cannot drift apart: a REJECTED entry counts as unapproved, not as
+    # reviewed.
+    from .bank_use import approved
+    if require_review and not approved(entry):
+        review = entry.human or {}
+        fatal.append(
+            f"REJECT {entry.entry_id} [review] not approved "
+            f"(reviewer={review.get('reviewer') or 'nobody'}, "
+            f"verdict={review.get('verdict') or 'none'}) - an entry nobody "
+            f"has approved must not publish")
 
     return fatal
 
@@ -150,8 +159,15 @@ def _load_existing(db) -> list[BankEntry]:
 
 
 def review(db, entry_id: str, *, reviewer: str, verdict: str = "approve",
-           element: str = "") -> bool:
-    """Record that a human read this entry.
+           element: str = "", kind: str = "human") -> bool:
+    """Record that someone read this entry.
+
+    `kind` is "human" or "machine", and it is not cosmetic. A model can
+    legitimately author and approve a batch, but writing a model's name into
+    a field called `human` would make the record claim a review that never
+    happened - and the reason the field exists at all is YouTube's rule about
+    AI content published "without adding the creator's original, authentic
+    insights". `bank_use.reviewed_by_human` is what reads it.
 
     `element` is the human-authored contribution - a hand-written closing
     line, a chosen refrain, an author's note. YouTube's prohibited bullet is
@@ -165,10 +181,11 @@ def review(db, entry_id: str, *, reviewer: str, verdict: str = "approve",
         return False
     entry = BankEntry.from_dict(json.loads(row["payload"]))
     entry.human = {"reviewer": reviewer, "verdict": verdict,
+                   "kind": "machine" if kind == "machine" else "human",
                    "element": element,
                    "reviewed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                                 time.gmtime())}
     db.save_bank_entry(entry)
     log_event("BANK", "entry reviewed", entry=entry_id, reviewer=reviewer,
-              verdict=verdict)
+              verdict=verdict, kind=entry.human["kind"])
     return True

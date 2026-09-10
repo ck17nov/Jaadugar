@@ -360,7 +360,9 @@ class Pipeline:
             self.db, group=group, language=request.language,
             video_format=request.video_format, job_id=job.job_id,
             topics=[request.niche], near_seconds=float(request.duration_seconds),
-            require_review=bool(self.cfg.get("bank.require_review", True)))
+            require_review=bool(self.cfg.get("bank.require_review", True)),
+            require_human=bool(self.cfg.get("bank.require_human_review",
+                                            False)))
         if claim is None:
             # Retry without the duration filter before giving up: a bank with
             # only 30-second stories in it should still serve a 45-second
@@ -369,7 +371,9 @@ class Pipeline:
                 self.db, group=group, language=request.language,
                 video_format=request.video_format, job_id=job.job_id,
                 topics=[request.niche], near_seconds=0.0,
-                require_review=bool(self.cfg.get("bank.require_review", True)))
+                require_review=bool(self.cfg.get("bank.require_review", True)),
+                require_human=bool(self.cfg.get("bank.require_human_review",
+                                                False)))
         if claim is None:
             counts = {f"{r['grp']}/{r['language']}/{r['video_format']}":
                       f"{r['unused']}/{r['total']}"

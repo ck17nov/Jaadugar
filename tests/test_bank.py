@@ -528,3 +528,102 @@ def test_every_beat_in_every_table_has_a_role_and_a_weight():
                 f"{shape}:{name} has no scene role"
             assert name in bank_prompt.BEAT_WEIGHTS, \
                 f"{shape}:{name} has no section weight"
+
+
+# ---------------------------------------------------------------------------
+# Approval: reviewed-and-rejected is not the same as reviewed
+# ---------------------------------------------------------------------------
+def test_a_rejected_entry_is_not_claimable(db):
+    """The hole this closes.
+
+    The gate tested `human.reviewer` for non-emptiness, so recording
+    "reviewer: chandan, verdict: reject" made an entry MORE claimable than
+    leaving it alone. A rejection is the one verdict that has to be
+    load-bearing.
+    """
+    entry = kids_entry()
+    entry.human = {"reviewer": "chandan", "verdict": "reject",
+                   "element": "the ending does not work"}
+    db.save_bank_entry(entry)
+    assert bank_use.approved(entry) is False
+    assert bank_use.claim(db, group="kids", language="en",
+                          video_format="SHORT", job_id="j") is None
+
+
+def test_an_approved_entry_is_claimable(db):
+    db.save_bank_entry(kids_entry())
+    assert bank_use.claim(db, group="kids", language="en",
+                          video_format="SHORT", job_id="j") is not None
+
+
+@pytest.mark.parametrize("verdict", ["approve", "approved", "OK", "yes", ""])
+def test_approval_synonyms(verdict):
+    """An empty verdict means approve - that was the old default."""
+    entry = kids_entry()
+    entry.human = {"reviewer": "someone", "verdict": verdict}
+    assert bank_use.approved(entry) is True
+
+
+@pytest.mark.parametrize("verdict", ["reject", "rejected", "no", "hold",
+                                     "needs work"])
+def test_anything_that_is_not_approval_blocks(verdict):
+    entry = kids_entry()
+    entry.human = {"reviewer": "someone", "verdict": verdict}
+    assert bank_use.approved(entry) is False
+
+
+def test_a_machine_review_is_recorded_as_a_machine_review(db):
+    """A model may author and approve a batch, but the record must say so.
+
+    Writing a model's name into a field called `human` would make the data
+    claim a review that never happened - and the reason the field exists is
+    YouTube's rule about AI content published "without adding the creator's
+    original, authentic insights".
+    """
+    entry = kids_entry()
+    entry.human = {}
+    db.save_bank_entry(entry)
+    assert bank_import.review(db, entry.entry_id, reviewer="claude-opus-5",
+                              kind="machine") is True
+
+    stored = bank.BankEntry.from_dict(
+        json.loads(db.bank_entries()[0]["payload"]))
+    assert stored.human["kind"] == "machine"
+    assert bank_use.approved(stored) is True
+    assert bank_use.reviewed_by_human(stored) is False
+
+
+def test_require_human_skips_a_machine_approved_entry(db):
+    """So a group where a person signing off matters can insist on it."""
+    entry = kids_entry()
+    entry.human = {"reviewer": "claude-opus-5", "verdict": "approve",
+                   "kind": "machine"}
+    db.save_bank_entry(entry)
+    assert bank_use.claim(db, group="kids", language="en",
+                          video_format="SHORT", job_id="j",
+                          require_human=True) is None
+
+
+def test_require_human_accepts_a_human_approved_entry(db):
+    db.save_bank_entry(kids_entry())          # the fixture records a human
+    assert bank_use.claim(db, group="kids", language="en",
+                          video_format="SHORT", job_id="j",
+                          require_human=True) is not None
+
+
+def test_an_unrecorded_kind_counts_as_human(db):
+    """Entries reviewed before `kind` existed were all reviewed by a person."""
+    entry = kids_entry()
+    entry.human = {"reviewer": "chandan", "verdict": "approve"}
+    assert bank_use.reviewed_by_human(entry) is True
+
+
+def test_import_and_claim_agree_on_what_approved_means(tmp_path, db):
+    """"Importable with --require-review" and "claimable" must not drift."""
+    entry = kids_entry()
+    entry.human = {"reviewer": "chandan", "verdict": "reject"}
+    path = _write(tmp_path, entry)
+    report = bank_import.import_file(path, db, expect_group="kids",
+                                     require_review=True)
+    assert report.stored == 0
+    assert any("[review]" in r and "reject" in r for r in report.rejected)

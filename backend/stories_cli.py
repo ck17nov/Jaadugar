@@ -159,6 +159,10 @@ def stories_review(
     note: str = typer.Option("", "--note",
                              help="what YOU contributed - a rewritten line, "
                                   "a chosen refrain, an author's note"),
+    kind: str = typer.Option("human", "--kind",
+                             help="human | machine. Use machine when a model "
+                                  "approved it, so the record does not claim "
+                                  "a review nobody did."),
 ) -> None:
     """Record that a human read an entry.
 
@@ -170,13 +174,15 @@ def stories_review(
     db = _db()
     try:
         ok = bank_import.review(db, entry_id, reviewer=by, verdict=verdict,
-                                element=note)
+                                element=note, kind=kind)
     finally:
         db.close()
     if not ok:
         console.print(f"[red]no entry[/red] {entry_id}")
         raise typer.Exit(code=2)
-    console.print(f"[green]{verdict}[/green] recorded for {entry_id} by {by}")
+    mark = "" if kind == "human" else "  [yellow](machine review)[/yellow]"
+    console.print(f"[green]{verdict}[/green] recorded for {entry_id} "
+                  f"by {by}{mark}")
 
 
 @stories_app.command("status")
@@ -184,10 +190,32 @@ def stories_status(
     group: str = typer.Option("", "--group", "-g"),
 ) -> None:
     """How many entries are left, per group / language / format."""
+    import json as _json
+
+    from engine.content.bank import BankEntry
+    from engine.content.bank_use import approved, reviewed_by_human
+
     db = _db()
     try:
         counts = db.bank_counts()
         rows = db.bank_entries(group=group, limit=5000) if group else []
+        # Per slot: how many are actually CLAIMABLE, and how many of those a
+        # person signed off. "unused" alone overstates what a render can take,
+        # because an unapproved entry is skipped.
+        ready: dict[str, list[int]] = {}
+        for row in db.bank_entries(limit=5000):
+            if row["used_at"]:
+                continue
+            try:
+                entry = BankEntry.from_dict(_json.loads(row["payload"]))
+            except Exception:                   # noqa: BLE001
+                continue
+            key = f'{row["grp"]}|{row["language"]}|{row["video_format"]}'
+            slot = ready.setdefault(key, [0, 0])
+            if approved(entry):
+                slot[0] += 1
+                if reviewed_by_human(entry):
+                    slot[1] += 1
     finally:
         db.close()
 
@@ -197,24 +225,40 @@ def stories_status(
         return
 
     table = Table(title="script bank")
-    for column in ("group", "language", "format", "unused", "total"):
+    for column in ("group", "language", "format", "ready", "of which human",
+                   "unused", "total"):
         table.add_column(column)
     for row in counts:
         if group and row["grp"] != group.lower():
             continue
         unused = int(row["unused"] or 0)
-        colour = "green" if unused > 5 else "yellow" if unused else "red"
+        key = f'{row["grp"]}|{row["language"]}|{row["video_format"]}'
+        claimable, by_human = ready.get(key, [0, 0])
+        colour = ("green" if claimable > 5 else
+                  "yellow" if claimable else "red")
         table.add_row(row["grp"], row["language"], row["video_format"],
-                      f"[{colour}]{unused}[/{colour}]", str(row["total"]))
+                      f"[{colour}]{claimable}[/{colour}]",
+                      str(by_human) if by_human else "[dim]0[/dim]",
+                      str(unused), str(row["total"]))
     console.print(table)
+    console.print("[dim]ready = unused AND approved, which is what a render "
+                  "will actually claim. \"of which human\" is how many a "
+                  "person signed off rather than a model.[/dim]")
 
     if rows:
         detail = Table(title=f"{group} entries")
-        for column in ("entry_id", "topic", "secs", "used", "title"):
+        for column in ("entry_id", "topic", "secs", "review", "used", "title"):
             detail.add_column(column)
         for row in rows[:40]:
+            try:
+                entry = BankEntry.from_dict(_json.loads(row["payload"]))
+                state = ("human" if reviewed_by_human(entry)
+                         else "machine" if approved(entry)
+                         else "[red]none[/red]")
+            except Exception:                   # noqa: BLE001
+                state = "[red]unreadable[/red]"
             detail.add_row(row["entry_id"], row["topic"] or "-",
-                           f"{row['est_seconds']:.0f}",
+                           f"{row['est_seconds']:.0f}", state,
                            "yes" if row["used_at"] else "-",
                            (row["title"] or "")[:48])
         console.print(detail)

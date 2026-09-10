@@ -70,15 +70,56 @@ class BankClaim:
                 "reviewer": (self.entry.human or {}).get("reviewer", "")}
 
 
+def approved(entry: BankEntry) -> bool:
+    """Has this entry been reviewed AND approved?
+
+    Reviewed and REJECTED is not the same as unreviewed, and the difference
+    was being lost: the old test was `human.reviewer` being non-empty, so
+    recording "reviewer: chandan, verdict: reject" made an entry MORE
+    claimable than leaving it alone. A rejection is the one verdict that has
+    to be load-bearing.
+    """
+    review = entry.human or {}
+    if not str(review.get("reviewer", "")).strip():
+        return False
+    # A blank or absent verdict is an approval, not a rejection: it means
+    # somebody was recorded as having read it and did not object. Only an
+    # explicit rejection blocks. Failing closed on blank would look safer and
+    # would in fact just make hand-edited records mysteriously unclaimable,
+    # since `review()` always writes a verdict.
+    verdict = str(review.get("verdict", "") or "approve").strip().lower()
+    return verdict in ("approve", "approved", "ok", "yes")
+
+
+def reviewed_by_human(entry: BankEntry) -> bool:
+    """True only when a PERSON approved it, not a model.
+
+    Scripts can be authored and approved by a model - which is a legitimate
+    way to fill the bank, and what the automated batch does - but the record
+    has to say so. Writing a model's name into a field called `human` would
+    make the data claim a review that never happened, and the whole reason
+    the field exists is YouTube's rule about AI content published "without
+    adding the creator's original, authentic insights".
+    """
+    return (approved(entry)
+            and str((entry.human or {}).get("kind", "human")).lower() == "human")
+
+
 def claim(db, *, group: str, language: str, video_format: str, job_id: str,
           topics: Sequence[str] = (), near_seconds: float = 0.0,
-          require_review: bool = True) -> BankClaim | None:
+          require_review: bool = True,
+          require_human: bool = False) -> BankClaim | None:
     """Take the next unused entry for this group, or None.
 
-    `require_review` skips entries nobody has read. On by default: the whole
-    argument for a bank over live generation is that a human saw it, and an
-    unreviewed entry has none of that benefit while having all of the
+    `require_review` skips entries nobody has approved. On by default: the
+    whole argument for a bank over live generation is that somebody read it,
+    and an unapproved entry has none of that benefit while having all of the
     permanence.
+
+    `require_human` narrows that to entries a PERSON approved. Off by default
+    because a model-authored, model-approved batch is a legitimate way to
+    fill the bank; turn it on (config `bank.require_human_review`) for
+    anything where a person signing off actually matters.
     """
     import json
 
@@ -98,11 +139,19 @@ def claim(db, *, group: str, language: str, video_format: str, job_id: str,
             log_event("BANK", "stored entry will not parse; leaving it claimed",
                       entry=row["entry_id"], error=str(exc)[:120])
             continue
-        if require_review and not (entry.human or {}).get("reviewer"):
-            log_event("BANK", "skipping an entry nobody has reviewed",
-                      entry=entry.entry_id)
+        if require_review and not approved(entry):
+            review = entry.human or {}
+            log_event("BANK", "skipping an entry that is not approved",
+                      entry=entry.entry_id,
+                      reviewer=str(review.get("reviewer", "")) or "nobody",
+                      verdict=str(review.get("verdict", "")) or "none")
             # Left claimed on purpose, same reasoning: releasing it would make
             # the next claim return the same entry forever.
+            continue
+        if require_human and not reviewed_by_human(entry):
+            log_event("BANK", "skipping an entry only a model approved",
+                      entry=entry.entry_id,
+                      kind=str((entry.human or {}).get("kind", "human")))
             continue
         log_event("BANK", "entry claimed", entry=entry.entry_id,
                   title=entry.title[:60], seconds=f"{entry.estimated_seconds:.0f}",
