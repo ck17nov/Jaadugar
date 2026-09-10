@@ -447,6 +447,10 @@ class CaptionEngine:
     # sentence is too long and shrinking is the honest response.
     MAX_BLOCK_LINES = 3
 
+    # The smallest the type may shrink to stay readable at phone size. Below
+    # this a caption is decoration rather than something anyone reads.
+    MIN_BLOCK_SCALE = 0.55
+
     @staticmethod
     def _break_lines(text: str, per_line: int) -> list[str]:
         """Split at word boundaries so no line exceeds `per_line`.
@@ -511,11 +515,34 @@ class CaptionEngine:
         lines = self._break_lines(text, per_line)
         if len(lines) <= self.MAX_BLOCK_LINES:
             return self._balance(text, lines, per_line), 1.0
-        # Re-wrap at the width that would fit in the allowed number of lines,
-        # and shrink the type by the same ratio so that width is real.
-        scale = max(0.62, self.MAX_BLOCK_LINES / len(lines))
-        wider = max(8, int(per_line / scale))
-        return self._break_lines(text, wider)[:self.MAX_BLOCK_LINES], scale
+
+        # Find the narrowest line width that fits inside the line budget, and
+        # shrink the type by exactly that ratio so the width is real.
+        #
+        # Searched rather than computed. The first version estimated the width
+        # from the line count and then truncated to the budget with a slice -
+        # which dropped the last word of the finance disclaimer, caught by
+        # test_nothing_is_ever_dropped. An estimate that is even slightly
+        # short silently loses text, so the width has to be one that has been
+        # checked.
+        widest = max(8, int(per_line / self.MIN_BLOCK_SCALE))
+        for width in range(per_line + 1, widest + 1):
+            candidate = self._break_lines(text, width)
+            if len(candidate) <= self.MAX_BLOCK_LINES:
+                scale = per_line / width
+                return self._balance(text, candidate, width), scale
+
+        # Legibly impossible: this sentence cannot fit three lines of a 1080
+        # frame at any readable size. Take the extra LINE rather than losing
+        # the end of the caption - an over-tall caption is recoverable, a
+        # truncated one is not, and the bank prompt caps caption length for
+        # exactly this reason.
+        lines = self._break_lines(text, widest)
+        log_event("CAPTION", "caption is too long for the line budget",
+                  chars=len(text), lines=len(lines),
+                  budget=self.MAX_BLOCK_LINES,
+                  note="rendering it taller rather than cutting it")
+        return self._balance(text, lines, widest), self.MIN_BLOCK_SCALE
 
     def _chars_per_line(self, width: int, height: int,
                         language: str = "", style: str = "") -> int:

@@ -43,6 +43,16 @@ SKIP_WORDS = {
     "than", "then", "when", "while", "into", "about", "over", "after",
     "before", "if", "no", "not", "all", "more", "most", "some", "any",
     "there", "here", "up", "out", "down", "off", "has", "have", "had",
+    # HINDI FUNCTION WORDS. This set was English-only, so a Hindi title never
+    # split into runs at all - the whole title was one run and the four-word
+    # cap became a blind truncation. Hindi puts its postpositions AFTER the
+    # noun, so cutting at four words reliably ended ON one: "मीरा और छत पर
+    # रखी दादी की चप्पल" became "मीरा और छत पर" - "Meera and roof on",
+    # which drops the entire subject of the title.
+    "का", "के", "की", "को", "में", "पर", "से", "ने", "है", "हैं", "था",
+    "थी", "थे", "और", "या", "भी", "ही", "तो", "कि", "यह", "वह", "ये",
+    "वे", "एक", "लिए", "साथ", "बाद", "पहले", "जब", "तब", "अगर", "नहीं",
+    "हुआ", "हुई", "हुए", "करना", "करने", "किया",
 }
 
 
@@ -55,13 +65,33 @@ class ThumbnailVariant:
     text: str = ""
 
 
+def _is_devanagari(text: str) -> bool:
+    """True when most letters are Devanagari.
+
+    "Most" rather than "any", so an English headline containing one Hindi
+    word does not switch strategies.
+    """
+    letters = [ch for ch in (text or "") if ch.isalpha()]
+    if not letters:
+        return False
+    hits = sum(1 for ch in letters if "ऀ" <= ch <= "ॿ")
+    return hits > len(letters) / 2
+
+
 def _headline(title: str, max_words: int = 4) -> str:
     """Reduce a title to a few words that still read as a phrase.
 
-    Picking the "most specific" words independently produces word salad
-    ("The First Light Of A Dying Star Was Finally Caught" -> "FIRST FINALLY
-    CAUGHT").  Taking the longest CONTIGUOUS run of content words preserves
-    meaning: the same title yields "FIRST LIGHT".
+    Two strategies, because English and Hindi put their function words in
+    different places and one rule cannot serve both.
+
+    ENGLISH: the longest CONTIGUOUS run of content words. Picking the "most
+    specific" words independently produces word salad ("The First Light Of A
+    Dying Star Was Finally Caught" -> "FIRST FINALLY CAUGHT"); the run rule
+    yields "FIRST LIGHT".
+
+    HINDI: the TAIL, trimmed of function words. See the comment at the branch
+    - Hindi is head-final and its postpositions sit inside the noun phrase,
+    so the run rule takes it apart rather than preserving it.
     """
     # `\w` DROPS COMBINING MARKS, and that silently destroyed every Hindi
     # headline. Python's \w matches Devanagari base letters (category Lo) but
@@ -81,6 +111,32 @@ def _headline(title: str, max_words: int = 4) -> str:
     ).split()
     if not raw:
         return ""
+
+    # HINDI IS HEAD-FINAL, so it needs the opposite strategy.
+    #
+    # The contiguous-run rule below assumes function words sit BETWEEN
+    # phrases, which is true of English ("The Truth About Animals" splits at
+    # "the" and "about"). Hindi puts its postposition INSIDE the noun phrase:
+    # "कागज़ की नाव" is "paper boat" as one unit, and splitting on की shreds
+    # it into two one-word runs, from which the longest-run rule returned just
+    # "कागज़" - "paper".
+    #
+    # Hindi also puts the head noun LAST, so the informative words are at the
+    # end rather than the front. Taking the tail and trimming function words
+    # off both edges gets the actual subject: "मीरा और छत पर रखी दादी की
+    # चप्पल" -> "रखी दादी की चप्पल", and "किरन और कागज़ की नाव" -> "कागज़ की
+    # नाव".
+    if _is_devanagari(" ".join(raw)):
+        tail = raw[-max_words:]
+        while tail and tail[0].lower() in SKIP_WORDS:
+            tail = tail[1:]
+        while len(tail) > 1 and tail[-1].lower() in SKIP_WORDS:
+            tail = tail[:-1]
+        # Everything was a function word: fall back to the longest word, which
+        # in a head-final language is usually the head noun.
+        if not tail:
+            tail = [max(raw, key=len)]
+        return " ".join(tail)
 
     # Split into runs of consecutive content words.
     runs: list[list[str]] = []
@@ -133,6 +189,17 @@ _WEAK_ENDINGS = {
     "nobody", "everyone", "someone", "anyone", "everybody", "anybody",
     "most", "every", "each", "both", "either", "neither", "another",
     "such", "same", "own", "other", "others",
+    # Interrogatives and determiners that promise a noun and then do not
+    # deliver one. "PPF vs NPS: Which One Actually Locks Your Money Longer?"
+    # truncated to "PPF VS NPS WHICH", which reads as a sentence cut off
+    # mid-word.
+    "which", "what", "who", "whose", "whom", "how", "why", "where",
+    "one", "ones", "vs", "versus",
+    # Hindi postpositions and conjunctions, for the same reason - and these
+    # matter more, because Hindi word order puts them at exactly the position
+    # a four-word cap lands on.
+    "और", "या", "पर", "की", "का", "के", "को", "में", "से", "ने", "तो",
+    "भी", "ही", "कि", "लिए", "साथ",
 }
 
 
@@ -263,17 +330,39 @@ def _frame_interest(path: Path) -> float:
     return clamp(detail / 24.0) * 0.7 + clamp(exposure) * 0.3
 
 
-def _subject_box(img: Image.Image, zoom: float = 2.1) -> tuple[int, int, int, int]:
-    """A crop `zoom` times tighter, centred on the busiest region.
+# How much tighter the thumbnail crop is than the frame.
+#
+# WAS 2.1, AND THAT WAS TOO MUCH. The 2.1 came from measuring PHOTOGRAPHIC
+# keyframes, which were wide establishing shots with a face 5-14% of frame
+# width - 6-17 pixels at the ~120px an impression is served at. But the
+# visuals are now AI illustrations generated from authored briefs like
+# "Meera, a six-year-old girl with two plaits, looking up a narrow
+# staircase", and the generator already frames its subject. Cropping to 48%
+# of a well-composed illustration produced a thumbnail of a forearm and some
+# steps, measured, from a real 1920x1080 render.
+#
+# 1.3 still tightens a loose frame without being able to lose the subject
+# entirely, and it upscales by 1.3 rather than 2.1, which keeps the result
+# sharp.
+DEFAULT_ZOOM = 1.3
 
-    THE single largest compositional defect measured: every keyframe examined
-    was a wide establishing shot with a face 5-14% of frame width, which is
-    6-17 PIXELS at the ~120px width most impressions are served at. Nobody
-    can see a face that size, so the frame has to be cropped in.
+# How strongly the crop is pulled back toward frame centre.
+#
+# Edge energy is the wrong signal for finding a person and there is no better
+# one available without a face detector: fabric folds, bangles and brickwork
+# are all high-energy while a face is smooth, so the centroid points AWAY
+# from the subject. It is still useful for "which half of the frame has the
+# content", which is all it is now trusted for.
+CENTRE_PULL = 0.55
+
+
+def _subject_box(img: Image.Image,
+                 zoom: float = DEFAULT_ZOOM) -> tuple[int, int, int, int]:
+    """A crop `zoom` times tighter, biased toward the busier region.
 
     The centroid is edge energy over a coarse grid rather than a face
     detector, because a face detector means opencv and there is none in
-    requirements.txt.
+    requirements.txt - see CENTRE_PULL for why it is only trusted weakly.
     """
     grey = img.convert("L").filter(ImageFilter.FIND_EDGES)
     from PIL import ImageStat
@@ -293,6 +382,11 @@ def _subject_box(img: Image.Image, zoom: float = 2.1) -> tuple[int, int, int, in
     cx = sum(e * (gx + 0.5) for e, gx, _ in cells) / total * w / grid
     cy = sum(e * (gy + 0.5) for e, _, gy in cells) / total * h / grid
     cy = cy * 0.88
+    # Pull back toward centre. Without this the energy centroid can sit in a
+    # corner - a patch of textured wall outscores a face - and the crop then
+    # contains none of the subject.
+    cx = cx * (1.0 - CENTRE_PULL) + (w / 2) * CENTRE_PULL
+    cy = cy * (1.0 - CENTRE_PULL) + (h * 0.45) * CENTRE_PULL
 
     new_w, new_h = int(w / zoom), int(h / zoom)
     left = int(clamp((cx - new_w / 2) / max(w - new_w, 1)) * (w - new_w))
@@ -301,7 +395,7 @@ def _subject_box(img: Image.Image, zoom: float = 2.1) -> tuple[int, int, int, in
 
 
 def _base_from_video(video: Path, out: Path, at_seconds: float = 0.6,
-                    *, zoom: float = 2.1) -> Path | None:
+                    *, zoom: float = DEFAULT_ZOOM) -> Path | None:
     """Choose the best keyframe and crop in on its subject.
 
     This took a FIXED frame at 0.6 seconds, which on an illustrated video is

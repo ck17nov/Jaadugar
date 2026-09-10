@@ -321,12 +321,33 @@ _HINTS: dict[str, tuple[str, ...]] = {
                      "confession", "horror", "scary", "creepypasta"),
     "TECH_NEWS": ("tech", "technology", "ai", "gadget", "software", "startup",
                   "news", "laptop", "pc", "youtube", "tools"),
+    # "explained" and "explainer" deliberately NOT here.
+    #
+    # They were in this list AND in EDUCATIONAL's, so they discriminated
+    # nothing - and because _PRIORITY puts SCIENCE_EXPLAINER first, every tie
+    # went to it. Measured: "mutual funds explained" selected
+    # SCIENCE_EXPLAINER, so a finance video got the science template's look
+    # and pacing. Almost every explainer in every niche has "explained" in
+    # its topic, which is exactly why it carries no subject information.
     "SCIENCE_EXPLAINER": ("science", "space", "physics", "biology", "astronomy",
-                          "cosmos", "quantum", "explainer", "explained"),
+                          "cosmos", "quantum", "chemistry", "experiment",
+                          "experiments"),
     "MOTIVATIONAL": ("motivation", "motivational", "discipline", "mindset",
                      "success", "inspire", "productivity"),
     "EDUCATIONAL": ("education", "learn", "learning", "tutorial", "how to",
-                    "guide", "study", "history", "finance", "health",
+                    "guide", "study", "history", "health",
+                    # The finance vocabulary, for the same reason it was
+                    # added to the niche family: "finance" alone matched none
+                    # of the channel's actual topics. EDUCATIONAL is the right
+                    # home - a money explainer wants slower pacing and
+                    # one-idea-per-frame captions, not a news template's
+                    # hard cuts.
+                    "finance", "financial", "money", "invest", "investing",
+                    "investment", "mutual", "fund", "funds", "sip", "stock",
+                    "stocks", "tax", "insurance", "loan", "emi", "ppf",
+                    "nps", "savings", "budget", "credit", "retirement",
+                    "inflation", "interest", "excel", "office",
+                    "spreadsheet",
                     # The programming and database niches belong here rather
                     # than with TECH_NEWS: a SQL walkthrough is a lesson, and
                     # wants EDUCATIONAL's slower pacing and one-idea-per-frame
