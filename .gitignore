@@ -47,3 +47,10 @@ _e2e*.py
 
 # Scratch probes written by audit subagents mid-investigation.
 _probe_*.py
+_render_bank.py
+_verify_*.py
+_genprompts.py
+_dis_check.py
+_thumb*.py
+_peek.py
+_bank_write.py
