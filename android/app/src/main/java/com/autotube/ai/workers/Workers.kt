@@ -57,6 +57,12 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
             return if (runAttemptCount < MAX_ATTEMPTS) Result.retry() else Result.success()
         }
 
+        // Keep the local automation rows warm. AutomationWorker rebuilds each
+        // recurring request from its Room row, and the schema migration is
+        // destructive, so without this an upgrade leaves the table empty
+        // until the user happens to open the Schedule tab.
+        runCatching { repo.syncAutomations() }
+
         notifyIfNeeded(app)
         repo.prune()
         return Result.success()
@@ -89,7 +95,15 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
                 id = NOTIF_APPROVAL,
             )
         }
-        if (failures > 0) {
+        // Change detection here too. Without it this fired on every
+        // 15-minute sync for as long as a single failed job existed - the
+        // exact bug that was fixed for the approval branch above, repeated
+        // verbatim underneath it. A job that failed once produced ninety-six
+        // identical alerts a day.
+        val lastFailures = app.secureStore.lastFailureCount
+        app.secureStore.lastFailureCount = failures
+
+        if (failures > 0 && failures > lastFailures) {
             postNotification(
                 app,
                 title = "Automation problem",
@@ -127,8 +141,32 @@ class AutomationWorker(appContext: Context, params: WorkerParameters) :
                 return Result.success()
             }
         }
-        val automation = automationId?.let { app.database.automations().byId(it) }
-        // Self-cancel when the automation is gone or switched off.
+        var automation = automationId?.let { app.database.automations().byId(it) }
+
+        // A MISSING ROW IS NOT PROOF THE AUTOMATION WAS DELETED.
+        //
+        // Room's migration is destructive, so an app upgrade empties this
+        // table - and the self-cancel below then killed every recurring
+        // automation the user had, permanently and without a word. Ask the
+        // backend, which is where automations actually live, before
+        // concluding anything.
+        if (automation == null && automationId != null) {
+            val restored = app.repository.syncAutomations()
+            if (restored.isFailure) {
+                // Could not reach the backend: "unreachable" must never be
+                // read as "deleted". Retry, and leave the schedule alone.
+                return if (runAttemptCount < 3) Result.retry() else Result.success()
+            }
+            automation = app.database.automations().byId(automationId)
+            if (automation != null) {
+                app.repository.logEvent(
+                    "AUTOMATION",
+                    "restored this automation from the backend after an " +
+                        "upgrade emptied the local table")
+            }
+        }
+
+        // Self-cancel when the automation is genuinely gone or switched off.
         //
         // Returning success alone left the periodic work in place, so a
         // stopped daily automation went on waking the phone every 24 hours
@@ -162,6 +200,7 @@ class AutomationWorker(appContext: Context, params: WorkerParameters) :
             uploadTime = automation.uploadTime,
             timezone = automation.timezone,
             madeForKids = automation.madeForKids,
+            minQualityScore = automation.minQualityScore,
         )
         val result = app.repository.startAutomation(request)
         return if (result.isSuccess) {
@@ -338,6 +377,9 @@ fun postNotification(context: Context, title: String, body: String, id: Int) {
         .setContentIntent(pending)
         .setAutoCancel(true)
         .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        // An updated count reuses the same notification id, so it should
+        // refresh the text silently rather than buzz the phone again.
+        .setOnlyAlertOnce(true)
         .build()
     runCatching {
         NotificationManagerCompat.from(context).notify(id, notification)

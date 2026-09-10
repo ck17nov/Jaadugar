@@ -311,6 +311,21 @@ fun LabeledDropdown(
     LaunchedEffect(value) {
         if (valueIsCustom && value != customText) customText = value
     }
+
+    // FOLLOW THE VALUE BACK OUT OF "Other".
+    //
+    // The caller can replace `value` with one of the listed options - the
+    // Create screen does exactly that when the channel group changes, to drop
+    // a topic that does not belong to the new group. `otherPicked` is private
+    // state here, so it stayed true: the field went on showing "Other topic…"
+    // with the old typed text underneath while the value that would be
+    // submitted was the group's first topic. Nothing on screen said so.
+    LaunchedEffect(value) {
+        if (otherPicked && value.isNotBlank() && value in options) {
+            otherPicked = false
+            customText = ""
+        }
+    }
     val shown = when {
         isOther -> otherLabel
         // Blank is only "nothing selected" when blank is not itself a choice.

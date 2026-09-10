@@ -281,3 +281,85 @@ def test_a_stage_error_is_stamped_even_when_the_stage_did_not(pipe,
     job = pipe.db.list_jobs(limit=1)[0]
     assert job.status == JobStatus.FAILED.value
     assert "trend feed died" in job.error
+
+
+# ---------------------------------------------------------------------------
+# The claim can change the request, so the profile is built after it
+# ---------------------------------------------------------------------------
+def test_a_kids_entry_claimed_by_a_custom_topic_gets_the_kids_profile(
+        pipe, monkeypatch):
+    """The classification reached the upload; the profile never heard.
+
+    `stage_bank` tightens `made_for_kids` when the claimed entry is
+    child-directed, and the NicheProfile used to be built before the claim -
+    so the video was flagged for children and rendered as general-audience
+    education: no kids restrictions on the image prompts, karaoke captions
+    instead of blocks, adult pacing.
+    """
+    from tests.test_bank import kids_entry
+
+    # GROUP-WIDE, which is what a custom topic can claim: a topic-less entry
+    # counts towards every topic in its group. A topic-SCOPED entry cannot be
+    # claimed by a custom topic at all, and failing there is correct - the
+    # script would be about a different subject.
+    entry = kids_entry()
+    entry.topic = ""
+    entry.recompute()
+    pipe.db.save_bank_entry(entry)
+    request = AutomationRequest(
+        niche="a small boy and a kite on the roof",   # custom, not listed
+        niche_group="kids", script_source="bank",
+        made_for_kids=False, video_format="SHORT", language="en")
+
+    seen: dict = {}
+
+    def capture(job, req, profile, *args, **kwargs):
+        seen["made_for_kids"] = profile.made_for_kids
+        seen["restrictions"] = list(profile.restrictions)
+        raise pipeline_module.PipelineError("research", "stopped on purpose")
+
+    monkeypatch.setattr(pipe, "stage_research", capture)
+    with pytest.raises(pipeline_module.PipelineError):
+        pipe.run(request, skip_preflight=True)
+
+    assert seen["made_for_kids"] is True
+    assert seen["restrictions"], "the kids profile carries restrictions"
+
+
+def test_a_live_request_still_gets_the_profile_it_asked_for(pipe, monkeypatch):
+    """Moving the profile build must not change the live path."""
+    seen: dict = {}
+
+    def capture(job, req, profile, *args, **kwargs):
+        seen["name"] = profile.name
+        seen["made_for_kids"] = profile.made_for_kids
+        raise pipeline_module.PipelineError("research", "stopped on purpose")
+
+    monkeypatch.setattr(pipe, "stage_research", capture)
+    with pytest.raises(pipeline_module.PipelineError):
+        pipe.run(AutomationRequest(niche="personal finance",
+                                   made_for_kids=False), skip_preflight=True)
+
+    assert seen["name"] == "personal finance"
+    assert seen["made_for_kids"] is False
+
+
+def test_the_profile_is_written_to_the_job_directory(pipe, monkeypatch):
+    """It is the record of how the video was built; moving it must not lose it."""
+    import json
+    from pathlib import Path
+
+    def stop(job, req, profile, *args, **kwargs):
+        raise pipeline_module.PipelineError("research", "stopped on purpose")
+
+    monkeypatch.setattr(pipe, "stage_research", stop)
+    with pytest.raises(pipeline_module.PipelineError):
+        pipe.run(AutomationRequest(niche="personal finance"),
+                 skip_preflight=True)
+
+    job = pipe.db.list_jobs(limit=1)[0]
+    written = Path(job.dir) / "niche_profile.json"
+    assert written.exists()
+    body = json.loads(written.read_text(encoding="utf-8"))
+    assert body["name"] == "personal finance"
+    assert body["style_template"]["name"]

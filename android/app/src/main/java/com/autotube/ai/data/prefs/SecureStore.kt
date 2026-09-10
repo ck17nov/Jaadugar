@@ -202,6 +202,11 @@ class SecureStore(context: Context) {
         get() = prefs.getInt(KEY_LAST_APPROVALS, 0)
         set(value) = prefs.edit().putInt(KEY_LAST_APPROVALS, value).apply()
 
+    /** Same purpose for failures: alert on a CHANGE, not on a non-zero count. */
+    var lastFailureCount: Int
+        get() = prefs.getInt(KEY_LAST_FAILURES, 0)
+        set(value) = prefs.edit().putInt(KEY_LAST_FAILURES, value).apply()
+
     var onboarded: Boolean
         get() = prefs.getBoolean(KEY_ONBOARDED, false)
         set(value) = prefs.edit().putBoolean(KEY_ONBOARDED, value).apply()
@@ -237,5 +242,6 @@ class SecureStore(context: Context) {
         private const val KEY_CHANNEL_ID = "channel_id"
         private const val KEY_ONBOARDED = "onboarded"
         private const val KEY_LAST_APPROVALS = "last_approval_count"
+        private const val KEY_LAST_FAILURES = "last_failure_count"
     }
 }

@@ -57,6 +57,13 @@ data class AutomationRequestDto(
     // topic cannot be matched back to a group by name, and without it the
     // video publishes to the default channel.
     @SerialName("niche_group") val nicheGroup: String = "",
+    // The Settings threshold. The backend and the engine have honoured a
+    // per-automation minimum all along; the app just never sent one, so the
+    // "Minimum quality score to publish" slider was written to device
+    // preferences and read by nothing - a video scoring 84 published with the
+    // slider at 95, and one scoring 72 stayed blocked with it at 50.
+    // 0 means "use the backend's configured minimum".
+    @SerialName("min_quality_score") val minQualityScore: Int = 0,
 )
 
 @Serializable
@@ -244,6 +251,12 @@ data class NichePreviewDto(
     val profile: NicheProfileDto = NicheProfileDto(),
     @SerialName("kids_niche_detected") val kidsNicheDetected: Boolean = false,
     @SerialName("requires_kids_confirmation") val requiresKidsConfirmation: Boolean = false,
+    @SerialName("child_directed_group") val childDirectedGroup: Boolean = false,
+    @SerialName("style_template") val styleTemplate: String = "",
+    /** "" until the backend answers. "none" means no burnt-in captions. */
+    @SerialName("caption_style") val captionStyle: String = "",
+    /** The language captions will be in, or "" when there will be none. */
+    @SerialName("caption_language") val captionLanguage: String = "",
 )
 
 @Serializable
@@ -325,6 +338,21 @@ data class AutomationSummaryDto(
     @SerialName("channel_is_default") val channelIsDefault: Boolean = false,
     val group: String = "",
     @SerialName("group_label") val groupLabel: String = "",
+    // EVERYTHING NEEDED TO REBUILD THE REQUEST, so the local Room row can be
+    // restored from the backend. Room's migration is destructive, so without
+    // these an upgrade left every recurring automation with no row - and
+    // AutomationWorker cancels its own schedule when the row is missing.
+    val audience: String = "",
+    val style: String = "",
+    @SerialName("duration_seconds") val durationSeconds: Int = 0,
+    @SerialName("voice_gender") val voiceGender: String = "",
+    @SerialName("caption_language") val captionLanguage: String = "",
+    @SerialName("caption_style") val captionStyle: String = "",
+    @SerialName("publish_mode") val publishMode: String = "scheduled",
+    @SerialName("script_source") val scriptSource: String = "live",
+    @SerialName("niche_group") val nicheGroup: String = "",
+    val mode: String = "",
+    @SerialName("min_quality_score") val minQualityScore: Int = 0,
 )
 
 @Serializable
@@ -420,6 +448,11 @@ data class BankQueryDto(
     val ready: Int = 0,
     @SerialName("human_reviewed") val humanReviewed: Int = 0,
     val unused: Int = 0,
+    // Which group the count was actually taken over. A blank group is
+    // resolved from the topic by the backend, the same way the claim
+    // resolves it, so this can differ from what was asked for - and saying
+    // "3 ready in Technical" beats implying every group was searched.
+    @SerialName("resolved_group") val resolvedGroup: String = "",
 )
 
 @Serializable

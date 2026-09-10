@@ -56,6 +56,15 @@ import kotlinx.coroutines.delay
 // scrolling list, and every extra option is a topic whose template, pacing and
 // visual style nobody has tuned. These are grouped so related topics sit
 // together in the list.
+// THE OFFLINE FALLBACK ONLY. The Topic dropdown reads the live catalogue
+// from /niche-groups; this is what it shows when the backend has not answered
+// yet or cannot be reached.
+//
+// It used to be the DEFAULT source, which made it a duplicate nobody
+// maintained: when AI, science and code were folded into Technical and four
+// topics were added, this list kept the old shape - so the four newly added
+// topics were missing from the list the user sees first. Keep it in step with
+// engine/core/groups.py.
 val NICHE_OPTIONS = listOf(
     // Kids
     "kids bedtime stories",
@@ -70,17 +79,18 @@ val NICHE_OPTIONS = listOf(
     // Finance
     "personal finance",
     "finance news",
-    // Tech
+    // Technical - AI, science and code all live here now
     "youtube tips and growth",
     "pc and laptop tech",
-    // AI
+    "new phone and laptop launches",
+    "phone and laptop buying advice",
+    "excel tips and tricks",
+    "ms office tips and tricks",
     "AI explained",
     "AI news",
     "AI tools and courses",
-    // Science
     "science facts",
     "science experiments",
-    // IT / programming
     "sql and databases",
     "programming and coding",
     "developer tools",
@@ -173,6 +183,9 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     val channels by vm.channels.collectAsStateWithLifecycle()
     val groups by vm.groups.collectAsStateWithLifecycle()
     val bankReady by vm.bankReady.collectAsStateWithLifecycle()
+    // Which group that count was taken over - not always the one
+    // asked for, because a blank group is resolved from the topic.
+    val bankGroup by vm.bankGroup.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
 
@@ -231,7 +244,19 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     // question asks: who is the video for. An under-13 audience is
     // child-directed whatever else is selected, which is why the toggle below
     // is disabled rather than merely pre-set in that case.
-    val nicheIsKids = niche.trim().lowercase() in KIDS_NICHES
+    // THE CHOSEN GROUP COUNTS, not only the topic string.
+    //
+    // KIDS_NICHES is a list of the nine LISTED kids topics, so a custom topic
+    // under the Kids group - "story of the thirsty crow" - was not
+    // child-directed as far as this screen was concerned. Set the age band to
+    // "all ages", which is a natural thing to do on a kids channel, and the
+    // effect below then cleared madeForKids: the POST said made_for_kids
+    // =false, the backend's niche-string gate agreed, and a children's story
+    // published to the kids channel as general-audience content with none of
+    // the kids safety profile. `child_directed` arrives per group from
+    // /niche-groups and every other part of the system honours it.
+    val groupIsKids = groups.firstOrNull { it.key == groupKey }?.childDirected == true
+    val nicheIsKids = niche.trim().lowercase() in KIDS_NICHES || groupIsKids
     val audienceIsChildren = audience in CHILD_AUDIENCES
     val kidsRequired = nicheIsKids || audienceIsChildren
     LaunchedEffect(nicheIsKids, audienceIsChildren) {
@@ -253,10 +278,13 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     // backend": /niche/preview answers 200 in under a second and survives a
     // 10-call burst. The transport was the problem - see RetryIdempotent in
     // ApiClient.)
-    LaunchedEffect(niche, audience, style, lengthSeconds) {
+    LaunchedEffect(niche, audience, style, lengthSeconds, groupKey, language,
+                   isShort) {
         if (niche.trim().length >= 3) {
             delay(600)
-            vm.previewNiche(niche.trim(), audience, style, lengthSeconds)
+            vm.previewNiche(niche.trim(), audience, style, lengthSeconds,
+                            groupKey, language,
+                            if (isShort) "SHORT" else "LONGFORM")
         }
     }
 
@@ -328,10 +356,21 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                 },
                 onValueChange = { picked ->
                     groupKey = picked
-                    // Drop a topic that does not belong to the new group,
+                    // Drop a topic that belongs to a DIFFERENT group's list,
                     // rather than leaving a mismatched pair on screen.
+                    //
+                    // A CUSTOM topic is kept. The group chooses the channel,
+                    // not the subject, so free text belongs to whichever
+                    // group the operator picked - and replacing it silently
+                    // was worse than a mismatch: the typed topic was gone,
+                    // the group's first topic was submitted in its place, and
+                    // the screen still showed the text that had been
+                    // discarded.
                     val allowed = groups.firstOrNull { it.key == picked }?.topics
-                    if (allowed != null && niche !in allowed) {
+                    val listedElsewhere = groups.any { g ->
+                        g.key != picked && niche in g.topics
+                    }
+                    if (allowed != null && niche !in allowed && listedElsewhere) {
                         niche = allowed.firstOrNull() ?: niche
                     }
                 },
@@ -360,7 +399,17 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
             // Narrowed to the chosen group, or everything when none is chosen
             // or the backend has not answered yet.
             value = niche,
-            options = selectedGroup?.topics ?: NICHE_OPTIONS,
+            // THE BACKEND'S CATALOGUE, not a hand-kept copy of it.
+            //
+            // NICHE_OPTIONS was a duplicate of the topic list that nobody
+            // updated when the groups were merged, and it is what this
+            // dropdown showed whenever no group was selected - the default
+            // state. So the four topics that had just been added (Excel, MS
+            // Office, phone and laptop launches, buying advice) were missing
+            // from the list the user looks at first. It survives only as the
+            // offline fallback.
+            options = selectedGroup?.topics
+                ?: groups.flatMap { it.topics }.distinct().ifEmpty { NICHE_OPTIONS },
             allowOther = true,
             otherLabel = "Other topic…",
             // Selecting "Other topic…" used to appear to do nothing at all -
@@ -405,7 +454,14 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                     ready == 0 ->
                         "No reviewed scripts left, so each video will be " +
                             "written fresh until you import a batch."
-                    else -> "$ready reviewed script(s) ready. Each video uses " +
+                    // Names the group the count was taken over. The backend
+                    // resolves a blank group from the topic - the same way
+                    // the claim resolves it - so "3 ready" can mean "3 in
+                    // Technical" rather than "3 anywhere".
+                    else -> "$ready reviewed script(s) ready" +
+                        (bankGroup.takeIf { it.isNotBlank() && groupKey.isBlank() }
+                            ?.let { " in ${'$'}it" } ?: "") +
+                        ". Each video uses " +
                         "the next one and its own length, so the duration " +
                         "above becomes a filter rather than a target."
                 },
@@ -496,9 +552,27 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
         // or block reads better for this kind of video. Two fewer things to
         // get wrong per automation, and they can no longer disagree with what
         // the script bank stores.
+        // SAY WHAT WILL ACTUALLY HAPPEN, which is not always "captions in
+        // the other language". One template - the long-form illustrated
+        // explainer - deliberately burns none in, and this line promised
+        // them anyway: a long-form storytelling video shipped with no
+        // captions on screen while the app had said they would be in Hindi.
+        // The backend derives the style, so the backend is asked.
+        val derivedCaptionStyle = preview?.captionStyle ?: ""
         Text(
-            "Captions: ${captionNoteFor(language)}. Style is chosen " +
-                "automatically for this niche.",
+            when {
+                derivedCaptionStyle == "none" ->
+                    "Captions: none burned in - this look reads better " +
+                        "clean. A ${captionNoteFor(language).substringBefore(' ')} " +
+                        "subtitle track is still uploaded with the video."
+                derivedCaptionStyle.isNotBlank() ->
+                    "Captions: ${captionNoteFor(language)}, " +
+                        "$derivedCaptionStyle style - chosen automatically " +
+                        "for this niche."
+                else ->
+                    "Captions: ${captionNoteFor(language)}. Style is chosen " +
+                        "automatically for this niche."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -794,6 +868,11 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                         publishMode = publishMode,
                         timezone = vm.store.timezone,
                         madeForKids = madeForKids,
+                        // The Settings threshold, which was written to device
+                        // preferences and then sent to nobody - so the slider
+                        // and its explanatory sentence did nothing in either
+                        // direction.
+                        minQualityScore = vm.store.qualityThreshold,
                     )
                 )
             },

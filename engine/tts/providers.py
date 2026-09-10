@@ -237,9 +237,14 @@ class GTTSProvider:
     # changing the speaking rate is a silent no-op here, which is
     # how a 45s request shipped as 63s.
     supports_rate = False
-    _LANG = {"en": "en", "en-IN": "en", "hi": "hi", "ta": "ta", "te": "te",
-             "bn": "bn", "mr": "mr", "es": "es", "fr": "fr", "de": "de",
-             "pt": "pt", "ar": "ar", "id": "id", "ja": "ja"}
+    # "hi-Latn" reads as English here, not Hindi: the text is in Latin
+    # letters, so the Hindi synthesiser would mispronounce it. Without the
+    # entry it defaulted to "en" anyway, but through the .get() default -
+    # which also missed the co.in accent below.
+    _LANG = {"en": "en", "en-IN": "en", "hi-Latn": "en", "hi": "hi",
+             "ta": "ta", "te": "te", "bn": "bn", "mr": "mr", "es": "es",
+             "fr": "fr", "de": "de", "pt": "pt", "ar": "ar", "id": "id",
+             "ja": "ja"}
 
     def available(self) -> bool:
         try:
@@ -252,7 +257,13 @@ class GTTSProvider:
         from gtts import gTTS
 
         lang = self._LANG.get(spec.language, "en")
-        tld = "co.in" if (spec.language or "").endswith("IN") else "com"
+        # Indian accent for the Indian codes, including Hinglish, whose code
+        # does not end in "IN".
+        language = (spec.language or "")
+        tld = ("co.in" if (language.endswith("IN")
+                           or language.lower().startswith(("hi", "ta", "te",
+                                                           "bn", "mr", "gu")))
+               else "com")
         mp3 = out_path.with_suffix(".mp3")
         mp3.parent.mkdir(parents=True, exist_ok=True)
         gTTS(text=text, lang=lang, tld=tld, slow=False).save(str(mp3))

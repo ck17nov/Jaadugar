@@ -512,7 +512,22 @@ fun SettingsScreen() {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OutlinedButton(onClick = { vm.clearSecrets() }) {
+        OutlinedButton(onClick = {
+            vm.clearSecrets()
+            // RESET THE DRAFTS TOO.
+            //
+            // clearSecrets() wipes EncryptedSharedPreferences, but these
+            // drafts are the only source of truth for the controls - so the
+            // key and client id stayed on screen after "clearing", and the
+            // next Save wrote them straight back. Everything on screen also
+            // disagreed with the now-empty store, including the buttons
+            // gated on it.
+            backendUrl = ""
+            apiKey = ""
+            oauthClientId = ""
+            ytAccount = ""
+            editing = false
+        }) {
             Text("Clear stored credentials")
         }
 

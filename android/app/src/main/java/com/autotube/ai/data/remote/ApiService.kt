@@ -19,6 +19,13 @@ interface ApiService {
         @Query("audience") audience: String = "18-35",
         @Query("style") style: String = "",
         @Query("duration") duration: Int = 45,
+        // The kids question and the caption style both depend on these: the
+        // group decides child-directedness for a CUSTOM topic, and the
+        // format plus the style decide which template - and one template
+        // burns no captions in at all.
+        @Query("group") group: String = "",
+        @Query("language") language: String = "en",
+        @Query("video_format") videoFormat: String = "SHORT",
     ): NichePreviewDto
 
     @GET("youtube/accounts")

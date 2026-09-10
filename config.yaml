@@ -126,6 +126,14 @@ tts:
     en: en-US-AriaNeural
     en-IN: en-IN-NeerjaNeural
     hi: hi-IN-SwaraNeural
+    # Hinglish is Hindi-English code-mixing written in LATIN script, so an
+    # Indian-English voice reads it correctly and the Devanagari Hindi voices
+    # mispronounce it. It needs its own entry: without one, _lookup falls back
+    # to the base code "hi" and hands back hi-IN-SwaraNeural, and because
+    # resolve_voice short-circuits on a non-empty id the curated
+    # EDGE_VOICES["hi-Latn"] mapping that exists for exactly this case never
+    # runs. Measured: voice_spec("hi-Latn") returned hi-IN-SwaraNeural.
+    hi-Latn: en-IN-NeerjaNeural
     ta: ta-IN-PallaviNeural
     te: te-IN-ShrutiNeural
     es: es-ES-ElviraNeural
@@ -134,6 +142,7 @@ tts:
       en: en-US-AriaNeural
       en-IN: en-IN-NeerjaNeural
       hi: hi-IN-SwaraNeural
+      hi-Latn: en-IN-NeerjaNeural        # Latin script: see voice_map above
       ta: ta-IN-PallaviNeural
       te: te-IN-ShrutiNeural
       bn: bn-IN-TanishaaNeural
@@ -144,6 +153,7 @@ tts:
       en: en-US-AndrewNeural
       en-IN: en-IN-PrabhatNeural
       hi: hi-IN-MadhurNeural
+      hi-Latn: en-IN-PrabhatNeural       # Latin script: see voice_map above
       ta: ta-IN-ValluvarNeural
       te: te-IN-MohanNeural
       bn: bn-IN-BashkarNeural

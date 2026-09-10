@@ -325,9 +325,18 @@ class CreateViewModel(
     private val _bankReady = MutableStateFlow<Int?>(null)
     val bankReady: StateFlow<Int?> = _bankReady.asStateFlow()
 
+    /** Which group the last count was actually taken over, for the label. */
+    private val _bankGroup = MutableStateFlow("")
+    val bankGroup: StateFlow<String> = _bankGroup.asStateFlow()
+
     fun loadBank(group: String, language: String, videoFormat: String,
                  topic: String = "") {
         viewModelScope.launch {
+            // BACK TO "checking" FIRST. Without this a failed or
+            // out-of-order response left the PREVIOUS selection's number on
+            // screen, labelled as the current one - so switching from a
+            // group with scripts to one without still read "3 ready".
+            _bankReady.value = null
             // ASK THE BACKEND, do not compute it here.
             //
             // This used to fold language dialects and sum the matching slots
@@ -341,6 +350,18 @@ class CreateViewModel(
                     _bankReady.value = bank.query?.ready
                         ?: bank.slots.filter { it.group == group }
                             .sumOf { it.ready }
+                    // The backend resolves a blank group from the topic, the
+                    // same way the claim does, so this is not always the
+                    // group that was asked for.
+                    _bankGroup.value = bank.query?.resolvedGroup ?: group
+                }
+                .onFailure {
+                    // Stays null, which the screen renders as "checking"
+                    // rather than as zero. Telling somebody they have no
+                    // scripts because a request failed is how they end up
+                    // importing a batch they already have.
+                    _bankReady.value = null
+                    _bankGroup.value = ""
                 }
         }
     }
@@ -350,12 +371,17 @@ class CreateViewModel(
         if (error.isKidsConfirmation()) _kidsBlocked.value = true
     }
 
-    fun previewNiche(niche: String, audience: String, style: String, duration: Int) {
+    fun previewNiche(niche: String, audience: String, style: String,
+                     duration: Int, group: String = "",
+                     language: String = "en", videoFormat: String = "SHORT") {
         if (niche.length < 2) return
         runTask<NichePreviewDto>({
             _preview.value = it
             _kidsPrompt.value = it.requiresKidsConfirmation
-        }) { repo.nichePreview(niche, audience, style, duration) }
+        }) {
+            repo.nichePreview(niche, audience, style, duration,
+                              group, language, videoFormat)
+        }
     }
 
     fun dismissKidsPrompt() { _kidsPrompt.value = false }
@@ -450,7 +476,11 @@ class ScheduleViewModel(
             // Reporting the failure matters: without it a backend that could
             // not be reached rendered as "None." - which reads as "you have no
             // automations" when the truth is "we have no idea".
-            repo.automations()
+            // syncAutomations both fetches AND writes the local rows that
+            // every recurring run rebuilds its request from. It used to fetch
+            // into memory only, so the Room table - emptied by the
+            // destructive schema migration on upgrade - was never restored.
+            repo.syncAutomations()
                 .onSuccess { _automations.value = it.automations; _loaded.value = true }
                 .onFailure { error(it.message ?: "Could not load automations.") }
         }

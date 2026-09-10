@@ -1077,7 +1077,12 @@ class Pipeline:
         # Translate here rather than at the script stage: the blocks are timed
         # to scene spans, and scene.start/duration are only filled in once the
         # voice has been measured.
-        if caption_language:
+        #
+        # Not when captions are off: `scene.caption_text` is read by nothing
+        # else, so on a captions-off template every translation call was made
+        # and then discarded - a per-scene LLM round trip per video, bought
+        # and thrown away.
+        if caption_language and caption_style != "none":
             self._translate_captions(job_dir, request, script)
         scenes_now = script.scene_objects()
         translated = [
@@ -1453,17 +1458,6 @@ class Pipeline:
         job_dir = self._job_dir(job, request)
         self.db.save_job(job)
 
-        profile = build_profile(
-            request.niche, audience=request.audience, style=request.style,
-            made_for_kids=request.made_for_kids, language=request.language,
-            duration_seconds=request.duration_seconds)
-
-        profile, template = self.apply_style_template(request, profile)
-        safe_write_json(job_dir / "niche_profile.json", {
-            **profile.to_dict(),
-            "style_template": template.to_dict(),
-        })
-
         if not skip_preflight:
             problems = self.preflight(request)
             blocking = [p for p in problems if "ffmpeg" in p or "limit" in p
@@ -1492,6 +1486,32 @@ class Pipeline:
             # the requested duration before the niche profile's pacing is
             # used.
             claim = self.stage_bank(job, request)
+
+            # BUILT AFTER THE CLAIM, because the claim can change the request.
+            #
+            # `stage_bank` tightens `made_for_kids` when the entry it claimed
+            # is child-directed, and it replaces the duration with the
+            # entry's own. The profile used to be built before all of that,
+            # so a kids script claimed by a custom topic was rendered from a
+            # general-audience profile: no KIDS_RESTRICTIONS on the image
+            # prompts, karaoke captions instead of blocks, and the wrong
+            # pacing - while the request said made_for_kids=True and the
+            # upload was correctly classified. The video was flagged for
+            # children and did not look like it.
+            #
+            # Preflight still runs first, so a blocked run cannot leave a
+            # claimed entry behind.
+            profile = build_profile(
+                request.niche, audience=request.audience,
+                style=request.style, made_for_kids=request.made_for_kids,
+                language=request.language,
+                duration_seconds=request.duration_seconds)
+            profile, template = self.apply_style_template(request, profile)
+            safe_write_json(job_dir / "niche_profile.json", {
+                **profile.to_dict(),
+                "style_template": template.to_dict(),
+            })
+
             videos = self.stage_research(job, request, profile)
             idea, context = self.stage_idea(job, request, profile, videos,
                                             claim)

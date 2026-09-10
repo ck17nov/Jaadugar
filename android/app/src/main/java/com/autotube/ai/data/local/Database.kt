@@ -169,11 +169,17 @@ interface AutomationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: AutomationEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<AutomationEntity>)
+
     @Query("SELECT * FROM automations ORDER BY created_at DESC")
     fun observeAll(): Flow<List<AutomationEntity>>
 
     @Query("SELECT * FROM automations WHERE enabled = 1 ORDER BY created_at DESC")
     suspend fun enabled(): List<AutomationEntity>
+
+    @Query("SELECT * FROM automations")
+    suspend fun all(): List<AutomationEntity>
 
     @Query("SELECT * FROM automations WHERE id = :id")
     suspend fun byId(id: String): AutomationEntity?

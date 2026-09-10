@@ -508,13 +508,50 @@ def get_config() -> dict[str, Any]:
 @app.get("/niche/preview", dependencies=[Depends(require_api_key)])
 def niche_preview(niche: str = Query(min_length=2, max_length=120),
                   audience: str = "18-35", style: str = "",
-                  duration: int = Query(45, ge=8, le=3600)) -> dict[str, Any]:
-    """Show how a niche will be interpreted before starting an automation."""
+                  duration: int = Query(45, ge=8, le=3600),
+                  group: str = "", language: str = "en",
+                  video_format: str = "SHORT") -> dict[str, Any]:
+    """Show how a niche will be interpreted before starting an automation.
+
+    `group` is the channel group chosen on the Create screen. It matters for
+    the kids question: `is_kids_niche` matches the niche STRING, so a custom
+    topic under the Kids group - "story of the thirsty crow" - was not
+    detected, and the screen never asked. The group is the operator saying
+    which channel this is for, and groups.py already declares which of them
+    are child-directed.
+
+    The caption and template fields exist so the screen can stop PROMISING
+    cross-language captions on a video that will not have any: the caption
+    style is derived from the niche and the format, and one template
+    deliberately burns none in.
+    """
+    from engine.core.groups import group as group_by_key
+    from engine.core.languages import caption_for
+    from engine.video.templates import select_template
+
+    chosen = group_by_key(group or "")
+    child_directed = bool(chosen and chosen.child_directed)
+    kids = is_kids_niche(niche) or child_directed
+
     profile = build_profile(niche, audience=audience, style=style,
-                            duration_seconds=duration)
+                            duration_seconds=duration, made_for_kids=kids,
+                            language=language)
+    template = select_template(
+        niche, style, made_for_kids=kids,
+        long_form=str(video_format).upper() == "LONGFORM",
+        forced=str(CFG.get("video.style_template", "")))
+    configured = str(CFG.get("captions.style", "") or "")
+    caption_style = template.caption_style or configured
     return {"profile": profile.to_dict(),
             "kids_niche_detected": is_kids_niche(niche),
-            "requires_kids_confirmation": is_kids_niche(niche)}
+            "requires_kids_confirmation": kids,
+            "child_directed_group": child_directed,
+            "style_template": template.name,
+            # "none" means no burnt-in captions; an SRT is still uploaded.
+            "caption_style": caption_style,
+            "caption_language": (caption_for(language)
+                                 if caption_style != "none" else ""),
+            }
 
 
 class ClearBody(BaseModel):
@@ -676,6 +713,27 @@ def list_automations(include_cancelled: bool = False,
             "video_format": payload.get("video_format", ""),
             "language": payload.get("language", ""),
             "made_for_kids": bool(payload.get("made_for_kids", False)),
+            # THE WHOLE REQUEST, not just what the list displays.
+            #
+            # The app rebuilds each recurring run's request from its own Room
+            # row, and Room's schema migration is destructive - so after an
+            # upgrade the rows were gone and every recurring automation
+            # cancelled itself on its next wake, silently and for good. The
+            # comment in Database.kt said a rebuild costs nothing "because
+            # the BACKEND persists them", which was only half true: it
+            # persisted them and then never served them. These fields are
+            # what make that sentence true.
+            "audience": payload.get("audience", ""),
+            "style": payload.get("style", ""),
+            "duration_seconds": int(payload.get("duration_seconds", 0) or 0),
+            "voice_gender": payload.get("voice_gender", ""),
+            "caption_language": payload.get("caption_language", ""),
+            "caption_style": payload.get("caption_style", ""),
+            "publish_mode": payload.get("publish_mode", "scheduled"),
+            "script_source": payload.get("script_source", "live"),
+            "niche_group": payload.get("niche_group", ""),
+            "mode": payload.get("mode", ""),
+            "min_quality_score": int(payload.get("min_quality_score", 0) or 0),
             "videos_made": db.count_jobs_for_automation(automation_id),
             "runs_finished": finished,
             "runs_requested": wanted,
@@ -715,7 +773,13 @@ def _automation_target(payload: dict[str, Any], row: dict[str, Any],
     if not channel_id:
         try:
             from engine.youtube.auth import YouTubeAuth
-            mapped = YouTubeAuth(CFG).channels_store.for_niche(niche)
+            # WITH the group key. Without it this fell back to keyword
+            # inference while the upload used the explicitly chosen group, so
+            # for a custom topic the Schedule tab confidently named a channel
+            # the video would not be posted to - the exact disagreement this
+            # function's own docstring promises not to have.
+            mapped = YouTubeAuth(CFG).channels_store.for_niche(
+                niche, group.key if group else "")
             channel_id = mapped.channel_id if mapped else ""
         except Exception:                       # noqa: BLE001
             channel_id = ""
@@ -748,14 +812,31 @@ def create_automation(body: AutomationBody) -> dict[str, Any]:
     request = body.to_request()
 
     # Kids content must be explicitly confirmed (spec section 9).
-    if is_kids_niche(request.niche) and not request.made_for_kids:
+    #
+    # THE CHOSEN GROUP COUNTS, not just the niche string. `is_kids_niche` is a
+    # niche-family match, so a CUSTOM topic under the Kids group - "story of
+    # the thirsty crow" - was not child-directed as far as this gate was
+    # concerned. Combined with an "all ages" audience clearing the flag on the
+    # Create screen, that published child-directed content to the kids channel
+    # without the Made-for-Kids classification, built as general-audience
+    # education with none of the kids restrictions. The group is the operator
+    # saying which channel this is for, and `groups.py` already declares that
+    # group child-directed; every other path in the codebase honours it.
+    from engine.core.groups import group as group_by_key
+    chosen = group_by_key(getattr(request, "niche_group", "") or "")
+    looks_child_directed = (is_kids_niche(request.niche)
+                            or bool(chosen and chosen.child_directed))
+    if looks_child_directed and not request.made_for_kids:
         raise HTTPException(
             status_code=409,
             detail={"error": "kids_confirmation_required",
                     "message": ("This niche looks child-directed. Confirm the "
                                 "'Made for Kids' classification before "
                                 "publishing."),
-                    "niche": request.niche})
+                    "niche": request.niche,
+                    "because": ("the chosen channel group is child-directed"
+                                if chosen and chosen.child_directed
+                                else "the topic is child-directed")})
 
     pipeline_problems: list[str] = []
     if not have_ffmpeg():
@@ -1176,14 +1257,33 @@ def _bank_status(db, _json, *, group: str = "", language: str = "",
     # and the automation failed with a full bank. Asking the same code that
     # does the claiming is the only way the two cannot drift.
     if group or language or video_format:
+        # THE GROUP IS INFERRED WHEN BLANK, exactly as the claim infers it.
+        #
+        # A blank group went straight into `grp = ?`, which matches no row, so
+        # the count was structurally zero - while `stage_bank` resolves a
+        # blank group from the topic before claiming. The app's default
+        # "All topics" selection therefore always read ready=0 and the screen
+        # warned, in red, that an automation would FAIL when the entry it
+        # would have claimed was sitting in the bank. Measured against the
+        # real workspace: group="" gave ready=0 where group="tech" gave 1 for
+        # the same language, format and topic.
+        effective = group
+        if not effective and topic:
+            from engine.core.groups import group_for_topic
+            found = group_for_topic(topic)
+            effective = found.key if found else ""
         rows = db.bank_candidates(
-            group=group, language=language or "en",
+            group=effective, language=language or "en",
             video_format=video_format or "SHORT",
             topics=[topic] if topic else (), limit=5000)
         entries = [e for e in (parse(r) for r in rows) if e is not None]
         out["query"] = {
             "group": group, "language": language,
             "video_format": video_format, "topic": topic,
+            # What the count was actually taken over, so the app can say
+            # "3 ready in Technical" rather than implying it searched
+            # everything.
+            "resolved_group": effective,
             "ready": sum(1 for e in entries if approved(e)),
             "human_reviewed": sum(1 for e in entries
                                   if reviewed_by_human(e)),

@@ -84,8 +84,12 @@ class AutoTubeRepository(
         audience: String,
         style: String,
         duration: Int,
+        group: String = "",
+        language: String = "en",
+        videoFormat: String = "SHORT",
     ): Result<NichePreviewDto> = call {
-        api.service().nichePreview(niche, audience, style, duration)
+        api.service().nichePreview(niche, audience, style, duration,
+                                   group, language, videoFormat)
     }
 
     suspend fun startAutomation(request: AutomationRequestDto): Result<String> = call {
@@ -116,6 +120,10 @@ class AutoTubeRepository(
                 channelId = request.channelId,
                 scriptSource = request.scriptSource,
                 nicheGroup = request.nicheGroup,
+                // Or the second recurring run drops it, which is what
+                // happened to the voice, caption and script-bank fields
+                // before this row learned to carry them.
+                minQualityScore = request.minQualityScore,
             )
         )
         logEvent("AUTOMATION", "queued ${request.niche} x${request.count}")
@@ -225,6 +233,72 @@ class AutoTubeRepository(
     /** Every automation the backend knows about, running or scheduled. */
     suspend fun automations(): Result<AutomationListDto> =
         call { api.service().automations() }
+
+    /**
+     * Restore the local automation rows from the backend.
+     *
+     * The Room table is what every recurring run rebuilds its request from,
+     * and the schema migration is destructive - so an app upgrade emptied it
+     * and each surviving WorkManager job then found no row, concluded the
+     * automation was deleted and cancelled itself permanently. Nothing ever
+     * read the automations back, even though the backend had persisted them
+     * all along and `GET /automations` served them.
+     *
+     * Preserves the local `enabled` flag: the backend's copy says whether the
+     * automation is live server-side, while a user who switched one off on
+     * this device should not have it switched back on by a sync.
+     *
+     * Returns the fetched list, so a caller that also wants to DISPLAY the
+     * automations does not have to make the request twice. A failure means
+     * the backend could not be reached - the caller must not treat
+     * "unreachable" as "deleted".
+     */
+    suspend fun syncAutomations(): Result<AutomationListDto> =
+            automations().mapCatching { list ->
+        val existing = db.automations().all().associateBy { it.id }
+        val rows = list.automations.map { dto ->
+            val local = existing[dto.id]
+            AutomationEntity(
+                id = dto.id,
+                niche = dto.niche,
+                audience = dto.audience.ifBlank { local?.audience ?: "18-35" },
+                language = dto.language.ifBlank { local?.language ?: "en" },
+                videoFormat = dto.videoFormat.ifBlank {
+                    local?.videoFormat ?: "SHORT" },
+                durationSeconds = if (dto.durationSeconds > 0) dto.durationSeconds
+                    else local?.durationSeconds ?: 45,
+                style = dto.style.ifBlank { local?.style ?: "" },
+                mode = dto.mode.ifBlank { local?.mode ?: "APPROVAL" },
+                frequency = dto.frequency,
+                days = dto.days,
+                uploadTime = dto.uploadTime,
+                timezone = dto.timezone,
+                madeForKids = dto.madeForKids,
+                createdAt = if (dto.createdAt > 0) (dto.createdAt * 1000).toLong()
+                    else local?.createdAt ?: System.currentTimeMillis(),
+                // The BACKEND decides whether this automation still runs, but
+                // a local "off" is a deliberate act on this device and wins.
+                enabled = dto.enabled && (local?.enabled ?: true),
+                voiceGender = dto.voiceGender.ifBlank {
+                    local?.voiceGender ?: "female" },
+                captionLanguage = dto.captionLanguage.ifBlank {
+                    local?.captionLanguage ?: "" },
+                captionStyle = dto.captionStyle.ifBlank {
+                    local?.captionStyle ?: "" },
+                publishMode = dto.publishMode.ifBlank {
+                    local?.publishMode ?: "scheduled" },
+                channelId = dto.channelId.ifBlank { local?.channelId ?: "" },
+                minQualityScore = if (dto.minQualityScore > 0) dto.minQualityScore
+                    else local?.minQualityScore ?: 0,
+                scriptSource = dto.scriptSource.ifBlank {
+                    local?.scriptSource ?: "live" },
+                nicheGroup = dto.nicheGroup.ifBlank {
+                    local?.nicheGroup ?: "" },
+            )
+        }
+        if (rows.isNotEmpty()) db.automations().upsertAll(rows)
+        list
+    }
 
     /**
      * Clear finished jobs and free their disk.
