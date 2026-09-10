@@ -260,6 +260,11 @@ class Script(JsonMixin):
     # {"heading": str, "scene_index": int}. Used for real YouTube chapters
     # instead of guessing labels from narration.
     chapters: list[dict[str, Any]] = field(default_factory=list)
+    # One or two sentences written to OPEN THE DESCRIPTION, as opposed to
+    # the first two sentences of the narration - which for a story is the
+    # middle of a scene, and for anything with a mandatory disclaimer is the
+    # disclaimer. Only a banked entry has one; empty falls back.
+    description_hook: str = ""
     # Child-directed narrative only: what the story-shape gate found. Kept on
     # the script so it lands in job.json and a boring story can be diagnosed
     # after the fact instead of re-run.

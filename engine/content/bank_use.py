@@ -269,6 +269,10 @@ def to_script(entry: BankEntry, *, language: str = "",
         claims=[dict(c) for c in (entry.claims or [])],
         provider=f"bank:{entry.entry_id}",
         chapters=_chapters(entry),
+        # Authored, validated and stored since the bank existed - and until
+        # now never read by anything, so the description it was written for
+        # opened with the narration instead.
+        description_hook=entry.description_hook,
     )
 
 
@@ -297,12 +301,28 @@ def bible_for(entry: BankEntry):
     A banked entry declares its cast, so that call is both unnecessary and
     strictly worse - inference can miss a character the author named.
     """
+    from .bank import _looks_non_latin
     from .characters import Character, CharacterBible
 
-    people = [Character(name=str(c.get("name", "")).strip(),
-                        description=str(c.get("description", "")).strip())
-              for c in (entry.characters or [])
-              if str(c.get("name", "")).strip()]
+    people: list[Character] = []
+    for raw in entry.characters or []:
+        name = str(raw.get("name", "")).strip()
+        described = str(raw.get("description", "")).strip()
+        if not name:
+            continue
+        # DROPPED rather than passed through. The clause becomes part of
+        # every image prompt, and an image generator cannot read Devanagari:
+        # the character's appearance is lost either way, but passing it also
+        # spends the prompt's budget on tokens that mean nothing. Import now
+        # rejects these; this is for the entries banked before it did.
+        if described and _looks_non_latin(described):
+            log_event("BANK", "character description is not in English; "
+                              "leaving this one out of the image bible",
+                      entry=entry.entry_id, character=name)
+            continue
+        if not described:
+            continue
+        people.append(Character(name=name, description=described))
     return CharacterBible(characters=people) if people else None
 
 

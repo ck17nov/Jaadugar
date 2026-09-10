@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from .logging import log_event
 from .models import JobStatus, VideoJob
 
 SCHEMA = """
@@ -375,16 +376,39 @@ class Database:
     # Script bank
     # ------------------------------------------------------------------
     def save_bank_entry(self, entry) -> None:
-        """Insert or replace one entry, PRESERVING its used state.
+        """Insert or replace one entry, PRESERVING its used state and review.
 
         Re-importing a corrected file must not un-use scripts that have
         already become videos, or the same story publishes twice.
+
+        The REVIEW is preserved on the same principle, and only when the
+        narration is untouched. A bank file carries no `human` block - that
+        is recorded by `stories review`, into the payload - so re-importing a
+        file to correct anything else silently discarded every verdict, and
+        "ready" went from five to nought with the import reporting success.
+        Measured while fixing three character descriptions.
+
+        A CHANGED narration drops the review deliberately: a verdict on
+        different words is not a verdict on these.
         """
         existing = self.query_one(
-            "SELECT used_at, used_job_id FROM bank_entries WHERE entry_id=?",
-            (entry.entry_id,))
+            "SELECT used_at, used_job_id, content_hash, payload "
+            "FROM bank_entries WHERE entry_id=?", (entry.entry_id,))
         used_at = float(existing["used_at"]) if existing else 0.0
         used_job = str(existing["used_job_id"]) if existing else ""
+        if existing and not (getattr(entry, "human", None) or {}).get(
+                "reviewer"):
+            same_text = str(existing["content_hash"] or "") == entry.content_hash
+            try:
+                held = (json.loads(existing["payload"]) or {}).get("human") or {}
+            except (ValueError, TypeError):
+                held = {}
+            if same_text and held.get("reviewer"):
+                entry.human = dict(held)
+                log_event("BANK", "kept the existing review across a "
+                                  "re-import",
+                          entry=entry.entry_id, reviewer=held.get("reviewer"),
+                          kind=held.get("kind", "human"))
         with self._lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO bank_entries (entry_id, grp, topic, "

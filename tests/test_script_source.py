@@ -160,3 +160,124 @@ def test_a_niche_outside_every_group_fails_under_bank_only(pipe, tmp_path):
     with pytest.raises(pipeline_module.PipelineError) as caught:
         pipe.stage_bank(_job(tmp_path), request)
     assert "channel group" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# One run's writes must not reach the next
+# ---------------------------------------------------------------------------
+def test_stage_bank_does_write_to_the_request_it_is_given(pipe, tmp_path):
+    """Establishes the premise for the two tests below.
+
+    `stage_bank` deliberately overwrites the duration with the entry's own
+    length, so the request object it is handed is NOT left alone.
+    """
+    from tests.test_bank import kids_entry
+
+    pipe.db.save_bank_entry(kids_entry())
+    request = AutomationRequest(niche="kids bedtime stories",
+                                script_source="bank", duration_seconds=45)
+    assert pipe.stage_bank(_job(tmp_path), request) is not None
+    assert request.duration_seconds != 45
+
+
+def test_run_does_not_write_to_the_callers_request(pipe, monkeypatch):
+    """The worker reuses ONE request object for every run in `count`.
+
+    So a banked run's duration leaked forward: run 1 claimed a 37-second
+    Short and run 2 - a live fallback once the bank ran dry under
+    bank_first - was written and rendered for 37 seconds instead of the 45
+    that was asked for. `run` works on a copy.
+    """
+    from tests.test_bank import kids_entry
+
+    pipe.db.save_bank_entry(kids_entry())
+    request = AutomationRequest(niche="kids bedtime stories",
+                                script_source="bank", duration_seconds=45,
+                                made_for_kids=False)
+
+    def stop(*args, **kwargs):
+        raise pipeline_module.PipelineError("research", "stopped on purpose")
+
+    monkeypatch.setattr(pipe, "stage_research", stop)
+    with pytest.raises(pipeline_module.PipelineError):
+        pipe.run(request, skip_preflight=True)
+
+    assert request.duration_seconds == 45
+    assert request.made_for_kids is False
+
+
+def test_the_next_run_in_the_batch_starts_from_the_original(pipe, monkeypatch):
+    """The leak end to end: two runs from one request object.
+
+    This is the `count: 2` case the worker actually runs - one request, one
+    loop - with the bank running dry between them, which is exactly when
+    run 2 has to be paced for the length that was asked for.
+    """
+    from tests.test_bank import kids_entry
+
+    pipe.db.save_bank_entry(kids_entry())
+    request = AutomationRequest(niche="kids bedtime stories",
+                                script_source="bank_first",
+                                duration_seconds=45)
+    seen: list[int] = []
+
+    def record(job, req, *args, **kwargs):
+        seen.append(req.duration_seconds)
+        raise pipeline_module.PipelineError("research", "stopped on purpose")
+
+    monkeypatch.setattr(pipe, "stage_research", record)
+    with pytest.raises(pipeline_module.PipelineError):
+        pipe.run(request, skip_preflight=True)
+
+    # A failed run puts its entry BACK, so the bank has to be emptied
+    # deliberately to reach the fallback rather than by letting run 1 consume
+    # it.
+    for row in pipe.db.bank_entries():
+        pipe.db.delete_bank_entry(row["entry_id"])
+    with pytest.raises(pipeline_module.PipelineError):
+        pipe.run(request, skip_preflight=True)
+
+    # Run 1 used the banked entry's length; run 2 found the bank empty and
+    # must be back on the requested 45.
+    assert seen[0] != 45
+    assert seen[1] == 45
+
+
+# ---------------------------------------------------------------------------
+# A failure the operator caused has to be visible on the job
+# ---------------------------------------------------------------------------
+def test_an_empty_bank_records_FAILED_and_says_why(pipe):
+    """It left a job at IDEA with error='' - forever.
+
+    `stage_bank` raised from OUTSIDE run()'s try block, so nothing advanced
+    the job row. The API still returned 202 and the app polled a job that
+    would never move or explain itself, while the raised message named the
+    missing slot exactly.
+    """
+    from engine.core.models import JobStatus
+
+    request = AutomationRequest(niche="kids bedtime stories",
+                                script_source="bank", language="en")
+    with pytest.raises(pipeline_module.PipelineError):
+        pipe.run(request, skip_preflight=True)
+
+    job = pipe.db.list_jobs(limit=1)[0]
+    assert job.status == JobStatus.FAILED.value
+    assert "no unused reviewed entry" in job.error
+
+
+def test_a_stage_error_is_stamped_even_when_the_stage_did_not(pipe,
+                                                              monkeypatch):
+    """`_advance(job, FAILED, job.error)` logged an empty note."""
+    from engine.core.models import JobStatus
+
+    def stop(*args, **kwargs):
+        raise pipeline_module.PipelineError("research", "the trend feed died")
+
+    monkeypatch.setattr(pipe, "stage_research", stop)
+    with pytest.raises(pipeline_module.PipelineError):
+        pipe.run(AutomationRequest(niche="science"), skip_preflight=True)
+
+    job = pipe.db.list_jobs(limit=1)[0]
+    assert job.status == JobStatus.FAILED.value
+    assert "trend feed died" in job.error

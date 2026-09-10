@@ -57,6 +57,9 @@ MAX_ARC_SHARE = 0.20
 MAX_OUTCOME_SHARE = 0.30
 # A character name may recur - a series is fine - but not everywhere.
 MAX_NAME_SHARE = 0.15
+# Below this many entries in a group, a share cap measures the bank's size
+# rather than its sameness: one script out of five is 20% whatever it says.
+SHARE_CAP_FLOOR = 10
 
 _SEED = 20260910          # PINNED: signatures must compare across imports
 
@@ -203,6 +206,31 @@ def _masked_text(entry) -> str:
     return mask_names(" ".join(entry.narrations()), names)
 
 
+# Keyed on CONTENT as well as id, so a corrected entry re-signs rather than
+# reusing the signature of the text it replaced.
+_SIGNATURES: dict[tuple[str, str], Any] = {}
+_SIGNATURE_CACHE_LIMIT = 4000
+
+
+def _peer_signature(entry) -> Any:
+    """The peer's MinHash, computed once per peer per process.
+
+    `check_new` is called once per entry being imported and signs every peer
+    it compares against, so a 20-entry batch against a 300-entry bank signed
+    the same 300 peers twenty times - 6,000 signatures to avoid a few dozen
+    exact comparisons, which made the cheap screening stage cost more than
+    the work it was screening.
+    """
+    key = (entry.entry_id, entry.content_hash)
+    hit = _SIGNATURES.get(key)
+    if hit is None:
+        if len(_SIGNATURES) >= _SIGNATURE_CACHE_LIMIT:
+            _SIGNATURES.clear()
+        hit = signature(_masked_text(entry))
+        _SIGNATURES[key] = hit
+    return hit
+
+
 def describe(entries: Sequence[Any]) -> BankStats:
     """Summarise a bank. Used for the report and for the share caps."""
     stats = BankStats(total=len(entries))
@@ -227,6 +255,11 @@ def check_new(candidate: Any, existing: Sequence[Any]) -> list[VarietyIssue]:
     finance explainer resembling a Hindi bedtime story is not a finding.
     """
     issues: list[VarietyIssue] = []
+    # An entry keeps its id and changes its narration when it is CORRECTED -
+    # that is what `stories export` exists for - so its own banked version
+    # has to be excluded here or a one-line fix is rejected as a 90%
+    # near-duplicate of itself. Which means this gate cannot be what notices
+    # that a store REPLACES a banked entry; the import report does that.
     peers = [e for e in existing
              if e.group == candidate.group and e.language == candidate.language
              and e.entry_id != candidate.entry_id]
@@ -270,10 +303,9 @@ def check_new(candidate: Any, existing: Sequence[Any]) -> list[VarietyIssue]:
     mine_text = _masked_text(candidate)
     mine_sig = signature(mine_text)
     for peer in peers:
-        peer_text = _masked_text(peer)
-        if estimate(mine_sig, signature(peer_text)) < SCREEN_SIMILARITY:
+        if estimate(mine_sig, _peer_signature(peer)) < SCREEN_SIMILARITY:
             continue
-        score = exact_similarity(mine_text, peer_text)
+        score = exact_similarity(mine_text, _masked_text(peer))
         if score >= REJECT_SIMILARITY:
             issues.append(VarietyIssue(
                 candidate.entry_id, "wording",
@@ -287,26 +319,41 @@ def check_new(candidate: Any, existing: Sequence[Any]) -> list[VarietyIssue]:
                 peer.entry_id))
 
     # ---- share caps, judged against the bank this entry would join ----
+    #
+    # FATAL for the arc and the outcome. They were warnings, which meant the
+    # one check that looks at the SHAPE OF THE WHOLE CHANNEL - the thing a
+    # human reviewer at YouTube would see as "mass production" - could not
+    # stop anything, while the batch prompt told the author it was enforced.
+    # A rejection here costs an import; the thing it prevents costs the
+    # channel's monetisation.
+    #
+    # Still floored at ten entries. Below that a single script is 10% of the
+    # bank on its own and every cap would trip on arithmetic rather than on
+    # sameness.
     stats = describe(list(peers) + [candidate])
-    if candidate.arc_variant and stats.total >= 10:
+    if candidate.arc_variant and stats.total >= SHARE_CAP_FLOOR:
         share = stats.arcs[candidate.arc_variant] / stats.total
         if share > MAX_ARC_SHARE:
             issues.append(VarietyIssue(
                 candidate.entry_id, "arc_share",
                 f"arc {candidate.arc_variant!r} would be {share:.0%} of this "
-                f"group; cap is {MAX_ARC_SHARE:.0%}", False))
+                f"group; cap is {MAX_ARC_SHARE:.0%}", True))
         outcome_share = stats.outcomes[candidate.outcome_class] / stats.total
         if outcome_share > MAX_OUTCOME_SHARE:
             issues.append(VarietyIssue(
                 candidate.entry_id, "outcome_share",
                 f"outcome {candidate.outcome_class!r} would be "
-                f"{outcome_share:.0%}; cap is {MAX_OUTCOME_SHARE:.0%}", False))
+                f"{outcome_share:.0%}; cap is {MAX_OUTCOME_SHARE:.0%}", True))
         for character in (candidate.characters or []):
             name = (character.get("name") or "").strip().lower()
             if not name:
                 continue
             name_share = stats.names[name] / stats.total
             if name_share > MAX_NAME_SHARE:
+                # A WARNING, unlike the two above: a recurring character
+                # across a couple of stories is a series, not mass
+                # production, and at the floor of ten entries a second
+                # appearance is already 20%.
                 issues.append(VarietyIssue(
                     candidate.entry_id, "name_share",
                     f"the name {name!r} would be in {name_share:.0%} of this "

@@ -137,6 +137,21 @@ OUR topic, and it must be true of it. Borrow the pattern, never the content.
 """
 
 
+def _lead_narration(script: Script) -> str:
+    """The narration with a disclaimer opener dropped.
+
+    `has_disclaimer` answers precisely "does scene 1 open with one", which is
+    what makes this safe: a video that merely MENTIONS "not financial advice"
+    in its closing line keeps every scene.
+    """
+    from .disclaimer import has_disclaimer
+
+    scenes = script.scene_objects()
+    if len(scenes) > 1 and has_disclaimer(script):
+        return " ".join(s.narration for s in scenes[1:])
+    return script.script
+
+
 class MetadataGenerator:
     def __init__(self, cfg: Config, router=None):
         self.cfg = cfg
@@ -509,9 +524,18 @@ Return JSON: {{"titles": ["...", "..."]}}"""
                           hashtags: bool = True) -> str:
         parts: list[str] = []
 
-        # Lead: what the viewer gets, in the video's own words.
-        lead = sentences(script.script)
-        summary = " ".join(lead[:2]) if lead else idea.angle
+        # Lead: what the viewer gets. An AUTHORED opener wins - a banked
+        # entry carries one written for exactly this slot.
+        summary = (script.description_hook or "").strip()
+        if not summary:
+            # Otherwise the video's own words, MINUS a mandatory disclaimer
+            # opener. `disclaimer.apply` prepends a scene and rebuilds
+            # `script.script` from the scenes, so on every finance and health
+            # video the first two sentences of the narration ARE the
+            # disclaimer - and it then appeared twice in one description,
+            # once as the lead and again under the disclosures.
+            lead = sentences(_lead_narration(script))
+            summary = " ".join(lead[:2]) if lead else idea.angle
         parts.append(truncate(summary, 260))
         # `idea.angle` is an ANALYSIS field, not copy. A real description shipped
         # with the line "consequence: the future tidal silence as the Moon

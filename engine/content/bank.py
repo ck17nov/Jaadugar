@@ -468,9 +468,30 @@ def validate(entry: BankEntry, *, expect_group: str = "") -> list[Problem]:
         if not entry.refrain:
             bad("refrain", "missing; the story gate requires a verbatim "
                            "refrain repeated three times")
+        # The NAME follows the narration - a Hindi story's characters are
+        # named in Devanagari, and the prompt asks for that so the name masks
+        # correctly against the narration. The DESCRIPTION does not: it is
+        # concatenated into the image prompt as "<name> is <description>" and
+        # sent to SDXL, whose text encoder cannot read Devanagari at all.
+        # Found in three banked Hindi entries, where the whole clause was
+        # noise - so the cast the bible exists to keep consistent was drawn
+        # differently in every single frame.
+        for index, person in enumerate(entry.characters or []):
+            described = str(person.get("description", "")).strip()
+            if described and _looks_non_latin(described):
+                bad(f"characters[{index}].description",
+                    "must be in ENGLISH - it goes into the image prompt. "
+                    "The NAME stays as the narration writes it")
         if not entry.characters:
-            bad("characters", "empty - this is what keeps a face consistent "
-                              "between shots", fatal=False)
+            # FATAL, not a warning. The cast is not only the image bible: it
+            # is the ONLY input to the variety gate's rename detector, which
+            # masks these names before comparing two stories. An entry with
+            # no cast masks nothing, so the same story under a new name
+            # compares as a different one and passes the gate that exists to
+            # keep the channel out of "mass production" review.
+            bad("characters", "empty - it keeps a face consistent between "
+                              "shots AND it is what the variety gate masks "
+                              "to catch a renamed duplicate")
 
     if not entry.description_hook:
         bad("description_hook", "missing", fatal=False)

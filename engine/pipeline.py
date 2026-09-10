@@ -1438,6 +1438,17 @@ class Pipeline:
 
     def run(self, request: AutomationRequest, *,
             skip_preflight: bool = False) -> PipelineResult:
+        # A COPY, because this method WRITES to the request: the banked
+        # entry's own duration replaces the requested one, and a
+        # child-directed entry tightens made_for_kids. The worker reuses a
+        # single request object for every run in `count`, so those writes
+        # leaked forward. Measured: run 1 claimed a 37-second Short and run 2
+        # - a live fallback once the bank ran dry under bank_first - was
+        # written, paced and rendered for 37 seconds instead of the 45 the
+        # operator asked for. Copying ends each run's mutations with the run,
+        # which is also what keeps the live path unaffected by a bank run
+        # beside it.
+        request = AutomationRequest.from_dict(request.to_dict())
         job = VideoJob(automation_id=request.id, request=request.to_dict())
         job_dir = self._job_dir(job, request)
         self.db.save_job(job)
@@ -1467,10 +1478,20 @@ class Pipeline:
                   mode=request.mode, dry_run=self.cfg.dry_run)
         started = time.time()
 
-        # Claimed before research so the entry's own length can replace the
-        # requested duration before the niche profile's pacing is used.
-        claim = self.stage_bank(job, request)
+        # INSIDE the try, even though nothing before it can have claimed
+        # anything. A bank failure is the one stage failure the operator is
+        # most likely to cause - asking for a slot the bank cannot fill - and
+        # it raised from outside the handler, so the job row was never
+        # advanced. Measured: script_source=bank against an empty bank left
+        # status=IDEA and error='' while the raised message said exactly what
+        # was missing. The API returns 202 and the app polls a job that will
+        # never move or explain itself.
+        claim = None
         try:
+            # Claimed before research so the entry's own length can replace
+            # the requested duration before the niche profile's pacing is
+            # used.
+            claim = self.stage_bank(job, request)
             videos = self.stage_research(job, request, profile)
             idea, context = self.stage_idea(job, request, profile, videos,
                                             claim)
@@ -1486,12 +1507,23 @@ class Pipeline:
             uploaded = self.stage_publish(
                 job, request, meta, quality,
                 fact_requires_approval=bool(fact.get("requires_approval")))
+        except JobCancelled as exc:
+            # `_raise_if_cancelled` has already written CANCELLED, so there is
+            # no status to advance - but the claim still has to go back, or
+            # cancelling a render silently consumes a curated script.
+            self._release_bank(claim, exc, job)
+            raise
         except PipelineError as exc:
             # The script was fine; something after it was not. Put the entry
             # back rather than burning a curated script on a transient TTS or
             # ffmpeg failure - unlike a generated script it cannot be
             # reproduced on demand.
             self._release_bank(claim, exc, job)
+            # A stage that raises without stamping job.error used to leave the
+            # row blank. The exception text is the only description of the
+            # failure that exists, so it becomes the error when nothing more
+            # specific was recorded.
+            job.error = job.error or str(exc)[:500]
             self._advance(job, JobStatus.FAILED, job.error)
             raise
         except Exception as exc:

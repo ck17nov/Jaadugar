@@ -33,6 +33,7 @@ import json
 from typing import Any, Sequence
 
 from ..core.groups import group as get_group
+from . import variety
 from .bank import ARC_VARIANTS, OUTCOME_CLASSES, words_per_second
 
 # ---------------------------------------------------------------------------
@@ -491,13 +492,30 @@ IMAGE BRIEFS
             tally = ("\n- Already used, so prefer the others: "
                      + ", ".join(f"{k} x{v}" for k, v in
                                  sorted(arc_tally.items(), key=lambda kv: -kv[1])))
+
+        # The caps have to be SATISFIABLE, and they were not.
+        #
+        # A flat share of the batch size asked for the impossible at the very
+        # counts `recommended_count` returns: at 9 scripts the arc cap came
+        # out as 1, and there are only 8 arcs; at 6 scripts the outcome cap
+        # came out as 1, and there are only 5 outcomes. A model handed a
+        # contradiction resolves it by ignoring one instruction, and which
+        # one is anyone's guess.
+        #
+        # The floor is the pigeonhole count - you cannot spread N scripts
+        # across K values with fewer than ceil(N/K) in the biggest bucket -
+        # and the share comes from the constants the gate actually enforces
+        # rather than a second copy of them.
+        arc_cap = max(-(-count // len(ARC_VARIANTS)),
+                      int(count * variety.MAX_ARC_SHARE))
+        outcome_cap = max(-(-count // len(OUTCOME_CLASSES)),
+                          int(count * variety.MAX_OUTCOME_SHARE))
         parts.append(f"""
 VARIETY - a bank of similar stories cannot be monetised, so this is enforced
 - "arc_variant" must be one of: {arcs}
 - "outcome_class" must be one of: {outcomes}
 - Spread them. In {count} scripts, no arc_variant may appear more than
-  {max(1, int(count * 0.2))} times and no outcome_class more than
-  {max(1, int(count * 0.3))} times.{tally}
+  {arc_cap} times and no outcome_class more than {outcome_cap} times.{tally}
 - Also fill "problem_domain", "setting", "protagonist_type" and
   "emotional_register" with short lowercase labels. Two scripts may not share
   five of those six axes - vary the problem, not just the name.
@@ -541,14 +559,36 @@ TITLES
     # automation for "kids bedtime stories" filters the bank on it. A
     # misspelled topic does not fail - it just makes the entry reachable only
     # by a group-wide automation, which is a silent loss.
-    if topics:
-        chosen = ", ".join(f'"{t}"' for t in topics)
+    # Only the topics that BELONG to this shape.
+    #
+    # The whole group used to be offered, so a drill prompt invited "kids
+    # bedtime stories" and then told the model to spread across them. A model
+    # obeying that writes six alphabet drills and labels two of them as
+    # bedtime stories; the topic check passes, and a bedtime-stories
+    # automation later claims a letter-B drill. Two instructions that cannot
+    # both be satisfied get one of them ignored, and which one is a guess.
+    for_shape = [t for t in topics if shape_for(group_key, t) == shape]
+    if for_shape:
+        chosen = ", ".join(f'"{t}"' for t in for_shape)
+        dropped = [t for t in topics if t not in for_shape]
+        note = ""
+        if dropped:
+            note = (f"\nThese belong to a DIFFERENT shape and are not "
+                    f"available in this batch: {', '.join(dropped)}. Ask for "
+                    f"them with their own --shape.")
         parts.append(
-            "\nTOPICS - set \"topic\" to EXACTLY one of these strings, and "
-            "cover a spread across the batch rather than writing every "
-            "script on the first one:\n"
-            + "\n".join(f"  - {t}" for t in topics)
-            + f"\nAllowed values for \"topic\": {chosen}")
+            f"\nTOPICS - every script here is a {shape}, so set \"topic\" to "
+            f"EXACTLY one of these strings, and cover a spread across the "
+            f"batch rather than writing every script on the first one:\n"
+            + "\n".join(f"  - {t}" for t in for_shape)
+            + f"\nAllowed values for \"topic\": {chosen}{note}")
+    elif topics:
+        # The caller forced a shape no listed topic maps to. Say so, rather
+        # than offering topics the import will warn about.
+        parts.append(
+            f"\nTOPICS - no listed topic of {label} is normally written as a "
+            f"{shape}, so this batch is off the standard map. Use whichever "
+            f"of these fits best: " + ", ".join(f'"{t}"' for t in topics))
 
     # ---- the exact shape ----
     example = {

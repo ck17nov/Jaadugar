@@ -11,7 +11,7 @@ scenes so the visual changes, trimming dead weight, and tightening the hook.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ..core.logging import log_event
@@ -226,17 +226,26 @@ def auto_improve(script: Script, profile: NicheProfile,
         span = s.duration if s.duration > 0 else (
             count_words(s.narration) / max(profile.words_per_second, 1.2))
         parts = sentences(s.narration)
-        if span > ceiling and len(parts) >= 2:
+        if span > ceiling and len(parts) >= 2 and not _carries_caption(s):
             mid = _split_point(parts)
             first, second = " ".join(parts[:mid]), " ".join(parts[mid:])
             if count_words(first) >= 3 and count_words(second) >= 3:
-                a = Scene(index=0, narration=first, role=s.role,
-                          visual_prompt=s.visual_prompt,
-                          visual_keywords=list(s.visual_keywords),
-                          on_screen_text=s.on_screen_text)
-                b = Scene(index=0, narration=second, role=s.role,
-                          visual_prompt=_vary_prompt(s.visual_prompt),
-                          visual_keywords=list(s.visual_keywords))
+                # `replace` rather than a field-by-field Scene(...), so a
+                # field added to Scene later is not silently dropped by the
+                # split. It already had been: caption_text went missing,
+                # which does not merely lose one caption - the render picks
+                # the caption path on COVERAGE, so a half-captioned script
+                # falls back to narration captions for the whole video, in
+                # the wrong language.
+                a = replace(s, index=0, narration=first,
+                            visual_keywords=list(s.visual_keywords),
+                            start=0.0, duration=0.0)
+                # The second half gets a different image and does NOT repeat
+                # the title card.
+                b = replace(s, index=0, narration=second,
+                            visual_prompt=_vary_prompt(s.visual_prompt),
+                            visual_keywords=list(s.visual_keywords),
+                            on_screen_text="", start=0.0, duration=0.0)
                 rebuilt += [a, b]
                 applied.append(f"split scene {s.index} ({span:.1f}s) into two")
                 continue
@@ -253,6 +262,19 @@ def auto_improve(script: Script, profile: NicheProfile,
     if applied:
         log_event("RETENTION", "auto-improvements applied", count=len(applied))
     return script, applied
+
+
+def _carries_caption(scene: Scene) -> bool:
+    """Whether this scene has a caption that a split would invalidate.
+
+    A caption is a translation of the WHOLE narration. Splitting the
+    narration leaves no mechanical way to split the caption with it:
+    duplicating it captions both halves with the full text, and dropping it
+    from one half makes that half fall back to the narration - which is the
+    other language. Neither is worth an extra visual change, so a captioned
+    scene is left long.
+    """
+    return bool((getattr(scene, "caption_text", "") or "").strip())
 
 
 def _split_point(parts: list[str]) -> int:

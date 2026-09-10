@@ -791,3 +791,324 @@ def test_an_entry_id_with_stray_whitespace_still_resolves(db):
     db.save_bank_entry(entry)
     assert bank_import.review(db, f"  {entry.entry_id}\r\n",
                               reviewer="chandan") is True
+
+
+# ---------------------------------------------------------------------------
+# The prompt must ask for something achievable
+# ---------------------------------------------------------------------------
+def test_every_recommended_batch_size_can_satisfy_its_own_variety_caps():
+    """The caps were arithmetically impossible at two reachable lengths.
+
+    The prompt derived them from the share constants alone, so at count=9 it
+    said "no arc_variant more than 1 time" with eight arcs available, and at
+    count=6 "no outcome_class more than 1 time" with five outcomes. Nine
+    scripts cannot be spread one-per-arc across eight arcs. An instruction
+    that cannot be obeyed gets ignored, and which of the two conflicting
+    instructions is ignored is a guess.
+
+    The floor is now the pigeonhole count, ceil(N/K).
+    """
+    import re
+
+    arcs, outcomes = len(bank.ARC_VARIANTS), len(bank.OUTCOME_CLASSES)
+    for seconds in (45, 50, 60, 90, 120, 150, 200, 300):
+        count = bank_prompt.recommended_count(
+            group_key="kids", target_seconds=seconds, shape="narrative",
+            made_for_kids=True)
+        text = bank_prompt.build(
+            group_key="kids", language="en", video_format="SHORT",
+            target_seconds=seconds, count=count, shape="narrative")
+        stated = re.search(r"no arc_variant may appear more than\s+(\d+) "
+                           r"times and no outcome_class more than (\d+)",
+                           text)
+        assert stated, f"{seconds}s: the caps are not in the prompt"
+        arc_cap, outcome_cap = int(stated.group(1)), int(stated.group(2))
+        assert arc_cap * arcs >= count, \
+            f"{seconds}s: {count} scripts cannot fit {arc_cap} per arc"
+        assert outcome_cap * outcomes >= count, \
+            f"{seconds}s: {count} scripts cannot fit {outcome_cap} per outcome"
+
+
+def test_the_caps_still_bind_when_the_batch_is_large():
+    """The floor must not become a licence to repeat one arc."""
+    text = bank_prompt.build(group_key="kids", language="en",
+                             video_format="SHORT", target_seconds=45,
+                             count=20, shape="narrative")
+    assert "more than\n  4 times" in text or "more than 4 times" in text
+
+
+def test_a_batch_is_only_offered_the_topics_of_its_own_shape():
+    """Two instructions that cannot both be satisfied.
+
+    The batch is locked to one shape while the TOPICS block listed the whole
+    group and asked for a spread across it. Obeying that writes six alphabet
+    drills and labels two of them "kids bedtime stories" - the topic check
+    passes, and a bedtime-stories automation later claims a letter-B drill.
+    """
+    drill = bank_prompt.build(group_key="kids", language="en",
+                              video_format="SHORT", target_seconds=45,
+                              count=6, shape="drill")
+    block = drill.split("TOPICS")[1].split("\n\n")[0]
+    assert "alphabet" in block
+    assert "bedtime stories" not in block.split("DIFFERENT shape")[0]
+    # And the excluded ones are named rather than silently missing, so the
+    # operator knows to ask for them with their own --shape.
+    assert "DIFFERENT shape" in block
+    assert "bedtime stories" in block
+
+
+def test_every_offered_topic_maps_back_to_the_batch_shape():
+    """The real invariant, across every group and shape."""
+    for group in ("kids", "finance", "tech"):
+        for shape in ("narrative", "poem", "drill", "explainer", "procedure"):
+            text = bank_prompt.build(group_key=group, language="en",
+                                     video_format="SHORT",
+                                     target_seconds=60, count=4,
+                                     shape=shape)
+            if "Allowed values for" not in text:
+                continue
+            listed = text.split("Allowed values for \"topic\": ")[1]
+            listed = listed.split("\n")[0]
+            for topic in [t.strip().strip('"') for t in listed.split('", "')]:
+                topic = topic.strip('"')
+                assert bank_prompt.shape_for(group, topic) == shape, \
+                    f"{group}/{shape} offered {topic!r}"
+
+
+# ---------------------------------------------------------------------------
+# Correcting an entry must not cost its review
+# ---------------------------------------------------------------------------
+def test_a_correction_keeps_the_review_it_already_had(db):
+    """Re-importing to fix anything else wiped every verdict.
+
+    A bank FILE carries no `human` block - the review lives in the payload,
+    written by `stories review` - so replacing the payload dropped it, and
+    "ready" went from five to nought while the import reported success.
+    Measured on the live bank while correcting three character descriptions.
+    """
+    entry = kids_entry()
+    db.save_bank_entry(entry)
+    assert bank_import.review(db, entry.entry_id, reviewer="claude-opus-5",
+                              kind="machine") is True
+
+    # The same entry as it comes back off disk: no review in the file.
+    fresh = bank.BankEntry.from_dict(entry.to_dict())
+    fresh.human = {}
+    fresh.characters = [{"name": "Milo", "description": "a six-year-old boy, "
+                                                       "red shirt, barefoot"}]
+    db.save_bank_entry(fresh)
+
+    stored = bank.BankEntry.from_dict(
+        json.loads(db.bank_entries()[0]["payload"]))
+    assert stored.human.get("reviewer") == "claude-opus-5"
+    assert stored.human.get("kind") == "machine"
+    assert bank_use.approved(stored) is True
+
+
+def test_a_rewritten_narration_loses_its_review(db):
+    """A verdict on different words is not a verdict on these."""
+    entry = kids_entry()
+    db.save_bank_entry(entry)
+    bank_import.review(db, entry.entry_id, reviewer="chandan")
+
+    rewritten = bank.BankEntry.from_dict(entry.to_dict())
+    rewritten.human = {}
+    rewritten.scenes[2].narration = ("He climbed onto the crate and the crate "
+                                     "tipped over sideways.")
+    rewritten.recompute()
+    rewritten.entry_id = entry.entry_id          # as `stories export` writes it
+    db.save_bank_entry(rewritten)
+
+    stored = bank.BankEntry.from_dict(
+        json.loads(db.bank_entries()[0]["payload"]))
+    assert stored.human.get("reviewer", "") == ""
+
+
+def test_a_replacement_is_reported_as_one(tmp_path, db):
+    """"1 of 1 stored" over a bank that stayed the same size.
+
+    Storing an entry whose id is already banked is an UPDATE. That is the
+    correction workflow working, but it has to be legible: an id that turned
+    up twice by accident looked exactly like a successful import.
+    """
+    entry = kids_entry()
+    db.save_bank_entry(entry)
+
+    report = bank_import.import_file(_write(tmp_path, entry), db,
+                                     expect_group="kids")
+    assert report.stored == 1
+    assert report.replaced == [entry.entry_id]
+    assert "0 new" in report.summary()
+    assert "updates to entries already banked" in report.summary()
+
+
+def test_the_same_id_twice_in_one_file_warns(tmp_path, db):
+    """Across imports it is a correction. Inside one file it is a mistake."""
+    first = kids_entry()
+    second = kids_entry(name="Asha", refrain="Up and up, we go up",
+                        setting="library", domain="lost_item")
+    second.entry_id = first.entry_id
+    path = tmp_path / "twice.jsonl"
+    path.write_text("\n".join(json.dumps(e.to_dict(), ensure_ascii=False)
+                              for e in (first, second)) + "\n",
+                    encoding="utf-8")
+
+    report = bank_import.import_file(path, db, expect_group="kids")
+    assert any("appears twice in this file" in w
+               for w in report.warnings), report.warnings
+
+
+def test_the_reported_bank_size_matches_the_table(tmp_path, db):
+    """It said "bank now: 31 entries" over a 26-row table.
+
+    A replaced entry was in the in-memory catalogue twice - once as loaded,
+    once as imported - and the stats described that list.
+    """
+    entry = kids_entry()
+    db.save_bank_entry(entry)
+    report = bank_import.import_file(_write(tmp_path, entry), db,
+                                     expect_group="kids")
+    assert report.stats["total"] == len(db.bank_entries()) == 1
+
+
+# ---------------------------------------------------------------------------
+# What reaches the image generator has to be readable by it
+# ---------------------------------------------------------------------------
+def test_a_devanagari_character_description_is_rejected(tmp_path, db):
+    """It became "<name> is <Devanagari>" in every image prompt.
+
+    SDXL's text encoder cannot read Devanagari, so the clause was noise -
+    and the cast the bible exists to keep consistent was drawn differently in
+    every frame. Found in three banked Hindi entries.
+    """
+    entry = kids_entry()
+    entry.language = "hi"
+    for index, scene in enumerate(entry.scenes):
+        scene.caption = f"An English caption for scene {index}."
+        scene.narration = "मीरा ने छत की ओर देखा और रुक गई।"
+    entry.characters = [{"name": "मीरा",
+                         "description": "छह साल की लड़की, दो चोटियाँ"}]
+    entry.recompute()
+
+    report = bank_import.import_file(_write(tmp_path, entry), db,
+                                     expect_group="kids")
+    assert report.stored == 0
+    assert any("characters[0].description" in r and "ENGLISH" in r
+               for r in report.rejected), report.rejected
+
+
+def test_a_devanagari_name_with_an_english_description_is_fine():
+    """The NAME follows the narration - that is what makes it mask."""
+    entry = kids_entry()
+    entry.characters = [{"name": "मीरा",
+                         "description": "six-year-old girl, two braids, "
+                                        "green frock"}]
+    problems = [str(p) for p in bank.validate(entry, expect_group="kids")
+                if "characters" in str(p)]
+    assert problems == []
+
+
+def test_the_bible_leaves_out_a_description_it_cannot_use():
+    """For the entries banked before the import check existed."""
+    entry = kids_entry()
+    entry.characters = [
+        {"name": "मीरा", "description": "छह साल की लड़की, दो चोटियाँ"},
+        {"name": "Dadi", "description": "elderly woman, white saree"}]
+    bible = bank_use.bible_for(entry)
+    assert bible is not None
+    assert [c.name for c in bible.characters] == ["Dadi"]
+
+
+def test_a_cast_with_nothing_usable_gives_no_bible():
+    entry = kids_entry()
+    entry.characters = [{"name": "मीरा",
+                         "description": "छह साल की लड़की, दो चोटियाँ"}]
+    assert bank_use.bible_for(entry) is None
+
+
+# ---------------------------------------------------------------------------
+# The share caps have to be able to stop something
+# ---------------------------------------------------------------------------
+_OBJECTS = ["lantern", "whistle", "marble", "ribbon", "pebble", "spoon",
+            "feather", "button", "bottle", "ladder", "basket", "candle"]
+_PLACES = ["kitchen", "terrace", "balcony", "courtyard", "verandah",
+           "doorway", "stairwell", "workshop", "garden", "attic", "shed",
+           "porch"]
+
+
+def _varied(index: int, *, arc: str = "alone",
+            outcome: str = "got_it") -> bank.BankEntry:
+    """An entry that differs from its siblings on everything but the arc.
+
+    Written so the earlier gates - refrain, axes, wording - cannot be what
+    rejects it. Only the share cap can.
+    """
+    thing, place = _OBJECTS[index], _PLACES[index]
+    entry = kids_entry(name=f"Child{index}",
+                       refrain=f"The {thing} waits, the {thing} waits",
+                       setting=place, domain=f"domain_{index}")
+    entry.arc_variant = arc
+    entry.outcome_class = outcome
+    entry.protagonist_type = f"child_{index}"
+    entry.emotional_register = f"register_{index}"
+    for number, scene in enumerate(entry.scenes):
+        scene.narration = (
+            f"Child{index} left the {thing} on the {place} and it rolled "
+            f"under the {_OBJECTS[(index + number) % len(_OBJECTS)]}. "
+            f"Nobody in the {place} noticed it there for {number + 2} whole "
+            f"days, which is how the {thing} came to matter at all.")
+        scene.caption = f"बच्चा {index} और {thing} की कहानी, दृश्य {number}।"
+    entry.characters = [{"name": f"Child{index}",
+                         "description": f"child of {index + 5} years, "
+                                        f"short hair, plain shirt"}]
+    entry.recompute()
+    entry.entry_id = ""
+    entry.recompute()
+    return entry
+
+
+def test_one_arc_cannot_own_a_group(db):
+    """The cap was a WARNING, so the check that looks at the shape of the
+    whole channel - the thing a reviewer would read as mass production -
+    could not stop anything, while the batch prompt said it was enforced.
+    """
+    peers = [_varied(i) for i in range(11)]
+    issues = variety.check_new(_varied(11), peers)
+    fatal = [i for i in issues if i.fatal and i.kind == "arc_share"]
+    assert fatal, [str(i) for i in issues]
+
+
+def test_below_the_floor_a_share_cap_measures_nothing(db):
+    """One script out of five is 20% whatever it says."""
+    peers = [_varied(i) for i in range(4)]
+    issues = variety.check_new(_varied(4), peers)
+    assert not [i for i in issues if i.kind in ("arc_share", "outcome_share")]
+
+
+def test_a_recurring_name_is_a_series_not_mass_production(db):
+    """Still a warning: at the floor of ten, a second appearance is 20%."""
+    peers = [_varied(i, arc=("alone" if i % 2 else "noticed")) for i in
+             range(11)]
+    for peer in peers[:2]:
+        peer.characters = [{"name": "Milo", "description": "a small boy"}]
+    candidate = _varied(11, arc="noticed")
+    candidate.characters = [{"name": "Milo", "description": "a small boy"}]
+    issues = variety.check_new(candidate, peers)
+    shares = [i for i in issues if i.kind == "name_share"]
+    assert shares and not any(i.fatal for i in shares)
+
+
+def test_the_signature_cache_does_not_change_a_verdict(db):
+    """Peer signatures are now computed once per process, not per pair."""
+    peers = [_varied(i) for i in range(6)]
+    candidate = _varied(7)
+    first = [str(i) for i in variety.check_new(candidate, peers)]
+    again = [str(i) for i in variety.check_new(candidate, peers)]
+    assert first == again
+
+    # A corrected peer must re-sign rather than reuse the signature of the
+    # text it replaced - the cache is keyed on the content hash for this.
+    peers[0].scenes[1].narration = candidate.scenes[1].narration
+    peers[0].recompute()
+    third = [str(i) for i in variety.check_new(candidate, peers)]
+    assert third != first

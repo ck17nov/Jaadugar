@@ -42,15 +42,26 @@ class ImportReport:
     rejected: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     unreviewed: int = 0
+    # How many of `stored` REPLACED an entry that was already banked. An
+    # entry_id is stated in the file whenever it came from `stories export`,
+    # and storing one is an UPDATE, not an addition - so "26 of 26 stored"
+    # while the bank stays at 26 rows was not a contradiction, it was an
+    # unreported replacement. Which is fine when it was a correction and a
+    # silent loss when the same id turned up twice by accident.
+    replaced: list[str] = field(default_factory=list)
     stats: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {"path": self.path, "seen": self.seen, "stored": self.stored,
                 "rejected": self.rejected, "warnings": self.warnings,
-                "unreviewed": self.unreviewed, "stats": self.stats}
+                "unreviewed": self.unreviewed,
+                "replaced": self.replaced, "stats": self.stats}
 
     def summary(self) -> str:
-        return (f"{self.stored} of {self.seen} stored, "
+        added = self.stored - len(self.replaced)
+        updated = (f", {len(self.replaced)} of them updates to entries "
+                   f"already banked" if self.replaced else "")
+        return (f"{self.stored} of {self.seen} stored ({added} new){updated}, "
                 f"{len(self.rejected)} rejected, "
                 f"{len(self.warnings)} warnings, "
                 f"{self.unreviewed} awaiting human review")
@@ -77,12 +88,23 @@ def import_file(path: Path, db, *, expect_group: str = "",
     # catalogue rather than only against this file.
     existing = _load_existing(db)
 
+    banked_ids = {e.entry_id for e in existing}
     for entry in entries:
         blockers = _gate(entry, existing, expect_group=expect_group,
                          require_review=require_review, report=report)
         if blockers:
             report.rejected.extend(blockers)
             continue
+        if entry.entry_id in banked_ids:
+            report.replaced.append(entry.entry_id)
+            # Only inside ONE file is this a mistake worth flagging. Across
+            # imports it is the correction workflow working as intended.
+            if any(e.entry_id == entry.entry_id for e in entries
+                   if e is not entry):
+                report.warnings.append(
+                    f"warn   {entry.entry_id} [entry_id] this id appears "
+                    f"twice in this file; only the last one is stored")
+        banked_ids.add(entry.entry_id)
         if not dry_run:
             db.save_bank_entry(entry)
         # Added to the in-memory catalogue either way, so two entries INSIDE
@@ -93,10 +115,17 @@ def import_file(path: Path, db, *, expect_group: str = "",
         if not (entry.human or {}).get("reviewer"):
             report.unreviewed += 1
 
-    report.stats = variety.describe(existing).to_dict()
+    # De-duplicated by id, because a replaced entry is in `existing` twice -
+    # once as it was loaded from the bank and once as it was just imported -
+    # and describing that list reported a bank bigger than the table.
+    # Measured: "bank now: 31 entries" over a 26-row table.
+    by_id: dict[str, Any] = {}
+    for one in existing:
+        by_id[one.entry_id] = one
+    report.stats = variety.describe(list(by_id.values())).to_dict()
     log_event("BANK", "import complete", path=path.name, seen=report.seen,
-              stored=report.stored, rejected=len(report.rejected),
-              dry_run=dry_run)
+              stored=report.stored, replaced=len(report.replaced),
+              rejected=len(report.rejected), dry_run=dry_run)
     return report
 
 
