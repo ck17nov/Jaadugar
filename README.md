@@ -96,48 +96,22 @@ in PowerShell 5.1:
 cd "C:\path\to\Vid App"; .\.venv\Scripts\python.exe -m backend.cli serve --host 0.0.0.0 --port 8099
 ```
 
-### Keeping it running (Windows)
+### Where this actually runs
 
-The app talking to nothing does not look like the backend being down - it
-looks like the app being broken. The topic list falls back to the copy built
-into the APK, which is older than the backend by construction, so topics that
-were merged away go on appearing; and the reviewed-script count cannot answer,
-so it reads "checking..." indefinitely. Both were reported as app bugs when
-the backend simply was not running.
+**The backend is deployed on an Oracle Cloud instance, and the phone talks to
+that - not to a laptop.** Running it locally, as above, is for development:
+the test suite, a dry-run render, importing a bank batch.
 
-`scripts/serve.cmd` runs the backend with a restart loop and logs to
-`workspace/logs/backend.log`. `scripts/serve-hidden.vbs` runs that with no
-console window. To start it at every logon:
+That distinction cost a full session once. The symptom was "the app still
+shows the old channel groups"; the cause was a deployed server 23 commits
+behind, while every fix was being applied and verified on a laptop nothing
+was connected to. If you change anything the app can see - groups, topics,
+languages, an endpoint - **it does not reach the phone until the server is
+updated.**
 
-```powershell
-$vbs = "C:\path\to\Vid App\scripts\serve-hidden.vbs"
-$action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument ('"' + $vbs + '"')
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User (whoami).Trim()
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName "Jaadugar Backend" -Action $action -Trigger $trigger -Settings $settings -Force
-```
-
-`ExecutionTimeLimit ([TimeSpan]::Zero)` matters: the default is three days,
-after which Task Scheduler would kill a perfectly healthy backend.
-
-Managing it afterwards:
-
-```powershell
-Start-ScheduledTask   -TaskName "Jaadugar Backend"   # start now
-Get-ScheduledTaskInfo -TaskName "Jaadugar Backend"   # last run and result
-Disable-ScheduledTask -TaskName "Jaadugar Backend"   # stop starting at logon
-Unregister-ScheduledTask -TaskName "Jaadugar Backend" -Confirm:$false
-```
-
-To stop a RUNNING one, kill the `cmd.exe` running `serve.cmd` as well as the
-`python.exe` under it - killing python alone just makes the restart loop bring
-it back fifteen seconds later.
-
-The phone needs the machine's LAN address, not `localhost`: find it with
-`ipconfig` and set the backend URL in the app to `http://<that-ip>:8099`.
-Windows must also allow inbound connections for whichever `python.exe`
-actually binds the socket, on the profile the Wi-Fi is using (`Public` for
-most home networks, confusingly).
+Host, credentials and the update procedure are in `DEPLOYMENT.local.md` in
+this directory. It is gitignored, because it names a machine that holds a
+YouTube publishing token.
 
 Full instructions: [docs/SETUP.md](docs/SETUP.md).
 Run it without your laptop: [deploy/oracle/README.md](deploy/oracle/README.md)

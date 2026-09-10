@@ -54,3 +54,7 @@ _dis_check.py
 _thumb*.py
 _peek.py
 _bank_write.py
+
+# Names the deployed host and its key path. Local only.
+DEPLOYMENT.local.md
+HANDOVER.local.md
