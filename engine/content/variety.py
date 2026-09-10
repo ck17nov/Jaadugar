@@ -72,17 +72,49 @@ def _perms(width: int = SIGNATURE_WIDTH) -> tuple[np.ndarray, np.ndarray]:
 _A, _B = _perms()
 
 
+# What a masked name is replaced BY.
+#
+# Alphabetic, because `util.words()` strips punctuation - the old placeholder
+# was " @ " and "@" is in util._PUNCT, so every masked name vanished entirely
+# instead of becoming a token. Two stories that differ only in name then had
+# DIFFERENT token counts at every name position, and the 4-gram windows either
+# side of each name were destroyed rather than aligned.
+_PLACEHOLDER = " xnamex "
+
+
 def mask_names(text: str, names: Iterable[str]) -> str:
     """Replace declared character names with a placeholder.
 
     This is what turns "the same story with a different protagonist" from
     invisible into obvious. Longest first, so "Mia Rose" is masked before
     "Mia" leaves a dangling "Rose".
+
+    WORD-BOUNDED, and that is not a nicety. Without \\b the substitution
+    matched inside words, so masking destroyed the overlap it exists to
+    measure: with a short name the wreckage was severe enough that a
+    byte-identical story escaped the gate completely. Measured, on the real
+    code, with protagonists "Milo" and "Al" over a story using wall / tall /
+    small / ball / called - raw 4-gram Jaccard 0.563, which is ABOVE the 0.55
+    reject line, but masked 0.055 and a MinHash estimate of 0.062, below the
+    0.12 screen. So `exact_similarity` was never called, "only the exact
+    score may reject" never engaged, and `check_new` returned nothing. Both
+    entries imported clean.
+
+    A name with no letters at either end - punctuation, or a name that is
+    itself a substring the author intended - still cannot be bounded, so
+    `\\b` is applied only where it means something.
     """
     out = text or ""
     for name in sorted({n.strip() for n in names if n and n.strip()},
                        key=len, reverse=True):
-        out = re.sub(re.escape(name), " @ ", out, flags=re.IGNORECASE)
+        escaped = re.escape(name)
+        # \b only asserts a boundary next to a word character. Anchoring
+        # against a name that starts or ends with punctuation would make the
+        # pattern unmatchable rather than safer.
+        left = r"\b" if name[:1].isalnum() else ""
+        right = r"\b" if name[-1:].isalnum() else ""
+        out = re.sub(f"{left}{escaped}{right}", _PLACEHOLDER, out,
+                     flags=re.IGNORECASE)
     return out
 
 

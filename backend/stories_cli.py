@@ -185,6 +185,50 @@ def stories_review(
                   f"by {by}{mark}")
 
 
+@stories_app.command("reclaim")
+def stories_reclaim(
+    apply: bool = typer.Option(False, "--apply",
+                               help="actually release them; default reports"),
+) -> None:
+    """Release entries claimed by a job that will never finish.
+
+    A claim is normally handed back by the pipeline's exception handlers,
+    which only run if the process survives to reach them. A kill does not:
+    this project's own long-form render was OOM-killed mid-encode and left
+    its entry marked used with no video and no way back. Ctrl-C, a service
+    restart and a power cut all do the same.
+
+    A job still working is never reclaimed, however long it has been going.
+    Releasing an entry mid-render is how the same script publishes twice.
+    """
+    db = _db()
+    try:
+        orphans = db.orphaned_bank_entries()
+        if apply:
+            for row in orphans:
+                db.release_bank_entry(row["entry_id"])
+    finally:
+        db.close()
+
+    if not orphans:
+        console.print("[green]nothing orphaned[/green] - every claimed entry "
+                      "belongs to a job that finished or is still running")
+        return
+
+    table = Table(title="orphaned claims")
+    for column in ("entry_id", "job", "why", "title"):
+        table.add_column(column)
+    for row in orphans:
+        table.add_row(row["entry_id"], row["used_job_id"] or "-",
+                      row["reason"], (row["title"] or "")[:40])
+    console.print(table)
+    if apply:
+        console.print(f"[green]released {len(orphans)}[/green] back to the pool")
+    else:
+        console.print(f"[yellow]{len(orphans)} would be released.[/yellow] "
+                      f"Re-run with --apply.")
+
+
 @stories_app.command("export")
 def stories_export(
     out: str = typer.Argument(..., help="the .jsonl file to write"),

@@ -123,40 +123,62 @@ def claim(db, *, group: str, language: str, video_format: str, job_id: str,
     """
     import json
 
-    while True:
-        row = db.claim_bank_entry(group=group, language=language,
-                                  video_format=video_format, job_id=job_id,
-                                  topics=topics, near_seconds=near_seconds)
-        if row is None:
-            return None
+    # DECIDE FIRST, CLAIM SECOND.
+    #
+    # This used to claim a row and THEN test it, moving on when the test
+    # failed - which left every rejected entry marked used. Measured: three
+    # unapproved entries in the bank, one claim() call, all three consumed
+    # and nothing rendered. And `save_bank_entry` preserves used state, so
+    # reviewing them afterwards could not bring them back. A single render
+    # destroyed the pool, while the CLI cheerfully said they "will not be
+    # claimed for rendering until reviewed".
+    candidates = db.bank_candidates(
+        group=group, language=language, video_format=video_format,
+        topics=topics, near_seconds=near_seconds)
+    if not candidates and near_seconds > 0:
+        # The duration filter is a preference, not a requirement: a bank of
+        # 30-second stories should still serve a 45-second request, since the
+        # entry's own length is what gets used anyway.
+        candidates = db.bank_candidates(
+            group=group, language=language, video_format=video_format,
+            topics=topics, near_seconds=0.0)
+
+    skipped: dict[str, int] = {}
+
+    def note(reason: str) -> None:
+        skipped[reason] = skipped.get(reason, 0) + 1
+
+    for row in candidates:
         try:
             entry = BankEntry.from_dict(json.loads(row["payload"]))
         except Exception as exc:                    # noqa: BLE001
-            # A row that will not parse must not be handed back to the pool,
-            # or the next claim picks it up again and the loop never ends. It
-            # stays claimed, which takes it out of circulation until someone
-            # re-imports a corrected file.
-            log_event("BANK", "stored entry will not parse; leaving it claimed",
+            log_event("BANK", "stored entry will not parse; skipping it",
                       entry=row["entry_id"], error=str(exc)[:120])
+            note("unparseable")
             continue
         if require_review and not approved(entry):
-            review = entry.human or {}
-            log_event("BANK", "skipping an entry that is not approved",
-                      entry=entry.entry_id,
-                      reviewer=str(review.get("reviewer", "")) or "nobody",
-                      verdict=str(review.get("verdict", "")) or "none")
-            # Left claimed on purpose, same reasoning: releasing it would make
-            # the next claim return the same entry forever.
+            note("not_approved")
             continue
         if require_human and not reviewed_by_human(entry):
-            log_event("BANK", "skipping an entry only a model approved",
-                      entry=entry.entry_id,
-                      kind=str((entry.human or {}).get("kind", "human")))
+            note("model_approved_only")
+            continue
+
+        # Only now is anything marked used, and only this one entry.
+        if db.claim_specific_bank_entry(entry.entry_id, job_id) is None:
+            # Another job took it between the read and here. Not an error and
+            # not a reason to stop - try the next candidate.
+            note("taken_by_another_job")
             continue
         log_event("BANK", "entry claimed", entry=entry.entry_id,
-                  title=entry.title[:60], seconds=f"{entry.estimated_seconds:.0f}",
+                  title=entry.title[:60],
+                  seconds=f"{entry.estimated_seconds:.0f}",
                   scenes=entry.scene_count)
         return BankClaim(entry=entry, entry_id=entry.entry_id)
+
+    if candidates:
+        log_event("BANK", "no claimable entry; nothing was consumed",
+                  candidates=len(candidates), **skipped)
+    return None
 
 
 def release(db, claim_: BankClaim | None, *, reason: str = "") -> None:

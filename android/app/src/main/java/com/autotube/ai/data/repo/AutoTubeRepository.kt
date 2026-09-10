@@ -114,6 +114,8 @@ class AutoTubeRepository(
                 captionStyle = request.captionStyle,
                 publishMode = request.publishMode,
                 channelId = request.channelId,
+                scriptSource = request.scriptSource,
+                nicheGroup = request.nicheGroup,
             )
         )
         logEvent("AUTOMATION", "queued ${request.niche} x${request.count}")

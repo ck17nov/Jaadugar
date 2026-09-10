@@ -152,6 +152,8 @@ class AutomationWorker(appContext: Context, params: WorkerParameters) :
             captionStyle = automation.captionStyle,
             publishMode = automation.publishMode,
             channelId = automation.channelId,
+            scriptSource = automation.scriptSource,
+            nicheGroup = automation.nicheGroup,
             style = automation.style,
             count = 1,
             mode = automation.mode,

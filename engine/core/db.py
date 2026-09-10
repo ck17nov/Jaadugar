@@ -477,6 +477,63 @@ class Database:
                 return None                 # somebody else claimed it first
         return dict(row)
 
+    def claim_specific_bank_entry(self, entry_id: str,
+                                  job_id: str) -> dict | None:
+        """Claim ONE known entry, atomically. None if somebody got there first.
+
+        Exists so a caller can decide whether it WANTS an entry before
+        marking it used. `claim_bank_entry` marks a row used and then hands
+        it over, which is fine when any row will do and catastrophic when the
+        caller might reject it: the previous consumer looped, and every entry
+        it declined - unapproved, unparseable, machine-approved under a
+        human-only policy - stayed claimed. One render walked the whole pool
+        and consumed it, and since `save_bank_entry` preserves used state,
+        reviewing an entry afterwards could not bring it back.
+
+        The atomicity is the same trick: `used_at<=0` in the UPDATE's WHERE,
+        so exactly one of two racing callers can win.
+        """
+        with self._lock:
+            updated = self._conn.execute(
+                "UPDATE bank_entries SET used_at=?, used_job_id=? "
+                "WHERE entry_id=? AND used_at<=0",
+                (time.time(), job_id, entry_id))
+            self._conn.commit()
+            if updated.rowcount != 1:
+                return None
+            row = self._conn.execute(
+                "SELECT * FROM bank_entries WHERE entry_id=?",
+                (entry_id,)).fetchone()
+        return dict(row) if row is not None else None
+
+    def bank_candidates(self, *, group: str, language: str,
+                        video_format: str, topics: Sequence[str] = (),
+                        near_seconds: float = 0.0,
+                        tolerance: float = 0.25,
+                        limit: int = 200) -> list[dict]:
+        """Unused entries that MIGHT be claimable, oldest first. No mutation.
+
+        The read half of what `claim_bank_entry` does in one step. The caller
+        filters these on whatever it cannot express in SQL - approval state,
+        reviewer kind, whether the payload parses - and then claims the one
+        it picked with `claim_specific_bank_entry`.
+        """
+        clauses = ["grp=?", "language=?", "video_format=?", "used_at<=0"]
+        params: list = [group.lower(), language.lower(), video_format.upper()]
+        wanted = [t.strip().lower() for t in topics if t and t.strip()]
+        if wanted:
+            marks = ",".join("?" for _ in wanted)
+            clauses.append(f"(topic='' OR topic IN ({marks}))")
+            params += wanted
+        if near_seconds > 0:
+            clauses.append("est_seconds BETWEEN ? AND ?")
+            params += [near_seconds * (1.0 - tolerance),
+                       near_seconds * (1.0 + tolerance)]
+        rows = self.query(
+            f"SELECT * FROM bank_entries WHERE {' AND '.join(clauses)} "
+            f"ORDER BY imported_at LIMIT ?", (*params, limit))
+        return [dict(r) for r in rows]
+
     def release_bank_entry(self, entry_id: str) -> None:
         """Put an entry back in the pool.
 
@@ -505,6 +562,63 @@ class Database:
                 "DELETE FROM bank_entries WHERE entry_id=?", (entry_id,))
             self._conn.commit()
         return cur.rowcount > 0
+
+    # A job is presumed dead after this long with no status change. Generous:
+    # a fifteen-minute long-form video spends over an hour in ffmpeg on two
+    # ARM cores, and reclaiming an entry from a render that is merely slow is
+    # how the same script publishes twice.
+    STALE_JOB_HOURS = 3.0
+
+    def orphaned_bank_entries(self, *,
+                              stale_hours: float | None = None) -> list[dict]:
+        """Entries claimed by a job that will never finish.
+
+        A claim is handed back by run()'s exception handlers, which only run
+        if the process survives to reach them. A kill does not: this project's
+        own long-form render was OOM-killed mid-encode (exit 137) and left its
+        entry marked used, its job frozen at RENDERING, and no way back.
+        Ctrl-C, a service restart and a power cut all do the same.
+
+        Three ways to be orphaned, and the third is the one that matters:
+          * the job is absent from video_jobs entirely;
+          * the job reached a terminal failure;
+          * the job is mid-stage but has not moved for `stale_hours`. Status
+            alone cannot tell a dead process from a busy one - the OOM-killed
+            render sat at RENDERING looking exactly like work in progress - so
+            the only available signal is that nothing has changed.
+        """
+        cutoff = float(self.STALE_JOB_HOURS if stale_hours is None
+                       else stale_hours) * 3600.0
+        rows = self.query(
+            "SELECT b.entry_id, b.title, b.used_job_id, b.used_at, "
+            "       j.status AS job_status, j.updated_at AS job_updated "
+            "FROM bank_entries b "
+            "LEFT JOIN video_jobs j ON j.job_id = b.used_job_id "
+            "WHERE b.used_at > 0")
+        # Never reclaim from a job that is WAITING for the user - it has
+        # finished its work and the entry is legitimately spent.
+        finished = {JobStatus.FAILED.value, JobStatus.REJECTED.value}
+        settled = {JobStatus.PUBLISHED.value, JobStatus.SCHEDULED.value,
+                   JobStatus.AWAITING_APPROVAL.value, JobStatus.READY.value}
+        now = time.time()
+        out = []
+        for row in rows:
+            record = dict(row)
+            status = record.get("job_status")
+            if status is None:
+                record["reason"] = "job never recorded"
+            elif status in finished:
+                record["reason"] = f"job {status}"
+            elif status in settled:
+                continue                    # spent on purpose
+            else:
+                idle = now - float(record.get("job_updated") or 0.0)
+                if idle < cutoff:
+                    continue                # still plausibly working
+                record["reason"] = (f"stuck at {status} for "
+                                    f"{idle / 3600:.1f}h")
+            out.append(record)
+        return out
 
     def bank_counts(self) -> list[dict]:
         """Per group/language/format: how many entries, how many left."""

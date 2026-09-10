@@ -53,6 +53,18 @@ data class AutomationEntity(
     @ColumnInfo(name = "publish_mode") val publishMode: String = "scheduled",
     @ColumnInfo(name = "channel_id") val channelId: String = "",
     @ColumnInfo(name = "min_quality_score") val minQualityScore: Int = 0,
+    // And then it happened again, to the two script-bank fields.
+    //
+    // A daily automation set to "Only my reviewed scripts" claimed a banked
+    // entry on the run POSTed from the Create screen, and then every
+    // WorkManager-fired run afterwards rebuilt the request from this row,
+    // found no scriptSource, fell back to "live" and generated a fresh
+    // unreviewed script - silently removing the review guarantee that is the
+    // whole reason "bank" exists as a separate option from "bank_first".
+    // nicheGroup went the same way, which sent a custom-topic automation to
+    // the default channel.
+    @ColumnInfo(name = "script_source") val scriptSource: String = "live",
+    @ColumnInfo(name = "niche_group") val nicheGroup: String = "",
 )
 
 @Entity(tableName = "jobs")
@@ -293,7 +305,10 @@ interface EventDao {
     // a local cache of automations the BACKEND now persists, so a rebuild
     // costs nothing and writing a hand migration for a cache does not earn
     // its keep.
-    version = 2,
+    // Bumped for script_source and niche_group. Same reasoning as the last
+    // bump: the table is a local cache of automations the BACKEND persists,
+    // so a destructive rebuild costs nothing.
+    version = 3,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)

@@ -428,10 +428,30 @@ class Pipeline:
                         claim.entry.to_dict())
         return claim
 
-    def _release_bank(self, claim, exc: BaseException) -> None:
-        """Return a claimed entry to the pool, never masking the real error."""
+    def _release_bank(self, claim, exc: BaseException,
+                      job: VideoJob | None = None) -> None:
+        """Return a claimed entry to the pool, never masking the real error.
+
+        REFUSES once the video exists on YouTube. `stage_publish` is the last
+        statement in run()'s try block, so an exception in its own bookkeeping
+        - writing upload_result.json, recording analytics - lands in the
+        handler AFTER the upload has succeeded. Releasing then puts the script
+        back in the pool for a later render to claim and publish a second
+        time, which is the one outcome a variety gate cannot undo.
+        """
         if claim is None:
             return
+        if job is not None:
+            published = (getattr(job, "youtube_video_id", "")
+                         or job.status in (JobStatus.PUBLISHED.value,
+                                           JobStatus.SCHEDULED.value))
+            if published:
+                log_event("BANK", "keeping the entry used - it has already "
+                                  "published",
+                          entry=claim.entry_id, job=job.job_id,
+                          video=getattr(job, "youtube_video_id", "") or "-",
+                          status=job.status, error=str(exc)[:120])
+                return
         try:
             from .content import bank_use
             bank_use.release(self.db, claim, reason=str(exc)[:160])
@@ -1008,14 +1028,33 @@ class Pipeline:
         # voice has been measured.
         if caption_language:
             self._translate_captions(job_dir, request, script)
+        scenes_now = script.scene_objects()
         translated = [
             (scene.start, scene.start + scene.duration,
              getattr(scene, "caption_text", ""))
-            for scene in script.scene_objects()
+            for scene in scenes_now
             if getattr(scene, "caption_text", "").strip()
         ]
+        # COVERAGE, not "any". A single captioned scene must not commit the
+        # whole video to the block path.
+        #
+        # The disclaimer scene always carries a caption, so on a live
+        # finance or health render `translated` was never empty even when the
+        # translation failed completely - and the video then shipped with one
+        # cue, the disclaimer, and every other scene uncaptioned. Before the
+        # bank work a failed translation left every caption empty, so the
+        # karaoke fallback took over and the video was captioned in the
+        # narration language, which is the correct degradation.
+        covered = (len(translated) / len(scenes_now)) if scenes_now else 0.0
+        enough = covered >= float(
+            self.cfg.get("captions.translated_coverage_floor", 0.6))
+        if caption_language and translated and not enough:
+            log_event("CAPTION", "too few scenes translated; falling back to "
+                                 "captions in the narration language",
+                      translated=len(translated), scenes=len(scenes_now),
+                      covered=f"{covered:.0%}")
         if caption_style != "none":
-            if caption_language and translated:
+            if caption_language and translated and enough:
                 ass_path, srt_path, groups =                     self.caption_engine.build_translated(
                         translated, job_dir / "captions.ass",
                         job_dir / "captions.srt", w, h,
@@ -1403,11 +1442,11 @@ class Pipeline:
             # back rather than burning a curated script on a transient TTS or
             # ffmpeg failure - unlike a generated script it cannot be
             # reproduced on demand.
-            self._release_bank(claim, exc)
+            self._release_bank(claim, exc, job)
             self._advance(job, JobStatus.FAILED, job.error)
             raise
         except Exception as exc:
-            self._release_bank(claim, exc)
+            self._release_bank(claim, exc, job)
             job.error = str(exc)[:500]
             self._advance(job, JobStatus.FAILED, job.error)
             raise PipelineError("pipeline", str(exc)) from exc
