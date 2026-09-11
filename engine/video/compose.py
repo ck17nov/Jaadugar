@@ -128,24 +128,44 @@ class VideoComposer:
     # ------------------------------------------------------------------
     # Pass A: per-scene motion clips
     # ------------------------------------------------------------------
-    def _clip_lengths(self, durations: list[float]) -> list[float]:
+    def _clip_lengths(self, durations: list[float],
+                      groups: list[int] | None = None) -> list[float]:
         """Pad each clip so cross-fades are centred and total length is exact.
 
         With n clips and transition T, an xfade chain outputs
         sum(L_i) - (n-1)*T.  Setting L_0 = d_0 + T/2, L_last = d_last + T/2 and
         L_i = d_i + T in between makes the output length exactly sum(d_i) and
         places each transition symmetrically across its scene boundary.
+
+        `groups` says which SCENE each clip belongs to, and changes the sum:
+        clips inside one scene are CUT together, not cross-faded, so they get
+        no padding at that boundary. Only a boundary where the group changes
+        costs T, and only the clips either side of it are padded.
+
+        Without it, one clip per shot meant one cross-fade per shot - a
+        dissolve between two angles on the same moment, which reads as a
+        mistake, and a filter chain three times longer than the scene count.
+        Every frame of the video passes through every node of that chain,
+        single threaded: 503 seconds of CPU for a 50-second Short.
         """
         n = len(durations)
         t = self.transition_dur
         if n == 1:
             return [durations[0]]
+        # Which boundaries actually cross-fade. boundary i sits between clip
+        # i and clip i+1.
+        if groups is None:
+            fades = [True] * (n - 1)
+        else:
+            fades = [groups[i] != groups[i + 1] for i in range(n - 1)]
         out: list[float] = []
         for i, d in enumerate(durations):
-            if i == 0 or i == n - 1:
-                out.append(d + t / 2.0)
-            else:
-                out.append(d + t)
+            pad = 0.0
+            if i > 0 and fades[i - 1]:
+                pad += t / 2.0
+            if i < n - 1 and fades[i]:
+                pad += t / 2.0
+            out.append(d + pad)
         return out
 
     def _motion_filter(self, motion: str, frames: int, w: int, h: int, *,
@@ -213,11 +233,12 @@ class VideoComposer:
     def render_scene_clips(self, timings: list[SceneTiming], out_dir: Path,
                            w: int, h: int,
                            parallel: int | None = None,
-                           hold_first_seconds: float = 0.0) -> list[Path]:
+                           hold_first_seconds: float = 0.0,
+                           groups: list[int] | None = None) -> list[Path]:
         ensure_dir(out_dir)
         if parallel is None:
             parallel = self.render_parallel
-        lengths = self._clip_lengths([t.duration for t in timings])
+        lengths = self._clip_lengths([t.duration for t in timings], groups)
         # Freeze the opening frame before the move begins. Used for Shorts,
         # where the first frame is the thumbnail and there is no API to upload
         # a different one.
@@ -412,20 +433,56 @@ class VideoComposer:
     # ------------------------------------------------------------------
     # Pass B: stitch + captions + final encode
     # ------------------------------------------------------------------
-    def _xfade_chain(self, clips: list[Path], lengths: list[float]) -> tuple[str, str]:
-        """Build the xfade filter chain and return (chain, final_label)."""
+    def _xfade_chain(self, clips: list[Path], lengths: list[float],
+                     groups: list[int] | None = None) -> tuple[str, str]:
+        """Build the filter chain and return (chain, final_label).
+
+        Shots of the SAME scene are concatenated - a shot change is a cut -
+        and only the scene streams are cross-faded. So the xfade chain is as
+        long as the scene count, not the shot count.
+        """
         if len(clips) == 1:
             return "[0:v]null[vout]", "[vout]"
         t = self.transition_dur
+
+        # Runs of consecutive clips that belong to one scene.
+        runs: list[list[int]] = []
+        for i in range(len(clips)):
+            if (runs and groups is not None
+                    and groups[i] == groups[runs[-1][-1]]):
+                runs[-1].append(i)
+            else:
+                runs.append([i])
+
         parts: list[str] = []
-        current = "[0:v]"
+        labels: list[str] = []
+        spans: list[float] = []
+        for n, run in enumerate(runs):
+            spans.append(sum(lengths[i] for i in run))
+            if len(run) == 1:
+                labels.append(f"[{run[0]}:v]")
+                continue
+            # A hard cut. `concat` needs matching parameters, which is true
+            # by construction: every clip came out of the same encoder
+            # settings at the same resolution and frame rate.
+            ins = "".join(f"[{i}:v]" for i in run)
+            label = f"[vc{n}]"
+            parts.append(f"{ins}concat=n={len(run)}:v=1:a=0{label}")
+            labels.append(label)
+
+        if len(labels) == 1:
+            # One scene: the concat IS the whole video.
+            parts.append(f"{labels[0]}null[vout]")
+            return ";".join(parts), "[vout]"
+
+        current = labels[0]
         cursor = 0.0
-        for i in range(1, len(clips)):
-            cursor += lengths[i - 1] - t
+        for i in range(1, len(labels)):
+            cursor += spans[i - 1] - t
             kind = (self.transition if self.transition != "auto"
                     else TRANSITIONS[i % len(TRANSITIONS)])
             label = f"[vx{i}]"
-            parts.append(f"{current}[{i}:v]xfade=transition={kind}:"
+            parts.append(f"{current}{labels[i]}xfade=transition={kind}:"
                          f"duration={t:.3f}:offset={max(cursor, 0.0):.3f}{label}")
             current = label
         return ";".join(parts), current
@@ -486,8 +543,9 @@ class VideoComposer:
         return segments, durations
 
     def finalize(self, clips: list[Path], durations: list[float], audio: Path,
-                 ass_file: Path | None, out_path: Path, w: int, h: int) -> RenderResult:
-        lengths = self._clip_lengths(durations)
+                 ass_file: Path | None, out_path: Path, w: int, h: int,
+                 groups: list[int] | None = None) -> RenderResult:
+        lengths = self._clip_lengths(durations, groups)
 
         # Long-form: pre-stitch in batches so the final call has a handful of
         # inputs instead of hundreds. Duration is preserved exactly (see
@@ -496,8 +554,11 @@ class VideoComposer:
         if len(clips) > self.segment_max:
             segment_dir = out_path.parent / "segments"
             clips, lengths = self._render_segments(clips, lengths, segment_dir)
+            # Pre-stitched segments are already one stream each, so every
+            # remaining boundary is a real scene boundary.
+            groups = None
 
-        chain, vlabel = self._xfade_chain(clips, lengths)
+        chain, vlabel = self._xfade_chain(clips, lengths, groups)
 
         filters = [chain]
         # Caption burn-in. fontsdir keeps rendering identical across machines.

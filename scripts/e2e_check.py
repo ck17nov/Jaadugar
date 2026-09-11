@@ -109,6 +109,11 @@ def run_one(pipe: Pipeline, *, group: str, topic: str, video_format: str,
         # test. A request that asked for approval could not detect the gate
         # firing when it should not.
         mode="AUTO",
+        # The child-directed classification, affirmed. Without it the kids
+        # gate holds the video - correctly - and the publish check below
+        # cannot tell that from the gate misfiring, which is the bug this
+        # whole sweep exists to catch a regression of.
+        kids_confirmed=True,
         # bank_first, not bank: an empty cell should fall through to live
         # generation rather than abort the sweep.
         script_source="bank_first")
@@ -130,8 +135,9 @@ def run_one(pipe: Pipeline, *, group: str, topic: str, video_format: str,
     shots = _shot_report(job_dir, duration)
     cues = _cue_report(job_dir)
 
+    script = json.loads((job_dir / "script.json").read_text(encoding="utf-8"))
     print(f"  {DIM}{job.job_id}  {duration:.1f}s  "
-          f"{(result.script.provider if result.script else '')}{RESET}")
+          f"{script.get('provider', '')}{RESET}")
 
     if "error" in shots:
         _check("shot pacing", False, shots["error"], failures)

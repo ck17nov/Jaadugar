@@ -1241,7 +1241,15 @@ class Pipeline:
         motion_cycle = self._motion_cycle or MOTION_CYCLE
         timings: list[SceneTiming] = []
         durations: list[float] = []
-        for scene in scenes:
+        # WHICH SCENE EACH SHOT BELONGS TO.
+        #
+        # Shots of one scene are CUT together; only scene boundaries get a
+        # cross-fade. A dissolve between two angles on the same moment reads
+        # as a mistake, and it also made the ffmpeg filter chain three times
+        # longer than the scene count - every frame passes through every
+        # node of it, single threaded.
+        shot_groups: list[int] = []
+        for scene_no, scene in enumerate(scenes):
             if scene.duration <= 0:
                 continue
             shots = scene.shot_paths()
@@ -1250,6 +1258,7 @@ class Pipeline:
             share = scene.duration / len(shots)
             for offset, path in enumerate(shots):
                 durations.append(share)
+                shot_groups.append(scene_no)
                 timings.append(SceneTiming(
                     index=len(timings), image=Path(path), duration=share,
                     motion=(scene.motion if offset == 0 else
@@ -1279,9 +1288,10 @@ class Pipeline:
                                              0.4)))
         clips = self._retry("render", lambda: self.composer.render_scene_clips(
             timings, job_dir / "clips", w, h,
-            hold_first_seconds=hold_open), job)
+            hold_first_seconds=hold_open, groups=shot_groups), job)
         result = self._retry("render", lambda: self.composer.finalize(
-            clips, durations, master, ass_path, job_dir / "video.mp4", w, h), job)
+            clips, durations, master, ass_path, job_dir / "video.mp4", w, h,
+            groups=shot_groups), job)
         cleanup_clips(clips)
 
         job.video_path = str(result.video)
