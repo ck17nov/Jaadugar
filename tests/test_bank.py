@@ -1290,3 +1290,73 @@ def test_an_unknown_group_asks_for_nothing(db, fake_research):
     fake_research.corpus = [_FakeVideo("Never Reached", 10, 10)]
     assert bank_prompt.viral_titles_for(load_config(), db,
                                         group_key="dog grooming") == []
+
+
+# ---------------------------------------------------------------------------
+# The prompt has to teach the rules the gates enforce
+# ---------------------------------------------------------------------------
+def test_the_prompt_bans_the_perception_turn():
+    """The gate rejects it, so the prompt must warn about it.
+
+    A gate that blocks something the prompt never mentioned just wastes a
+    batch. Measured: 10 of 19 banked narratives turn on the child looking
+    somewhere else.
+    """
+    text = bank_prompt.build(group_key="kids", language="en",
+                             video_format="SHORT", target_seconds=45,
+                             count=6, shape="narrative")
+    assert "THE TURN MUST BE AN IDEA" in text
+    for banned in ("noticed", "peeked", "remembered"):
+        assert banned in text
+    assert "looked\n  somewhere else" in text or "looked" in text
+
+
+def test_the_prompt_states_the_measured_title_band():
+    text = bank_prompt.build(group_key="kids", language="en",
+                             video_format="SHORT", target_seconds=45,
+                             count=6, shape="narrative")
+    assert "8 to 14 WORDS" in text
+    assert "55 to 70 characters" in text
+    # And the hard limit the importer enforces, so a batch is not rejected
+    # wholesale after being written - which is what happened.
+    assert "100" in text
+
+
+def test_the_prompt_forbids_spoiling_the_turn_in_the_title():
+    text = bank_prompt.build(group_key="kids", language="en",
+                             video_format="SHORT", target_seconds=45,
+                             count=6, shape="narrative")
+    assert "NO SPOILERS" in text
+    assert "last 40%" in text
+
+
+def test_an_explainer_is_told_to_keep_its_searchable_term():
+    """The opposite rule, because a how-to IS found by matching words."""
+    text = bank_prompt.build(group_key="tech", language="en",
+                             video_format="LONGFORM", target_seconds=300,
+                             count=3, shape="procedure")
+    assert "SEARCH for" in text
+    assert "NO SPOILERS" not in text
+
+
+def test_a_drill_is_not_given_the_story_craft_rules():
+    """A counting drill has no turn and no refrain to protect."""
+    text = bank_prompt.build(group_key="kids", language="en",
+                             video_format="SHORT", target_seconds=45,
+                             count=6, shape="drill")
+    assert "THE TURN MUST BE AN IDEA" not in text
+
+
+def test_research_patterns_are_on_by_default():
+    """The 26 existing entries were authored blind against their own niche.
+
+    `viral_titles` had been a parameter of `build` since the bank existed
+    and nothing ever supplied one, because the CLI flag was opt-in.
+    """
+    import inspect
+
+    from backend import stories_cli
+
+    source = inspect.getsource(stories_cli.stories_prompt)
+    assert '"--viral/--no-viral"' in source
+    assert "True, " in source.split("viral: bool")[1][:120]

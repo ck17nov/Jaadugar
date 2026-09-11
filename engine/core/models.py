@@ -236,6 +236,19 @@ class Scene(JsonMixin):
     duration: float = 0.0
     asset_path: str = ""
     motion: str = "zoom_in"
+    # EXTRA SHOTS for this same beat, in order after `asset_path`.
+    #
+    # One image per beat meant a 51.8-second Short was seven stills held 7.4
+    # seconds each, drifting at a third of a pixel per frame - a slideshow.
+    # The narration span is still one beat; it is now covered by two or three
+    # framings of it, which is what the reference channels do. `asset_path`
+    # stays the FIRST shot so the thumbnail picker and everything else that
+    # reads one image per scene keep working.
+    extra_assets: list[str] = field(default_factory=list)
+
+    def shot_paths(self) -> list[str]:
+        """Every image for this beat, in screen order."""
+        return [p for p in [self.asset_path, *self.extra_assets] if p]
 
 
 @dataclass

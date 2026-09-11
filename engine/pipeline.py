@@ -31,8 +31,8 @@ from .core.db import Database
 from .core.groups import group_for_topic
 from .core.logging import log_event, setup_logging
 from .core.models import (AutomationRequest, ContentIdea, JobStatus, Mode,
-                          QualityReport, ResearchVideo, Script, VideoJob,
-                          VideoMetadata)
+                          QualityReport, ResearchVideo, Scene, Script,
+                          VideoJob, VideoMetadata)
 from .core.niche import build_profile
 from .core.util import (clamp, count_words, ensure_dir, have_ffmpeg,
                         read_json, safe_write_json, sha1, slugify)
@@ -42,7 +42,8 @@ from .research.youtube import QuotaGuard, YouTubeResearch
 from .thumbnail.generator import ThumbnailGenerator
 from .tts.engine import VoiceEngine
 from .video.captions import CaptionEngine
-from .video.compose import SceneTiming, VideoComposer, assign_motion, cleanup_clips
+from .video.compose import (MOTION_CYCLE, SceneTiming, VideoComposer,
+                           assign_motion, cleanup_clips)
 from .video.music import build_music, build_transition_sfx
 from .video.templates import (apply_to_profile, caption_overrides,
                               select_template, video_overrides,
@@ -975,6 +976,75 @@ class Pipeline:
             bible.save(job_dir / "character_bible.json")
         return bible or None
 
+    # How a beat is covered when it is long enough for more than one shot.
+    #
+    # Framings of the SAME moment, in an order that reads: establish it, get
+    # closer, then the detail that matters. Deliberately not "a different
+    # scene" - the narration has not moved on, so neither has the subject.
+    SHOT_SCALES = (
+        "",                                         # the brief as written
+        "closer medium shot, same moment, shallow depth of field",
+        "detail insert, hands and the object, close up",
+        "wider angle of the same moment, low camera",
+    )
+
+    def _plan_shots(self, scenes: list[Scene]) -> list[tuple[Scene, list[Scene]]]:
+        """Decide how many images each beat gets, and describe each one.
+
+        The count comes from the beat's MEASURED duration, so a short beat
+        keeps its single image and only the long ones are broken up. A shot
+        shorter than `video.shot_min_seconds` reads as a flicker, which is
+        the opposite failure to the one being fixed.
+        """
+        floor = float(self.cfg.get("video.shot_min_seconds", 2.0))
+        cap = max(1, int(self.cfg.get("video.shots_per_scene_max", 3)))
+        cycle = self._motion_cycle or MOTION_CYCLE
+        plan: list[tuple[Scene, list[Scene]]] = []
+        index = 0
+        for scene in scenes:
+            span = float(scene.duration or 0.0)
+            wanted = 1 if span <= 0 else max(1, min(cap, int(span // floor)))
+            shots: list[Scene] = []
+            for shot in range(wanted):
+                suffix = self.SHOT_SCALES[shot % len(self.SHOT_SCALES)]
+                brief = scene.visual_prompt or scene.narration
+                shots.append(Scene(
+                    # A FRESH index per shot: the image seed is derived from
+                    # it, so without this every shot of a beat would be the
+                    # same picture generated three times.
+                    index=index,
+                    narration=scene.narration,
+                    visual_prompt=f"{brief}, {suffix}" if suffix else brief,
+                    visual_keywords=list(scene.visual_keywords),
+                    on_screen_text=scene.on_screen_text if shot == 0 else "",
+                    role=scene.role,
+                    caption_text=scene.caption_text,
+                    duration=(span / wanted) if span > 0 else 0.0,
+                    # Alternating moves, so consecutive shots of one beat do
+                    # not all drift the same way.
+                    motion=cycle[index % len(cycle)],
+                ))
+                index += 1
+            plan.append((scene, shots))
+        total = sum(len(s) for _, s in plan)
+        if total > len(scenes):
+            log_event("VISUAL", "covering beats with several shots",
+                      beats=len(scenes), shots=total,
+                      mean_hold=f"{sum(float(s.duration or 0) for s in scenes) / max(total, 1):.1f}s")
+        return plan
+
+    def _collect_shots(self, plan: list[tuple[Scene, list[Scene]]]) -> None:
+        """Copy the generated paths back onto the real scenes."""
+        for scene, shots in plan:
+            paths = [s.asset_path for s in shots if s.asset_path]
+            if not paths:
+                continue
+            scene.asset_path = paths[0]
+            scene.extra_assets = paths[1:]
+            # The first shot's motion becomes the scene's, for anything that
+            # still reads one motion per scene.
+            scene.motion = shots[0].motion
+
     def stage_visuals(self, job: VideoJob, request: AutomationRequest, profile,
                       script: Script, claim=None) -> list:
         self._advance(job, JobStatus.VISUALS, f"scenes={len(script.scenes)}")
@@ -982,11 +1052,6 @@ class Pipeline:
         scenes = script.scene_objects()
         assign_motion(scenes, self._motion_cycle)
         w, h = self.composer.resolution(request.video_format)
-
-        # Scene durations were measured during the voice stage and written back
-        # onto the script. Passing them lets the stock-video provider skip
-        # clips shorter than the scene, which would otherwise loop visibly.
-        durations = [s.duration or 0.0 for s in scenes]
 
         # Fix the cast before any image is generated.
         #
@@ -996,6 +1061,20 @@ class Pipeline:
         # scene, because the entire point is that the descriptions do not
         # change between shots.
         bible = self._character_bible(job_dir, script, claim)
+
+        # MORE PICTURES PER BEAT, same narration timing.
+        #
+        # A beat is six to nine seconds of speech, and one still held for all
+        # of it is a slideshow: measured on a real Short, 7 images over 51.8
+        # seconds, 7.4s each. The beat keeps its span and its brief; it is
+        # now covered by two or three FRAMINGS of the same moment - a wide,
+        # a medium, a detail - which is what the channels this imitates do.
+        #
+        # Built as extra scenes before generation rather than in a second
+        # pass, so the existing thread pool, per-shot seeding and provider
+        # fallback all apply unchanged.
+        shot_plan = self._plan_shots(scenes)
+        to_generate = [shot for _, shots in shot_plan for shot in shots]
 
         assets = self._retry("visuals", lambda: self.visual_engine.generate(
             # The ART DIRECTION, not the tone.
@@ -1010,10 +1089,12 @@ class Pipeline:
             #
             # `profile.visual_style` is what the template set for exactly this
             # purpose (templates.py apply_to_profile).
-            scenes, job_dir / "assets", style=profile.visual_style,
+            to_generate, job_dir / "assets", style=profile.visual_style,
             made_for_kids=profile.made_for_kids, width=w, height=h,
-            durations=durations, bible=bible), job)
+            durations=[s.duration or 0.0 for s in to_generate],
+            bible=bible), job)
 
+        self._collect_shots(shot_plan)
         script.scenes = [s.to_dict() for s in scenes]
         job.script = script.to_dict()
         job.assets = [a.to_dict() for a in assets]
@@ -1148,16 +1229,42 @@ class Pipeline:
             voice, job_dir / "master.wav", music=music_path, sfx=sfx_path), job)
 
         # ---- video ------------------------------------------------------
-        durations = [s.duration for s in scenes if s.duration > 0]
+        # ONE CLIP PER SHOT, not per beat.
+        #
+        # A beat's measured span is divided between its shots, so the total
+        # is unchanged to the millisecond and the audio, the captions and
+        # the chapter marks all still line up - they are timed in absolute
+        # seconds and know nothing about clips. What changes is how often
+        # the picture does.
+        motion_cycle = self._motion_cycle or MOTION_CYCLE
+        timings: list[SceneTiming] = []
+        durations: list[float] = []
+        for scene in scenes:
+            if scene.duration <= 0:
+                continue
+            shots = scene.shot_paths()
+            if not shots:
+                continue
+            share = scene.duration / len(shots)
+            for offset, path in enumerate(shots):
+                durations.append(share)
+                timings.append(SceneTiming(
+                    index=len(timings), image=Path(path), duration=share,
+                    motion=(scene.motion if offset == 0 else
+                            motion_cycle[len(timings) % len(motion_cycle)])))
         if not durations:
             raise PipelineError("render", "no measured scene durations")
-        timings = [SceneTiming(index=s.index, image=Path(s.asset_path),
-                               duration=s.duration, motion=s.motion)
-                   for s in scenes if s.asset_path and s.duration > 0]
-        if len(timings) != len(durations):
+        if len(timings) != len(durations):        # pragma: no cover - paired above
             raise PipelineError("render",
-                                f"{len(durations)} timed scenes but "
+                                f"{len(durations)} timed shots but "
                                 f"{len(timings)} have images")
+        timed = sum(s.duration for s in scenes if s.duration > 0)
+        if abs(sum(durations) - timed) > 0.05:
+            raise PipelineError(
+                "render",
+                f"the shots total {sum(durations):.2f}s against {timed:.2f}s "
+                f"of measured narration - the picture would drift from the "
+                f"voice")
 
         # Hold the opening frame on a SHORT.
         #

@@ -396,7 +396,39 @@ that breaks one is rejected without being read
   Scene 1 opens on the character doing something, somewhere, right now.
 - Invite the child to join in aloud EXACTLY TWICE, and make the invitation fit
   the story - if it is about a kite, do not ask them to knock three times.
-- No moral, no "and that is why". The last line is what the character feels.""")
+- No moral, no "and that is why". The last line is what the character feels.
+
+CRAFT - what separates a story from the SHAPE of a story
+The rules above are satisfiable by a script that is dull, and nineteen of them
+were: measured across the existing bank, 10 of 19 turn on the child merely
+looking somewhere else, 9 of 19 make the obstacle a feeling in the body, and
+"throat went tight" appears word for word in three different stories. All
+nineteen passed every gate. These four rules are what the gates now also
+check, and they are the difference between a story and a template.
+- THE TURN MUST BE AN IDEA, NEVER A PERCEPTION. Banned as the turn's opening
+  move: noticed, saw, spotted, looked, peeked, peered, glanced, remembered,
+  realised, heard, listened, watched, found - and "तभी ... (देखा|सुना|झाँका|
+  दिखा|सूझा)". The test: if the turn can be restated as "they looked
+  somewhere else", it is not a turn. The child must INVENT something - use an
+  object for a job it was not made for, combine two things, trade, ask
+  differently, or change what they want. A five-year-old should be able to
+  copy it tomorrow.
+- SOMETHING MUST GET MEASURABLY WORSE, and the script must name the
+  worsening: a second person who wants the same thing, a limit that appears,
+  or the attempt breaking something. A body sensation - an ache, a tight
+  throat, tired arms - is at most ONE CLAUSE in the whole script, and never
+  the obstacle on its own. Nothing about the situation has changed when a
+  shoulder hurts.
+- THE FIRST SENTENCE CARRIES THE WANT and what is lost if it fails, in
+  fourteen words or fewer. Posture, weather and furniture wait for sentence
+  two. Do not open every script with the character's name as the literal
+  first word - at most one in five of this batch may.
+- THE REFRAIN IS SOMETHING A CHILD CAN POINT AT, DO OR COUNT. Not sharing,
+  kindness, quiet, enough, brave, patience, हिम्मत or सब्र - those are ideas.
+  It must contain a repeated word, a rhyme or a count; the CHARACTER says it
+  out loud inside the action at least once, not only as a line tagged onto
+  the end of a scene; and it should mean something different the last time
+  from the first.""")
 
     if finance:
         parts.append("""
@@ -534,17 +566,59 @@ VARIETY - a bank of similar stories cannot be monetised, so this is enforced
                      + "; ".join(list(used_titles)[:60]))
 
     # ---- titles ----
+    #
+    # Rewritten against MEASURED data, because the previous instruction -
+    # "at most 70 characters, specific, and true of THIS script" - produced
+    # 13 bare noun phrases with no verb out of 22, 8 that printed the
+    # ending, and 0 that asked a question. The top thirty performers in this
+    # niche, from the seeded-channel research, run a median 11 words and 66
+    # characters, 46% carry a question mark or an exclamation, 50% open with
+    # an emoji and 83% end in hashtags.
+    #
+    # The render's own scorer now agrees with these rules - it used to
+    # reward the opposite - so a title written to them wins on merit rather
+    # than by being authored.
     if shape in ("narrative", "poem"):
-        alts_line = (" One that names the character and\n  the problem, one "
-                     "that poses the situation.")
+        part_two = ("an OPEN QUESTION or a felt consequence. The viewer must "
+                    "not be able to finish the sentence in their head")
+        alts_line = ("Exactly one of the three opens on a question word, "
+                     "exactly one opens on the character acting, and AT MOST "
+                     "ONE may use the \"X and the Y\" noun-list frame.")
+        spoiler = """
+- NO SPOILERS, and this is checked mechanically. Take the last 40% of your
+  scenes - for 7 scenes, scenes 5, 6 and 7. No content word that FIRST
+  appears in those scenes may appear in the title or either alt. Only the
+  character's name and an object named in scene 1 may cross over. The check
+  compares word STEMS, so an inflected form does not get past it: if the
+  narration says "दूसरे सिरे" you may not write "दूसरा सिरा" either."""
     else:
-        alts_line = (" One that names the thing and what\n  it does, one that "
-                     "names the mistake it prevents.")
+        part_two = ("THE MISTAKE IT PREVENTS, or what it costs not to know "
+                    "this")
+        alts_line = ("One names the thing and what it does; one names the "
+                     "mistake it prevents.")
+        spoiler = """
+- Keep the term people actually SEARCH for in the visible title (VLOOKUP,
+  expense ratio, Word styles). A how-to is found by matching its words."""
+
+    limit = ("100 characters INCLUDING the tail below - YouTube truncates at "
+             "100 and the importer rejects anything longer")
     parts.append(f"""
-TITLES
-- "title" is at most 70 characters, specific, and true of THIS script. No
-  "Amazing", no "You won't believe", no keyword stuffing.
-- "title_alts" holds two more options of DIFFERENT shapes.{alts_line}
+TITLES - the operator's stated main concern, so read this twice
+- The VISIBLE title - what is left after removing a leading emoji, a
+  trailing " | English gloss" and the hashtag tail - is 55 to 70 characters
+  and 8 to 14 WORDS. Count them. The whole string must still fit {limit}.
+- TWO PARTS. Part one: the character and the trouble, with the character's
+  name inside the first four words. Part two: {part_two}.
+  Join them with "..." or end on "?".{spoiler}
+- Exactly ONE emoji, at the front, chosen for the FEELING rather than the
+  object. No emoji anywhere else. At most one "!". No ALL CAPS.
+- End with 2 to 3 lowercase hashtags. A Devanagari title may add
+  " | <4-6 word English gloss>" before them IF the whole string still fits
+  100 characters; drop the gloss before you drop the sentence.
+- "title_alts" holds two more, in the same length band. {alts_line}
+- The question the title poses MUST be answered on screen. No "Amazing",
+  no "You won't believe", no keyword stuffing, no promise the script does
+  not keep.
 - "description_hook" is one or two sentences to open the description.""")
 
     if viral_titles:

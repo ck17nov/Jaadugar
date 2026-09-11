@@ -55,9 +55,13 @@ def stories_prompt(
                                    "procedure"),
     out: str = typer.Option("", "--out", help="write to a file instead"),
     viral: bool = typer.Option(
-        False, "--viral",
+        True, "--viral/--no-viral",
         help="include real high-performing titles from the niche as SHAPE "
-             "input. Spends YouTube quota and needs YOUTUBE_API_KEY."),
+             "input. ON by default - a batch authored blind against its own "
+             "niche is how the existing 26 were written. Costs ~9 YouTube "
+             "quota units and needs YOUTUBE_API_KEY; degrades silently to a "
+             "prompt without the patterns when either is missing. Use "
+             "--no-viral to skip the call."),
 ) -> None:
     """Print the prompt to paste into Claude or ChatGPT."""
     found = get_group(group)
