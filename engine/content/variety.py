@@ -57,11 +57,17 @@ MAX_ARC_SHARE = 0.20
 MAX_OUTCOME_SHARE = 0.30
 # A character name may recur - a series is fine - but not everywhere.
 MAX_NAME_SHARE = 0.15
-# No single TURN KIND may own more than this share of a group. The measured
-# failure: 10 of 19 narratives turned on the child looking somewhere else,
-# and every pair differed on enough of the other axes to pass, because none
-# of them described the plot machinery.
+# Only the WEAK turn kinds are capped, and this is a correction to a first
+# attempt that capped all of them at 25%.
+#
+# The rewritten bank came back with 9 of 12 turns labelled "invent" and the
+# cap rejected them - which is backwards. "invent" is what a good turn IS,
+# and the label being shared says nothing about the plot: a bottle cap used
+# as a bird bath, a hair clip used as a clamp and a paper sail torn off are
+# three different ideas. The failure being guarded against is specifically
+# the turn that is not a turn, so only that is capped.
 MAX_TURN_SHARE = 0.25
+WEAK_TURN_KINDS = frozenset({"notice"})
 # Below this many entries in a group, a share cap measures the bank's size
 # rather than its sameness: one script out of five is 20% whatever it says.
 SHARE_CAP_FLOOR = 10
@@ -350,7 +356,7 @@ def check_new(candidate: Any, existing: Sequence[Any]) -> list[VarietyIssue]:
                 f"outcome {candidate.outcome_class!r} would be "
                 f"{outcome_share:.0%}; cap is {MAX_OUTCOME_SHARE:.0%}", True))
         turn = (candidate.turn_kind or "").strip().lower()
-        if turn:
+        if turn in WEAK_TURN_KINDS:
             turns = Counter(
                 (getattr(e, "turn_kind", "") or "").strip().lower()
                 for e in list(peers) + [candidate])

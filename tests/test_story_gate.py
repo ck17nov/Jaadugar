@@ -25,8 +25,12 @@ BAD = [
 GOOD_EN = [
     "Mia wants the top shelf tin. Not yet, Mia. Not yet.",
     "She jumps up. Her fingers miss. Not yet, Mia. Not yet.",
-    "The shelf is too tall. Her tummy feels tight. Can you jump with me?",
-    "She sees a small wooden stool and pulls it close.",
+    # A COMPLICATION, not a feeling. This fixture is the gate's definition
+    # of a well-shaped story, so it has to satisfy the craft checks too -
+    # it used to have a body ache here and a perception at the turn, which
+    # is exactly what 12 of the 19 banked entries had.
+    "The shelf is too tall, and the last tin slides further back.",
+    "She drags a small wooden stool across and makes herself taller.",
     "She climbs up and opens the lid. The cookies smell sweet.",
     "Not yet, Mia. Not yet. Now yes, Mia!",
 ]

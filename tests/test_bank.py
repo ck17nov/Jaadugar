@@ -37,6 +37,7 @@ def kids_entry(*, name: str = "Milo", refrain: str = "Slow and slow, up we go",
         "refrain": refrain,
         "description_hook": "A small boy, a stuck kite, and one good idea.",
         "arc_variant": "alone", "outcome_class": "got_it",
+        "turn_kind": "invent",
         "problem_domain": domain, "setting": setting,
         "protagonist_type": "boy_6", "emotional_register": "determined",
         "characters": [{"name": name,
@@ -56,14 +57,14 @@ def kids_entry(*, name: str = "Milo", refrain: str = "Slow and slow, up we go",
                    f"{name} ने ऊँची छलांग लगाई पर पत्ते ही हाथ आए।",
                    f"{name} jumping with one arm stretched up, leaves "
                    f"falling around him, garden in afternoon light"),
-            _scene("obstacle", "The branch was far above him. His chest felt "
-                               "tight and his eyes stung a little.",
-                   "टहनी बहुत ऊँची थी और उसका मन भर आया।",
+            _scene("obstacle", "The kite string snapped and the kite slid "
+                               "deeper into the branches.",
+                   "पतंग की डोर टूट गई और पतंग और ऊपर फँस गई।",
                    f"{name} standing still with his shoulders down, looking "
                    f"up at a high branch, long shadows"),
-            _scene("turn", f"Then {name} saw the low wall beside the tree. "
-                           f"{refrain}. He climbed it, one careful foot at a "
-                           f"time.",
+            _scene("turn", f"{name} leaned the flat crate against the trunk "
+                           f"and made himself a step. {refrain}. He climbed "
+                           f"it, one careful foot at a time.",
                    f"तभी {name} ने पेड़ के पास की दीवार देखी।",
                    f"{name} placing one foot on a low garden wall beside the "
                    f"mango tree, careful expression, golden light"),
@@ -732,8 +733,12 @@ def test_an_entry_that_keeps_its_id_is_corrected_in_place(tmp_path, db):
 
     fixed = kids_entry()
     fixed.entry_id = original.entry_id          # what export gives you
-    fixed.scenes[3].narration = ("Then Milo spotted the low garden wall and "
-                                 "climbed it. Slow and slow, up we go.")
+    # The content of the correction is incidental to what these two tests
+    # check - that the ID decides whether a re-import updates or forks. It
+    # must still be a story the gate accepts, so the turn is something Milo
+    # DOES rather than something he spots.
+    fixed.scenes[3].narration = ("Milo dragged the crate over and stood on "
+                                 "it. Slow and slow, up we go.")
     fixed.recompute()
     assert fixed.entry_id == original.entry_id
     assert fixed.content_hash != original.content_hash
@@ -761,8 +766,12 @@ def test_an_authored_file_forks_and_remove_is_the_way_back(tmp_path, db):
 
     fixed = kids_entry()
     fixed.entry_id = ""
-    fixed.scenes[3].narration = ("Then Milo spotted the low garden wall and "
-                                 "climbed it. Slow and slow, up we go.")
+    # The content of the correction is incidental to what these two tests
+    # check - that the ID decides whether a re-import updates or forks. It
+    # must still be a story the gate accepts, so the turn is something Milo
+    # DOES rather than something he spots.
+    fixed.scenes[3].narration = ("Milo dragged the crate over and stood on "
+                                 "it. Slow and slow, up we go.")
     fixed.recompute()
     assert fixed.entry_id != original.entry_id
 

@@ -14,11 +14,16 @@ whole image budget and a render.
 Regex and Counter only. No API call, no new dependency, and it must stay that
 way: a gate that costs a round trip is a gate somebody will disable.
 
-The checks are deliberately split. Four are BLOCKING because a script failing
-them is not a story at all - it has no protagonist, no repetition, it opens
-with a rhetorical question, or an adult solves the problem for the child.
-Four are ADVISORY because they are matters of degree and a false positive
-should not throw away a usable script.
+The checks are deliberately split. Seven are BLOCKING because a script
+failing them is not a story at all - no protagonist, no repetition, an
+opening rhetorical question, an adult solving it for the child, a turn that
+is only a glance, an obstacle that is only an ache, or a refrain made of
+abstractions. Four are ADVISORY because they are matters of degree and a
+false positive should not throw away a usable script.
+
+The last three of those were advisory when written, because 12 of the 19
+banked entries failed them and blocking would have made the bank
+un-importable. All twelve were rewritten; the bank passes; they block now.
 """
 from __future__ import annotations
 
@@ -430,17 +435,17 @@ def evaluate(narrations: list[str], *, words_per_scene_floor: int = 12,
          f"the child - the winning idea must be the child's own")
         if not ok else "the child resolves it"))
 
-    # ---- 9. the turn is an IDEA, not a glance -------------------- advisory
+    # ---- 9. the turn is an IDEA, not a glance -------------------- BLOCKING
     #
-    # Advisory for now DELIBERATELY. 14 of the 17 entries already banked
-    # fail this, and making it blocking today would make the existing bank
-    # un-importable - including the re-import that carries a corrected
-    # title. `stories craft-report` lists the failures; enforcement comes
-    # when they have been rewritten.
+    # Advisory when it was written, because 12 of the 19 banked entries
+    # failed it and blocking would have made the bank un-importable. All
+    # twelve have since been rewritten and the whole bank passes, so it
+    # blocks now - which is the point: the next weak batch is rejected
+    # before anyone renders it.
     turn = _turn_scene(narrations, beats)
     perception = bool(turn and _PERCEPTION_TURN.match(turn.strip()))
     report.findings.append(Finding(
-        "turn_is_an_idea", not perception, False,
+        "turn_is_an_idea", not perception, True,
         (f"the turn is a perception, not an idea: {turn.strip()[:60]!r} - "
          f"the child should invent, combine, trade or reframe something a "
          f"five-year-old could copy tomorrow, not just look elsewhere")
@@ -451,7 +456,7 @@ def evaluate(narrations: list[str], *, words_per_scene_floor: int = 12,
     body_only = bool(cost and _BODY_ONLY.search(cost)
                      and not _COMPLICATION.search(cost))
     report.findings.append(Finding(
-        "obstacle_is_more_than_a_feeling", not body_only, False,
+        "obstacle_is_more_than_a_feeling", not body_only, True,
         (f"the obstacle is only a body feeling: {cost.strip()[:60]!r} - "
          f"something must get measurably WORSE: a second person who wants "
          f"the same thing, a limit appearing, or the attempt breaking "
@@ -461,7 +466,7 @@ def evaluate(narrations: list[str], *, words_per_scene_floor: int = 12,
     # ---- 11. a refrain a child can point at ---------------------- advisory
     abstract = bool(refrain and _ABSTRACT_REFRAIN.search(refrain))
     report.findings.append(Finding(
-        "refrain_is_concrete", not abstract, False,
+        "refrain_is_concrete", not abstract, True,
         (f"the refrain {refrain!r} is an idea rather than a thing - every "
          f"content word should be something a child can point at, do or "
          f"count")
