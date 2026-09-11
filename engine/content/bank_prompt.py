@@ -738,6 +738,14 @@ TITLES - the operator's stated main concern, so read this twice
         "description_hook": "...",
         "arc_variant": ARC_VARIANTS[0] if shape in ("narrative", "poem") else "",
         "outcome_class": OUTCOME_CLASSES[0] if shape in ("narrative", "poem") else "",
+        # THE SEVENTH AXIS, and it has to be in the example or it is not
+        # written. The output block says "exactly these fields, nothing
+        # else", so a field described in prose above but missing from the
+        # example comes back empty every time - measured on a real batch.
+        # An empty turn_kind switches off the one variety check that caught
+        # ten of the first nineteen stories turning on the child merely
+        # looking somewhere else.
+        "turn_kind": "invent" if shape in ("narrative", "poem") else "",
         "problem_domain": "...",
         "setting": "...",
         "protagonist_type": "...",
