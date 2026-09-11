@@ -179,6 +179,15 @@ class BankEntry:
     setting: str = ""
     protagonist_type: str = ""
     emotional_register: str = ""
+    # WHAT THE CHILD DOES AT THE TURN, from a closed vocabulary.
+    #
+    # A seventh axis, and the one the others could not see: 10 of the first
+    # 19 narratives turned on the child merely LOOKING somewhere else, and
+    # every pair of them differed on enough of the original six to pass. The
+    # variety gate was measuring the furniture while the plot machinery was
+    # identical. "notice" is allowed - a story may legitimately turn on
+    # seeing something - but it is capped like any other share.
+    turn_kind: str = ""
 
     characters: list[dict[str, str]] = field(default_factory=list)
     # Numbers the script asserts, declared so the fact checker can tell an
@@ -217,7 +226,8 @@ class BankEntry:
         """
         return (self.problem_domain.lower(), self.setting.lower(),
                 self.protagonist_type.lower(), self.emotional_register.lower(),
-                self.outcome_class.lower(), self.arc_variant.lower())
+                self.outcome_class.lower(), self.arc_variant.lower(),
+                self.turn_kind.lower())
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -230,6 +240,7 @@ class BankEntry:
             "refrain": self.refrain,
             "description_hook": self.description_hook,
             "arc_variant": self.arc_variant,
+            "turn_kind": self.turn_kind,
             "outcome_class": self.outcome_class,
             "problem_domain": self.problem_domain, "setting": self.setting,
             "protagonist_type": self.protagonist_type,
@@ -260,6 +271,7 @@ class BankEntry:
             refrain=str(raw.get("refrain", "")).strip(),
             description_hook=str(raw.get("description_hook", "")).strip(),
             arc_variant=str(raw.get("arc_variant", "")).strip().lower(),
+            turn_kind=str(raw.get("turn_kind", "")).strip().lower(),
             outcome_class=str(raw.get("outcome_class", "")).strip().lower(),
             problem_domain=str(raw.get("problem_domain", "")).strip().lower(),
             setting=str(raw.get("setting", "")).strip().lower(),

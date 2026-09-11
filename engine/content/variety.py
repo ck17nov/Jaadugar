@@ -57,6 +57,11 @@ MAX_ARC_SHARE = 0.20
 MAX_OUTCOME_SHARE = 0.30
 # A character name may recur - a series is fine - but not everywhere.
 MAX_NAME_SHARE = 0.15
+# No single TURN KIND may own more than this share of a group. The measured
+# failure: 10 of 19 narratives turned on the child looking somewhere else,
+# and every pair differed on enough of the other axes to pass, because none
+# of them described the plot machinery.
+MAX_TURN_SHARE = 0.25
 # Below this many entries in a group, a share cap measures the bank's size
 # rather than its sameness: one script out of five is 20% whatever it says.
 SHARE_CAP_FLOOR = 10
@@ -344,6 +349,19 @@ def check_new(candidate: Any, existing: Sequence[Any]) -> list[VarietyIssue]:
                 candidate.entry_id, "outcome_share",
                 f"outcome {candidate.outcome_class!r} would be "
                 f"{outcome_share:.0%}; cap is {MAX_OUTCOME_SHARE:.0%}", True))
+        turn = (candidate.turn_kind or "").strip().lower()
+        if turn:
+            turns = Counter(
+                (getattr(e, "turn_kind", "") or "").strip().lower()
+                for e in list(peers) + [candidate])
+            turns.pop("", None)
+            share = turns[turn] / max(sum(turns.values()), 1)
+            if share > MAX_TURN_SHARE:
+                issues.append(VarietyIssue(
+                    candidate.entry_id, "turn_share",
+                    f"turn_kind {turn!r} would be {share:.0%} of this group; "
+                    f"cap is {MAX_TURN_SHARE:.0%} - vary what the child DOES "
+                    f"at the turn, not just the setting", True))
         for character in (candidate.characters or []):
             name = (character.get("name") or "").strip().lower()
             if not name:

@@ -47,8 +47,19 @@ BEATS: dict[str, list[tuple[str, str]]] = {
         ("want", "name the character in the first five words and the ONE "
                  "thing they want"),
         ("attempt", "they try it THEMSELVES and it does not work"),
-        ("obstacle", "it gets harder; say what that feels like in the body"),
-        ("turn", "they THEMSELVES have the idea or notice the thing"),
+        # These two lines were the cause, not a symptom.
+        #
+        # "say what that feels like in the body" produced a body ache as the
+        # obstacle in 9 of the first 19 entries - "throat went tight"
+        # appeared verbatim in three different stories - and "or notice the
+        # thing" produced a turn that is a glance in 10 of 19. The authors
+        # did exactly what they were told; the instruction was wrong.
+        ("obstacle", "something gets measurably WORSE - a second person who "
+                     "wants it too, a limit appearing, or the attempt "
+                     "breaking something. Not a feeling in the body"),
+        ("turn", "they THEMSELVES do something new: use a thing for a job it "
+                 "was not made for, combine two things, trade, ask "
+                 "differently, or change what they want. NOT 'they noticed'"),
         ("resolve", "they get there, and one warm line of how that feels"),
         ("refrain", "the refrain, word for word, as the last line"),
     ],
@@ -162,6 +173,13 @@ MAX_BANK_SCENES = 90
 # indefensible rather than merely imperfect.
 MAX_SCENE_SECONDS = 12.0
 
+# How long a STORY may grow by repeating its beats before it becomes a
+# sectioned piece instead. Four minutes: past that, a bedtime story wants
+# chapters rather than a longer spine, and the sectioned mode is the right
+# shape for it. The researched kids median is 158 seconds, comfortably
+# inside this.
+BEAT_REPEAT_CEILING = 240
+
 # Roughly how many words of JSON output one entry costs, used only to keep the
 # suggested batch size inside a single chat response.
 _BATCH_WORD_BUDGET = 9000
@@ -187,6 +205,24 @@ def scene_plan(*, group_key: str, target_seconds: int, shape: str,
         # beat is a unit of meaning, and splitting it mid-thought reads worse
         # than holding the picture a moment longer.
         low, high = len(beats), len(beats) + 2
+    elif beat_mode and target_seconds <= BEAT_REPEAT_CEILING:
+        # THE MIDDLE BAND: still a story, just a longer one.
+        #
+        # There used to be a one-second cliff here. A six-beat narrative at
+        # 72 seconds got 6-8 scenes; at 73 it got 18-20 and switched to
+        # sectioned mode. Nothing about a story changes in that second, and
+        # the effect was that every one of the 22 banked kids entries is a
+        # SHORT - while 86 of the 225 researched kids videos run past 90
+        # seconds, at a 158-second median and 500k median views.
+        #
+        # The cliff existed because one beat had to be one picture, so a
+        # long beat meant a long hold. Shots removed that: a beat's span is
+        # now covered by two or three framings. So the story simply grows by
+        # REPEATING beats - a second "attempt", a second "obstacle" - which
+        # is what the beat table already tells authors to do.
+        low = max(len(beats),
+                  -(-target_seconds // int(MAX_SCENE_SECONDS)))
+        high = low + 2
     else:
         # Either an explainer, or a story too long for one picture per beat.
         # Both become sections covering several scenes each.
@@ -549,6 +585,10 @@ VARIETY - a bank of similar stories cannot be monetised, so this is enforced
 - "outcome_class" must be one of: {outcomes}
 - Spread them. In {count} scripts, no arc_variant may appear more than
   {arc_cap} times and no outcome_class more than {outcome_cap} times.{tally}
+- "turn_kind" says what the child DOES at the turn, and must be one of:
+  invent, combine, trade, ask, reframe, notice. "notice" is capped at a
+  quarter of the batch, because a story that turns on looking somewhere
+  else is the commonest way one of these comes out flat.
 - Also fill "problem_domain", "setting", "protagonist_type" and
   "emotional_register" with short lowercase labels. Two scripts may not share
   five of those six axes - vary the problem, not just the name.
