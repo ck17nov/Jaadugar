@@ -30,7 +30,9 @@ data class HealthDto(
 
 @Serializable
 data class AutomationRequestDto(
-    val niche: String,
+    // Blank in Auto mode: the backend picks the topic for each run and
+    // returns the one it chose.
+    val niche: String = "",
     val audience: String = "18-35",
     val language: String = "en",
     @SerialName("video_format") val videoFormat: String = "SHORT",
@@ -47,6 +49,13 @@ data class AutomationRequestDto(
     @SerialName("upload_time") val uploadTime: String = "",
     val timezone: String = "Asia/Kolkata",
     @SerialName("made_for_kids") val madeForKids: Boolean = false,
+    // A HUMAN ticked the Made-for-Kids disclosure on the Create screen.
+    //
+    // Not the same thing as madeForKids, which this app sets by inference
+    // for a kids group or an under-13 audience - and with the switch
+    // disabled in that state, so it carries no consent. The backend held
+    // every kids video for a confirmation it had no field to receive.
+    @SerialName("kids_confirmed") val kidsConfirmed: Boolean = false,
     val keywords: List<String> = emptyList(),
     @SerialName("publish_mode") val publishMode: String = "scheduled",
     // "live" | "bank_first" | "bank". Defaults to live, so an automation
@@ -57,6 +66,9 @@ data class AutomationRequestDto(
     // topic cannot be matched back to a group by name, and without it the
     // video publishes to the default channel.
     @SerialName("niche_group") val nicheGroup: String = "",
+    // AUTO MODE: the backend takes the NEXT topic in nicheGroup on
+    // every run, so one automation covers a whole channel group.
+    @SerialName("topic_rotate") val topicRotate: Boolean = false,
     // The Settings threshold. The backend and the engine have honoured a
     // per-automation minimum all along; the app just never sent one, so the
     // "Minimum quality score to publish" slider was written to device
@@ -77,6 +89,8 @@ data class AutomationRequestDto(
 data class AutomationAcceptedDto(
     val accepted: Boolean = false,
     @SerialName("automation_id") val automationId: String = "",
+    /** The topic the backend picked, for a rotating automation. */
+    val niche: String = "",
     val queued: Int = 0,
     val note: String = "",
 )
@@ -232,7 +246,14 @@ data class QuotaDto(
     val limit: Int = 10000,
     @SerialName("reserved_for_uploads") val reservedForUploads: Int = 0,
     @SerialName("available_for_research") val availableForResearch: Int = 0,
-    @SerialName("max_uploads_per_day") val maxUploadsPerDay: Int = 6,
+    // FOUR, not six. An upload spends 1600 for the insert plus 50 for the
+    // thumbnail and 400 for the captions, and the free grant is 10,000 -
+    // dividing by the insert alone promised two uploads a day that cannot
+    // happen. The default matters because it is what an app talking to an
+    // un-upgraded backend shows.
+    @SerialName("max_uploads_per_day") val maxUploadsPerDay: Int = 4,
+    @SerialName("units_per_upload") val unitsPerUpload: Int = 2050,
+    @SerialName("uploads_today") val uploadsToday: Int = 0,
     val resets: String = "",
 )
 
@@ -264,6 +285,11 @@ data class NichePreviewDto(
     @SerialName("caption_style") val captionStyle: String = "",
     /** The language captions will be in, or "" when there will be none. */
     @SerialName("caption_language") val captionLanguage: String = "",
+    /**
+     * Somebody already confirmed the child-directed classification for this
+     * channel group, so the Create screen must not ask again.
+     */
+    @SerialName("kids_confirmed_for_group") val kidsConfirmedForGroup: Boolean = false,
 )
 
 @Serializable
@@ -275,14 +301,27 @@ data class YouTubeChannelDto(
     val subscribers: Long = 0,
     val videos: Long = 0,
     val views: Long = 0,
+    @SerialName("is_default") val isDefault: Boolean = false,
+    /** Why this one channel's stats are missing. Blank when it answered. */
+    val error: String = "",
 )
 
 @Serializable
 data class YouTubeStatusDto(
     val configured: Boolean = false,
+    /**
+     * At least one brand channel is authorised and can publish.
+     *
+     * Not "the one token works": a token is bound to a single channel, and
+     * this install has three. Reporting one token's health as the whole
+     * connection is what showed "not connected" over three working
+     * channels.
+     */
     val authorized: Boolean = false,
     /** "device" (from the phone), "env" (desktop client) or "none". */
     @SerialName("client_source") val clientSource: String = "none",
+    /** How many channels are authorised, from the store - not from a call. */
+    @SerialName("channel_count") val channelCount: Int = 0,
     val channels: List<YouTubeChannelDto> = emptyList(),
     val error: String = "",
 )
@@ -360,6 +399,13 @@ data class AutomationSummaryDto(
     @SerialName("niche_group") val nicheGroup: String = "",
     val mode: String = "",
     @SerialName("min_quality_score") val minQualityScore: Int = 0,
+    // Carried so a recurring run rebuilt from the backend does not drop the
+    // child-directed confirmation and get held all over again.
+    @SerialName("kids_confirmed") val kidsConfirmed: Boolean = false,
+    @SerialName("topic_rotate") val topicRotate: Boolean = false,
+    /** The topic this automation last dispatched. */
+    @SerialName("last_topic") val lastTopic: String = "",
+    @SerialName("topic_count") val topicCount: Int = 0,
 )
 
 @Serializable

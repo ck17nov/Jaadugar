@@ -299,6 +299,7 @@ def shape_for(group_key: str, topic_kind: str = "") -> str:
             w in topic_kind.lower()
             for w in ("fix", "clean", "install", "repair", "setup",
                       "speed up", "tips and tricks", "how to",
+                      "troubleshoot", "backup", "file management",
                       # Excel and Office are step-by-step by nature: the
                       # value is "click here, then here", which is a
                       # procedure, not an explanation of a mechanism.
@@ -683,7 +684,24 @@ TITLES - the operator's stated main concern, so read this twice
     # automation later claims a letter-B drill. Two instructions that cannot
     # both be satisfied get one of them ignored, and which one is a guess.
     for_shape = [t for t in topics if shape_for(group_key, t) == shape]
-    if for_shape:
+    pinned = (topic or "").strip()
+    if pinned:
+        # ONE topic for the whole batch.
+        #
+        # Filling the bank topic by topic is the only way to get even
+        # coverage: a batch told to "spread across these nine" reliably
+        # writes six bedtime stories and one of everything else, so the
+        # thin topics stay thin no matter how many batches are run. The
+        # caller asks for a topic and gets a batch entirely on it.
+        parts.append(
+            f"\nTOPIC - every script in this batch is about ONE subject. Set "
+            f'"topic" to EXACTLY this string on every line, character for '
+            f"character, and write nothing that belongs under another "
+            f"heading:\n  {pinned}\n"
+            f"Vary the SUBJECT MATTER within it - different angles, "
+            f"examples, questions and situations under the same heading - "
+            f"not the heading itself.")
+    elif for_shape:
         chosen = ", ".join(f'"{t}"' for t in for_shape)
         dropped = [t for t in topics if t not in for_shape]
         note = ""
@@ -708,7 +726,7 @@ TITLES - the operator's stated main concern, so read this twice
     # ---- the exact shape ----
     example = {
         "group": group_key.lower(),
-        "topic": topics[0] if topics else "",
+        "topic": pinned or (topics[0] if topics else ""),
         "shape": shape,
         "volatility": "evergreen",
         "language": language,
@@ -794,12 +812,22 @@ def viral_titles_for(cfg, db, *, group_key: str, video_format: str = "SHORT",
     return titles
 
 
-def context_from_bank(db, *, group_key: str, language: str) -> dict[str, Any]:
+def context_from_bank(db, *, group_key: str, language: str,
+                      topic: str = "") -> dict[str, Any]:
     """Names, refrains, titles and arc counts already in the bank.
 
     Fed back into the next batch prompt so the model does not repeat itself
     across batches - which is the single biggest cause of a bank that reads as
     mass-produced.
+
+    `topic` puts that topic's own entries FIRST. The prompt only shows the
+    first 40-60 of each list, and once a group holds hundreds of entries an
+    unordered slice is mostly other topics - so a batch of Excel procedures
+    would be warned off bedtime-story titles and told nothing about the
+    eleven Excel titles it is actually at risk of repeating.
+
+    Newest first, for the same reason: the entries most likely to be
+    repeated are the ones written last.
     """
     import json as _json
 
@@ -807,7 +835,13 @@ def context_from_bank(db, *, group_key: str, language: str) -> dict[str, Any]:
     refrains: list[str] = []
     titles: list[str] = []
     arcs: dict[str, int] = {}
-    for row in db.bank_entries(group=group_key, language=language, limit=5000):
+    rows = list(db.bank_entries(group=group_key, language=language,
+                                limit=5000))
+    rows.reverse()                          # newest first
+    wanted = (topic or "").strip().lower()
+    if wanted:
+        rows.sort(key=lambda r: (r["topic"] or "").strip().lower() != wanted)
+    for row in rows:
         try:
             data = _json.loads(row["payload"])
         except Exception:                       # noqa: BLE001

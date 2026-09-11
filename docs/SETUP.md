@@ -151,21 +151,30 @@ looped and loudness-matched. Nothing is ever downloaded from a music site.
 ```yaml
 youtube:
   upload_enabled: false      # master safety switch - keep false until happy
-  default_privacy: private
+  default_privacy: public    # what an approved video is uploaded as
+  force_private: false       # rehearsal switch; see below
 quality:
   minimum_score: 80
 automation:
   approval_required: true    # APPROVAL mode is the default
-  daily_video_limit: 3
+  daily_video_limit: 4       # what the quota actually buys
 dry_run: true                # no upload, full artifacts
 ```
 
 Environment variables override the file: `DRY_RUN`, `UPLOAD_ENABLED`,
-`AUTOTUBE_WORKSPACE`, `AUTOTUBE_CONFIG`.
+`FORCE_PRIVATE`, `AUTOTUBE_WORKSPACE`, `AUTOTUBE_CONFIG`. The env value wins,
+so a server whose `.env` says `FORCE_PRIVATE=true` publishes nothing however
+the YAML reads.
 
-**Automatic public publishing is off by default and requires three separate
-changes** (`dry_run: false`, `upload_enabled: true`, `default_privacy: public`).
-That is deliberate.
+**Publishing publicly takes FOUR settings, not three** - `dry_run: false`,
+`upload_enabled: true`, `default_privacy: public` **and**
+`force_private: false`. The last one is the one that catches people:
+`force_private` pins `privacyStatus` to private *and* drops `publishAt`, so it
+overrides `default_privacy` completely. Setting `default_privacy: public` while
+`force_private` is on does nothing at all.
+
+Turn `force_private` **on** deliberately when you want to rehearse: uploads
+happen for real, and nobody sees the result.
 
 ## 6. Scheduling without keeping the phone online
 

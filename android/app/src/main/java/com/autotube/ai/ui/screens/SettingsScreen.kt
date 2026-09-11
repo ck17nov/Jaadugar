@@ -55,7 +55,6 @@ import com.autotube.ai.ui.components.SectionTitle
 import com.autotube.ai.ui.vm.SettingsViewModel
 import com.autotube.ai.ui.vm.appViewModel
 import kotlin.math.roundToInt
-import com.autotube.ai.ui.components.LabeledDropdown
 
 // One zone on purpose - see the note where it is displayed.
 private val TIMEZONES = listOf("Asia/Kolkata")
@@ -85,6 +84,10 @@ fun SettingsScreen() {
     // not committed immediately: a rotation mid-edit would otherwise re-seed
     // from storage and silently discard the changes.
     var editing by rememberSaveable { mutableStateOf(false) }
+    // Wiping the keystore is one tap and cannot be undone, so it asks.
+    // rememberSaveable, not remember: rotating with the dialog up should not
+    // silently dismiss it.
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
     var backendUrl by rememberSaveable { mutableStateOf(store.backendUrl) }
     var apiKey by rememberSaveable { mutableStateOf(store.apiKey) }
     var oauthClientId by rememberSaveable { mutableStateOf(store.oauthClientId) }
@@ -156,12 +159,18 @@ fun SettingsScreen() {
                 TextButton(onClick = { cancel() }) { Text("Cancel") }
                 Button(onClick = { save() }) { Text("Save") }
             } else {
+                // Deliberately NOT gated by Edit, because none of them
+                // changes anything: Dismiss on the banner, Test connection,
+                // Refresh, Reload, the Copy buttons, and "Choose groups"
+                // (a disclosure). A read-only screen still has to be able to
+                // diagnose the backend.
                 Button(onClick = { editing = true }) { Text("Edit") }
             }
         }
         if (!editing) {
             Text(
-                "Read-only. Tap Edit to change anything.",
+                "Read-only, including the publishing channels below. " +
+                    "Tap Edit to change anything.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -325,57 +334,89 @@ fun SettingsScreen() {
                     // pasting an id and tapping Connect refused with "Set the
                     // OAuth client ID in Settings first" while the field
                     // visibly contained it.
-                    if (editing) save()
+                    save()
                     runCatching { authManager.launch(authLauncher) }
                         .onFailure {
                             vm.reportAuthError(it.message ?: "Cannot start sign-in")
                         }
                 },
-                enabled = oauthClientId.isNotBlank() && !busy,
-            ) { Text(if (editing) "Save and connect" else "Connect YouTube") }
-            OutlinedButton(onClick = { vm.refreshYouTube() }) { Text("Refresh") }
+                // Behind Edit: the OAuth callback writes a refresh token to
+                // the backend, which is a mutation whatever the button looks
+                // like.
+                enabled = editing && oauthClientId.isNotBlank() && !busy,
+            ) { Text("Save and connect") }
+            OutlinedButton(onClick = { vm.refreshYouTube() },
+                           enabled = !busy) { Text("Refresh") }
         }
 
         youtube?.let { yt ->
             Card(shape = RoundedCornerShape(12.dp)) {
                 Column(Modifier.padding(12.dp)) {
-                    // Reports WHERE the OAuth client came from.
+                    // Whether ANY brand channel is authorised - not whether
+                    // one particular token works.
                     //
-                    // This used to show "missing on backend" in red whenever
-                    // .env had no desktop client - which is the normal state
-                    // when you connect from the phone, the supported path. It
-                    // read as an error for a correct setup.
+                    // Two things were wrong here. The verdict was driven by
+                    // clientSource, which the backend derived from a key
+                    // that stopped existing when the token store went
+                    // multi-channel: three connected channels reported
+                    // "not connected". And the channel list came from one
+                    // token, which by definition sees one channel, so the
+                    // card said 1 while Publishing channels below said 3.
                     ServiceLine(
                         "YouTube connection",
-                        yt.clientSource != "none",
-                        when (yt.clientSource) {
-                            "device" -> "connected from this phone"
-                            "env" -> "using the backend's own OAuth client"
-                            else -> "not connected - tap Connect YouTube"
+                        yt.authorized,
+                        if (!yt.authorized) "not connected - tap Connect YouTube"
+                        else {
+                            val how = when (yt.clientSource) {
+                                "device" -> "authorised from this phone"
+                                "env" -> "authorised with the backend's own OAuth client"
+                                else -> "authorised"
+                            }
+                            val n = yt.channelCount
+                            "$n channel${if (n == 1) "" else "s"} connected - $how"
                         },
                     )
+                    // Live health, which is a different question from
+                    // "is anything connected": a stored channel whose token
+                    // will not refresh cannot upload, and saying so per
+                    // channel beats failing the whole install.
+                    val live = yt.channels.count { it.error.isBlank() }
                     ServiceLine(
                         "Can upload",
-                        yt.authorized,
-                        if (yt.authorized) "yes"
-                        else "no - reconnect YouTube",
+                        live > 0,
+                        when {
+                            !yt.authorized -> "no - reconnect YouTube"
+                            live == yt.channelCount ->
+                                "yes - every channel's token refreshed"
+                            live > 0 ->
+                                "$live of ${yt.channelCount} channels responded - see below"
+                            else -> "no channel could refresh its token - reconnect"
+                        },
                     )
-                    if (yt.channels.isEmpty() && yt.authorized) {
-                        Text(
-                            "Connected, but no channel came back yet. Tap Refresh.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                     yt.channels.forEach { channel ->
                         Spacer(Modifier.height(6.dp))
-                        Text(channel.title, style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "${channel.subscribers} subscribers - " +
-                                "${channel.videos} videos",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            channel.title.ifBlank { channel.channelId } +
+                                if (channel.isDefault) "  (default)" else "",
+                            style = MaterialTheme.typography.bodyMedium,
                         )
+                        if (channel.error.isBlank()) {
+                            Text(
+                                "${channel.subscribers} subscribers - " +
+                                    "${channel.videos} videos",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            // NOT "0 subscribers - 0 videos". A channel that
+                            // could not answer has unknown stats, and zeros
+                            // read as a real, alarming number.
+                            Text(
+                                channel.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                     if (yt.error.isNotBlank()) {
                         Text(
@@ -436,6 +477,7 @@ fun SettingsScreen() {
                     .filter { it.channelId != account.channelId }
                     .flatMap { it.niches }
                     .toSet(),
+                editable = editing,
                 onMakeDefault = { vm.makeDefault(account.channelId) },
                 onToggleNiche = { niche ->
                     val next = if (niche in account.niches) {
@@ -460,9 +502,12 @@ fun SettingsScreen() {
                             vm.reportAuthError(it.message ?: "Cannot start sign-in")
                         }
                 },
-                enabled = oauthClientId.isNotBlank() && !busy,
+                // Behind Edit for the same reason as Connect: the grant
+                // writes a new channel record on the backend.
+                enabled = editing && oauthClientId.isNotBlank() && !busy,
             ) { Text("Add channel") }
-            OutlinedButton(onClick = { vm.refreshAccounts() }) { Text("Reload") }
+            OutlinedButton(onClick = { vm.refreshAccounts() },
+                           enabled = !busy) { Text("Reload") }
         }
 
         // No "default niche" or "default language" here any more. Asked for:
@@ -527,23 +572,58 @@ fun SettingsScreen() {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OutlinedButton(onClick = {
-            vm.clearSecrets()
-            // RESET THE DRAFTS TOO.
-            //
-            // clearSecrets() wipes EncryptedSharedPreferences, but these
-            // drafts are the only source of truth for the controls - so the
-            // key and client id stayed on screen after "clearing", and the
-            // next Save wrote them straight back. Everything on screen also
-            // disagreed with the now-empty store, including the buttons
-            // gated on it.
-            backendUrl = ""
-            apiKey = ""
-            oauthClientId = ""
-            ytAccount = ""
-            editing = false
-        }) {
+        // Behind Edit AND behind a confirmation. It wipes the keystore, it
+        // cannot be undone, and it sat one stray tap away on a screen that
+        // described itself as read-only.
+        OutlinedButton(onClick = { confirmClear = true }, enabled = editing) {
             Text("Clear stored credentials")
+        }
+
+        if (confirmClear) {
+            AlertDialog(
+                onDismissRequest = { confirmClear = false },
+                title = { Text("Clear stored credentials?") },
+                text = {
+                    Text(
+                        "Removes the backend API key, the OAuth client ID " +
+                            "and the YouTube sign-in from this phone's " +
+                            "encrypted storage. This cannot be undone and " +
+                            "you will have to enter them and reconnect " +
+                            "YouTube again.
+
+The backend URL is kept. " +
+                            "Channels already connected on the backend are " +
+                            "not removed, and published videos stay up."
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmClear = false
+                        vm.clearSecrets()
+                        // RESET THE DRAFTS TOO.
+                        //
+                        // clearSecrets() wipes EncryptedSharedPreferences,
+                        // but these drafts are the only source of truth for
+                        // the controls - so the key and client id stayed on
+                        // screen after "clearing", and the next Save wrote
+                        // them straight back.
+                        //
+                        // backendUrl is NOT reset: clearSecrets does not
+                        // remove it from storage, so blanking the draft left
+                        // the field disagreeing with the store and armed the
+                        // next Save to wipe a working URL.
+                        apiKey = ""
+                        oauthClientId = ""
+                        ytAccount = ""
+                        editing = false
+                    }) { Text("Clear") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmClear = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
         }
 
         Spacer(Modifier.height(32.dp))
@@ -614,11 +694,17 @@ private fun ChannelCard(
     isDefault: Boolean,
     groups: List<NicheGroupDto>,
     takenElsewhere: Set<String>,
+    // Whether Edit is on. Every control below that CHANGES something -
+    // the default channel, the group mapping, removing the channel - is
+    // inert without it. They were all live while the screen said
+    // "Read-only", so a stray tap could retarget a niche to another
+    // channel or delete an authorisation.
+    editable: Boolean,
     onMakeDefault: () -> Unit,
     onToggleNiche: (String) -> Unit,
     onForget: () -> Unit,
 ) {
-    var confirmForget by remember { mutableStateOf(false) }
+    var confirmForget by rememberSaveable { mutableStateOf(false) }
     var showNiches by rememberSaveable(account.channelId) { mutableStateOf(false) }
 
     Card(shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -662,7 +748,8 @@ private fun ChannelCard(
                 if (isDefault) {
                     AssistChip(onClick = {}, label = { Text("Default") })
                 } else {
-                    TextButton(onClick = onMakeDefault) { Text("Make default") }
+                    TextButton(onClick = onMakeDefault,
+                               enabled = editable) { Text("Make default") }
                 }
             }
 
@@ -687,7 +774,8 @@ private fun ChannelCard(
                 TextButton(onClick = { showNiches = !showNiches }) {
                     Text(if (showNiches) "Done" else "Choose groups")
                 }
-                TextButton(onClick = { confirmForget = true }) { Text("Remove") }
+                TextButton(onClick = { confirmForget = true },
+                           enabled = editable) { Text("Remove") }
             }
 
             if (showNiches) {
@@ -703,7 +791,8 @@ private fun ChannelCard(
                         }
                         FilterChip(
                             selected = mine,
-                            enabled = mine || group.key !in takenElsewhere,
+                            enabled = editable &&
+                                (mine || group.key !in takenElsewhere),
                             onClick = { onToggleNiche(group.key) },
                             label = {
                                 Text("${group.label} (${group.topics.size})",
@@ -713,7 +802,13 @@ private fun ChannelCard(
                     }
                 }
                 Text(
-                    if (groups.isEmpty()) {
+                    if (!editable) {
+                        // Otherwise every chip is greyed out and the
+                        // explanation below reads as "all six groups belong
+                        // to another channel", which is alarming and false.
+                        "Tap Edit at the top of Settings to change which " +
+                            "groups publish here."
+                    } else if (groups.isEmpty()) {
                         "Groups have not loaded from the backend yet - tap " +
                             "Reload."
                     } else {

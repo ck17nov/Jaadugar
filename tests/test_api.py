@@ -189,7 +189,16 @@ class TestQuotaEndpoint:
         assert body["costs"]["video_insert"] == 1600
         assert body["costs"]["search_list"] == 100
         assert body["limit"] == 10000
-        assert body["max_uploads_per_day"] == 6
+        # FOUR, and derived from the cost table rather than asserted, so
+        # the number cannot drift away from the costs again. It read 6 for
+        # as long as it divided by the insert alone and ignored the
+        # thumbnail and the caption track every upload also pays for.
+        assert body["costs"]["thumbnail_set"] == 50
+        assert body["costs"]["captions_insert"] == 400
+        assert body["units_per_upload"] == 2050
+        assert body["max_uploads_per_day"] == 4
+        assert body["max_uploads_per_day"] == (
+            body["limit"] // body["units_per_upload"])
         assert "Pacific" in body["resets"]
 
     def test_reserve_is_subtracted_from_research_budget(self, client):

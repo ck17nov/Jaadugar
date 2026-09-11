@@ -26,7 +26,8 @@ from fastapi import (BackgroundTasks, Depends, FastAPI, Header, HTTPException,
                      Query, Request)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (BaseModel, Field, field_validator,
+                      model_validator)
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -103,7 +104,9 @@ async def rate_limit(request: Request, call_next):
 # Request models
 # ==========================================================================
 class AutomationBody(BaseModel):
-    niche: str = Field(min_length=2, max_length=120)
+    # Blank is legal ONLY with topic_rotate, where the backend picks the
+    # topic for each run. See _check_topic_choice below.
+    niche: str = Field(default="", max_length=120)
     audience: str = Field(default="18-35", max_length=60)
     language: str = Field(default="en", max_length=12)
     video_format: Literal["SHORT", "LONGFORM"] = "SHORT"
@@ -124,6 +127,17 @@ class AutomationBody(BaseModel):
     upload_time: str = Field(default="", max_length=5)
     timezone: str = Field(default="Asia/Kolkata", max_length=64)
     made_for_kids: bool = False
+    # A HUMAN ticked the Made-for-Kids disclosure on the Create screen.
+    #
+    # Distinct from made_for_kids, which the app sets by INFERENCE whenever
+    # the group is Kids or the audience is under 13 - and with the switch
+    # disabled in that state, so it is not an act of consent. The publish
+    # gate needs the human act and had no field for it; see
+    # AutomationRequest.kids_confirmed.
+    #
+    # Not required and never defaulted true: an older app build must keep
+    # today's behaviour rather than silently gaining a confirmation.
+    kids_confirmed: bool = False
     # THE AUTOMATION THIS RUN BELONGS TO, when it is not a new one.
     #
     # Every Start used to mint a fresh id, including the recurring runs the
@@ -147,6 +161,33 @@ class AutomationBody(BaseModel):
     script_source: Literal["live", "bank_first", "bank"] = "live"
     # Which group's bank to draw from. Empty derives it from the niche.
     niche_group: str = Field(default="", max_length=32)
+    # AUTO MODE for topics. One automation covers a whole channel group: each
+    # run takes the NEXT topic in that group, so nine kids topics need one
+    # automation instead of nine.
+    #
+    # A BOOLEAN, NOT A MAGIC NICHE STRING. `niche` is read by build_profile,
+    # is_kids_niche, group_for_topic, the research query, the idea dedupe and
+    # published_videos.niche - a sentinel in there is one missed branch away
+    # from a published video about "rotate all topics". A boolean cannot be
+    # rendered into a script.
+    topic_rotate: bool = False
+
+    @model_validator(mode="after")
+    def _check_topic_choice(self):
+        if self.topic_rotate:
+            # ROTATION IS SCOPED TO ONE GROUP, and that is a safety rule
+            # rather than tidiness. `child_directed` is a property of the
+            # GROUP, so within a group the Made-for-Kids answer is constant
+            # and the 409 gate below still means something. Rotating over
+            # every topic would walk into the nine kids topics with
+            # made_for_kids=False and build a general-audience profile for
+            # child-directed content.
+            if not str(self.niche_group or "").strip():
+                raise ValueError("topic_rotate needs a niche_group: "
+                                 "rotation runs over ONE group's topics")
+        elif len(self.niche.strip()) < 2:
+            raise ValueError("niche must be at least 2 characters")
+        return self
 
     @field_validator("upload_time")
     @classmethod
@@ -320,7 +361,9 @@ class Worker:
         # Recorded before queueing so it can be listed and cancelled even if
         # the process dies before the run starts.
         try:
-            _db().save_automation(request)
+            _db().save_automation(
+                request,
+                last_topic=(request.niche if request.topic_rotate else ""))
         except Exception as exc:
             log_event("WORKER", "could not persist the automation",
                       error=str(exc)[:160])
@@ -340,7 +383,19 @@ class Worker:
             # finished - useless for reporting what is running and for
             # cancelling it.
             self.current_automation = request.id
-            for _ in range(max(1, request.count)):
+            for index in range(max(1, request.count)):
+                # count>1 makes N videos inside ONE post, so a rotating
+                # automation has to advance per VIDEO or all N land on the
+                # same topic.
+                if request.topic_rotate and index > 0:
+                    request.niche = _rotate_topic(request)
+                    db = _db()
+                    try:
+                        db.set_automation_topic(request.id, request.niche)
+                    finally:
+                        db.close()
+                    log_event("AUTOMATION", "auto topic advanced",
+                              automation=request.id, topic=request.niche)
                 if request.id in self.cancelled_automations:
                     log_event("WORKER", "remaining runs cancelled",
                               automation=request.id)
@@ -553,11 +608,13 @@ def niche_preview(niche: str = Query(min_length=2, max_length=120),
     style is derived from the niche and the format, and one template
     deliberately burns none in.
     """
-    from engine.core.groups import group as group_by_key
+    from engine.core.groups import group as group_by_key, group_for_topic
     from engine.core.languages import caption_for
     from engine.video.templates import select_template
 
-    chosen = group_by_key(group or "")
+    # The same resolution the publish gate uses - the key first, then the
+    # topic - so the screen cannot report a group the render will not use.
+    chosen = group_by_key(group or "") or group_for_topic(niche)
     child_directed = bool(chosen and chosen.child_directed)
     kids = is_kids_niche(niche) or child_directed
 
@@ -570,10 +627,23 @@ def niche_preview(niche: str = Query(min_length=2, max_length=120),
         forced=str(CFG.get("video.style_template", "")))
     configured = str(CFG.get("captions.style", "") or "")
     caption_style = template.caption_style or configured
+
+    # Has the child-directed classification already been confirmed for this
+    # channel group? The Create screen asks once per group rather than once
+    # per automation, so it needs to know when not to ask.
+    already = False
+    if chosen:
+        db = _db()
+        try:
+            already = db.kids_confirmation_exists(group=chosen.key)
+        finally:
+            db.close()
+
     return {"profile": profile.to_dict(),
             "kids_niche_detected": is_kids_niche(niche),
             "requires_kids_confirmation": kids,
             "child_directed_group": child_directed,
+            "kids_confirmed_for_group": already,
             "style_template": template.name,
             # "none" means no burnt-in captions; an SRT is still uploaded.
             "caption_style": caption_style,
@@ -705,6 +775,7 @@ def list_automations(include_cancelled: bool = False,
     except Exception:                           # noqa: BLE001
         default_channel = ""
     from engine.core.groups import group_for_topic
+    from engine.core.groups import topics as _group_topics
 
     out = []
     for row in db.list_automations(include_cancelled=include_cancelled,
@@ -741,6 +812,16 @@ def list_automations(include_cancelled: bool = False,
             "video_format": payload.get("video_format", ""),
             "language": payload.get("language", ""),
             "made_for_kids": bool(payload.get("made_for_kids", False)),
+            # Carried so a recurring run rebuilt on the phone does not drop
+            # the confirmation and re-trigger the hold.
+            "kids_confirmed": bool(payload.get("kids_confirmed", False)),
+            "topic_rotate": bool(payload.get("topic_rotate", False)),
+            # `last`, not `next`: with bank skipping on, the next name in the
+            # list is not necessarily what will run, and this row must not
+            # make a claim it cannot keep.
+            "last_topic": row.get("last_topic", "") or "",
+            "topic_count": len(_group_topics(
+                str(payload.get("niche_group") or ""))),
             # THE WHOLE REQUEST, not just what the list displays.
             #
             # The app rebuilds each recurring run's request from its own Room
@@ -777,6 +858,67 @@ def list_automations(include_cancelled: bool = False,
         })
     return {"automations": out, "queue_depth": WORKER.depth,
             "running": WORKER.current_automation or ""}
+
+
+def _topic_the_bank_can_serve(db, request, order: list[str]) -> str:
+    """The first topic in `order` with an approved, unused entry, or "".
+
+    Mirrors stage_bank's SECOND attempt - no duration filter. The first
+    attempt narrows est_seconds to the requested duration +/-25% and the
+    pipeline retries without it, so probing WITH the duration would skip
+    topics the claim would in fact have served.
+
+    `approved()` is imported rather than reimplemented because it is the
+    same gate the claim applies, and "importable" and "claimable" drifting
+    apart is a bug this codebase has already had once.
+    """
+    from engine.content.bank import BankEntry
+    from engine.content.bank_use import approved
+
+    for topic in order:
+        for row in db.bank_candidates(
+                group=request.niche_group, language=request.language,
+                video_format=request.video_format, topics=[topic], limit=50):
+            try:
+                if approved(BankEntry.from_dict(json.loads(row["payload"]))):
+                    return topic
+            except Exception:                   # noqa: BLE001
+                continue
+        log_event("AUTOMATION", "topic skipped this lap: no reviewed script",
+                  automation=request.id, topic=topic)
+    return ""
+
+
+def _rotate_topic(request) -> str:
+    """The concrete topic for THIS run of a rotating automation.
+
+    The cursor is BACKEND state (automations.last_topic) because the phone's
+    copy is a cache: Room migrates destructively, so a device-side cursor
+    would restart the lap on every app upgrade and every reinstall.
+    """
+    from engine.core.groups import rotation_order
+
+    db = _db()
+    try:
+        row = db.get_automation(request.id) or {}
+        order = rotation_order(request.niche_group,
+                               after=str(row.get("last_topic") or ""))
+        if not order:
+            return request.niche            # unknown group: leave it alone
+        if (request.script_source or "live").lower() == "bank":
+            # "Only my reviewed scripts" HARD-FAILS a topic with an empty
+            # bank, so a strict lap would fail most runs while the bank is
+            # still filling. Skip to a topic that can actually be served.
+            picked = _topic_the_bank_can_serve(db, request, order)
+            if picked:
+                return picked
+            log_event("AUTOMATION", "no topic in this group has a reviewed "
+                      "script left; running the next one so the failure is "
+                      "visible", automation=request.id,
+                      group=request.niche_group)
+        return order[0]
+    finally:
+        db.close()
 
 
 def _automation_target(payload: dict[str, Any], row: dict[str, Any],
@@ -839,6 +981,14 @@ def create_automation(body: AutomationBody) -> dict[str, Any]:
     """Queue an automation run. Returns immediately; poll /jobs for progress."""
     request = body.to_request()
 
+    # BEFORE the kids gate and before the profile is built: everything
+    # downstream reads request.niche, and resolving it here is what lets the
+    # rest of the system stay ignorant that rotation exists at all.
+    if request.topic_rotate:
+        request.niche = _rotate_topic(request)
+        log_event("AUTOMATION", "auto topic chosen", automation=request.id,
+                  group=request.niche_group, topic=request.niche)
+
     # Kids content must be explicitly confirmed (spec section 9).
     #
     # THE CHOSEN GROUP COUNTS, not just the niche string. `is_kids_niche` is a
@@ -850,8 +1000,15 @@ def create_automation(body: AutomationBody) -> dict[str, Any]:
     # education with none of the kids restrictions. The group is the operator
     # saying which channel this is for, and `groups.py` already declares that
     # group child-directed; every other path in the codebase honours it.
-    from engine.core.groups import group as group_by_key
-    chosen = group_by_key(getattr(request, "niche_group", "") or "")
+    # THE SAME RESOLUTION stage_publish uses - the key first, then the
+    # topic. Resolving from the key alone here while the publish gate also
+    # falls back to the topic meant a kids automation with a blank group
+    # recorded its confirmation against no group at all, and was then
+    # measured at publish time against the kids group it had never
+    # confirmed.
+    from engine.core.groups import group as group_by_key, group_for_topic
+    chosen = (group_by_key(getattr(request, "niche_group", "") or "")
+              or group_for_topic(request.niche))
     looks_child_directed = (is_kids_niche(request.niche)
                             or bool(chosen and chosen.child_directed))
     if looks_child_directed and not request.made_for_kids:
@@ -865,6 +1022,22 @@ def create_automation(body: AutomationBody) -> dict[str, Any]:
                     "because": ("the chosen channel group is child-directed"
                                 if chosen and chosen.child_directed
                                 else "the topic is child-directed")})
+
+    # The operator ticked the disclosure with it on screen. THAT is the
+    # confirmation, and the publish gate must not ask a second time - which
+    # it did on every single run, because "once per automation" cannot be
+    # satisfied by an automation created fresh for each video.
+    #
+    # Recorded at submit time on purpose: the classification was confirmed
+    # even if the render later fails.
+    if request.made_for_kids and getattr(request, "kids_confirmed", False):
+        db = _db()
+        try:
+            db.record_kids_confirmation(
+                group=(chosen.key if chosen else ""),
+                automation_id=request.id, source="create_screen")
+        finally:
+            db.close()
 
     pipeline_problems: list[str] = []
     if not have_ffmpeg():
@@ -880,6 +1053,10 @@ def create_automation(body: AutomationBody) -> dict[str, Any]:
     log_event("API", "automation queued", niche=request.niche,
               count=request.count, mode=request.mode)
     return {"accepted": True, "automation_id": request.id,
+            # The topic actually chosen. For a rotating automation the phone
+            # sent blank, so without this its own row would show no subject
+            # until the next sync.
+            "niche": request.niche,
             "queued": WORKER.depth,
             "note": "poll GET /jobs for progress"}
 
@@ -1080,7 +1257,14 @@ def quota() -> dict[str, Any]:
             "reserved_for_uploads": pipe.quota.reserve,
             "available_for_research": pipe.quota.remaining(),
             "costs": pipe.quota.costs,
-            "max_uploads_per_day": pipe.quota.limit // pipe.quota.cost("video_insert"),
+            # The number the phone shows. It used to be limit // insert = 6,
+            # which counts only part of what an upload spends: a published
+            # video also sets a thumbnail and attaches captions, so the real
+            # ceiling is 4. The fifth upload of a day would put the video up
+            # and then fail to caption it.
+            "max_uploads_per_day": pipe.quota.max_uploads_per_day,
+            "units_per_upload": pipe.quota.per_upload,
+            "uploads_today": pipe.quota.uploads_today,
             "resets": "midnight US Pacific",
         }
     finally:
@@ -1092,6 +1276,9 @@ def quota() -> dict[str, Any]:
 def youtube_status() -> dict[str, Any]:
     from engine.youtube.auth import YouTubeAuth
     auth = YouTubeAuth(CFG)
+    store = auth.channels_store
+    default = store.default_id()
+    authorised = [c for c in store.all() if c.refresh_token]
 
     # Where the OAuth client came from, rather than a bare "configured" flag.
     #
@@ -1100,30 +1287,62 @@ def youtube_status() -> dict[str, Any]:
     # desktop client at all - showed up in the app as "Backend OAuth client:
     # missing on backend" in red. That reads as a fault when it is the normal,
     # correct state.
-    stored = auth.store.read() if auth.store.exists() else {}
-    if stored.get("client_id"):
+    #
+    # READ FROM THE CHANNEL RECORDS, not the top level of the token file.
+    # The client id moved inside `channels[<id>]` when the store went
+    # multi-channel, and this check did not move with it - so every install
+    # with brand channels found nothing, fell through to `auth.configured`
+    # (false, because the server has no desktop client), and reported
+    # "not connected" over three working channels. The same legacy-top-level
+    # -key bug was fixed once in `YouTubeAuth.authorized` and missed here.
+    if any(c.client_id for c in authorised):
         source = "device"
     elif auth.configured:
         source = "env"
     else:
         source = "none"
 
-    out: dict[str, Any] = {
-        "configured": auth.configured,
-        "authorized": auth.authorized,
-        "client_source": source,
-        "channels": [],
-    }
-    if auth.authorized:
+    # ONE ROW PER AUTHORISED CHANNEL.
+    #
+    # This used to be `auth.channels()`, which asks `channels.list(mine=True)`
+    # with the DEFAULT channel's token - and a YouTube token is bound to one
+    # channel, so it always returned exactly one however many were connected.
+    # The count the operator sees has to come from the store, like
+    # /youtube/accounts, and only the per-channel STATS come from the API.
+    rows: list[dict[str, Any]] = []
+    for channel in authorised:
+        row: dict[str, Any] = {
+            "channel_id": channel.channel_id,
+            "title": channel.title or channel.channel_id,
+            "custom_url": "", "thumbnail": "",
+            "subscribers": 0, "videos": 0, "views": 0,
+            "is_default": channel.channel_id == default,
+            "error": "",
+        }
         try:
-            out["channels"] = auth.channels()
-        except Exception as exc:
-            out["error"] = str(exc)[:240]
-            # `authorized` is true whenever a token exists, but a token that
-            # cannot be refreshed is not a working connection. Say so, instead
-            # of showing "Authorised: yes" beside a refresh error.
-            out["authorized"] = False
-    return out
+            live = auth.channels(channel_id=channel.channel_id)
+            if live:
+                row.update({k: v for k, v in live[0].items()
+                            if k != "channel_id"})
+                row["title"] = live[0].get("title") or row["title"]
+        except Exception as exc:            # noqa: BLE001
+            # One dead token is not a dead install. Reported on its own row
+            # instead of flipping the whole connection to unauthorised,
+            # which is what used to happen and what made a transient network
+            # error read as "reconnect YouTube".
+            row["error"] = str(exc)[:240]
+        rows.append(row)
+
+    return {
+        "configured": auth.configured,
+        # "at least one brand channel can publish", which is the same rule
+        # the upload path uses.
+        "authorized": bool(authorised),
+        "client_source": source,
+        "channel_count": len(authorised),
+        "channels": rows,
+        "error": "",
+    }
 
 
 class NicheMapBody(BaseModel):

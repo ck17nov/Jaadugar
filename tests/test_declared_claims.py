@@ -143,10 +143,18 @@ def test_a_real_citation_still_fires(text):
 # Per-scene caption language
 # ---------------------------------------------------------------------------
 def _kids_entry_from_disk(path: str, index: int = 0):
+    """A real banked entry, read from a FIXTURE rather than from banks/.
+
+    These two files used to live in banks/ and were therefore shipped
+    content as well as test input - so emptying or regenerating the bank
+    broke three tests that have nothing to do with the catalogue. They are
+    fixtures; they belong here.
+    """
     import json
     from pathlib import Path
     from engine.content.bank import BankEntry
-    line = Path(path).read_text(encoding="utf-8").splitlines()[index]
+    here = Path(__file__).resolve().parent / 'fixtures' / Path(path).name
+    line = here.read_text(encoding="utf-8").splitlines()[index]
     return BankEntry.from_dict(json.loads(line))
 
 

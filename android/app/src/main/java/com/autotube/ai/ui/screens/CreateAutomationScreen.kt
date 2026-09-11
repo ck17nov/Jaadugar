@@ -17,6 +17,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -95,7 +96,28 @@ val NICHE_OPTIONS = listOf(
     "sql and databases",
     "programming and coding",
     "developer tools",
+    "windows tips and tricks",
+    "android tips and tricks",
+    "iphone tips and tricks",
+    "browser tips and tricks",
+    "google tools and workspace",
+    "hidden features and shortcuts",
+    "computer troubleshooting",
+    "file management and backup",
+    "cybersecurity basics",
+    "privacy and online safety",
+    "cloud storage explained",
+    "networking basics",
+    "productivity software and apps",
+    "tech myths busted",
+    "youtube automation and monetisation",
 )
+
+// The Topic dropdown's Auto entry. A UI-ONLY value: the submit handler
+// turns it into topicRotate=true and a blank niche, so it never crosses the
+// wire. Kept out of NICHE_OPTIONS on purpose - that list is checked against
+// the backend's topic catalogue by tests/test_app_backend_contract.py.
+const val AUTO_TOPIC = "__auto_rotate__"
 
 // Niches that are child-directed by definition. Picking one of these sets the
 // Made for Kids flag without prompting: being asked to confirm on every
@@ -218,7 +240,20 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     var uploadTime by rememberSaveable { mutableStateOf("20:00") }
     var count by rememberSaveable { mutableIntStateOf(1) }
     var autoMode by rememberSaveable { mutableStateOf(vm.store.autoApprove) }
+    // Whether the operator has deliberately overridden the Settings default
+    // FOR THIS automation. Without it the screen cannot tell "I want
+    // approval just this once" from "I have not touched it".
+    var autoModeTouched by rememberSaveable { mutableStateOf(false) }
     var madeForKids by rememberSaveable { mutableStateOf(false) }
+    // THE HUMAN ACT, captured separately from the flag.
+    //
+    // For a Kids group the app sets madeForKids itself, disables the switch
+    // and suppresses the consent dialog - so the operator performs no
+    // affirmative act at all and made_for_kids on the wire means "something
+    // detected kids content". The backend needs the other fact, and held
+    // every kids video waiting for it. Sending kidsConfirmed = madeForKids
+    // would fabricate a consent nobody gave; this is ticked deliberately.
+    var kidsConfirmed by rememberSaveable { mutableStateOf(false) }
     // Blank means "let the backend decide from the niche map, then the
     // default channel" - which is the behaviour people set the mapping up
     // for, so it stays the default rather than pre-selecting a channel.
@@ -268,6 +303,24 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     val nicheIsKids = niche.trim().lowercase() in KIDS_NICHES || groupIsKids
     val audienceIsChildren = audience in CHILD_AUDIENCES
     val kidsRequired = nicheIsKids || audienceIsChildren
+    // Already confirmed for this channel group, so do not ask again. The
+    // backend reports this from its own record, which is what makes the
+    // confirmation genuinely once rather than once per automation.
+    val kidsAlreadyConfirmed = preview?.kidsConfirmedForGroup == true
+    // Auto mode for TOPICS. Named `rotating`, never `autoMode` - that one
+    // already means AUTO-vs-APPROVAL publishing.
+    val rotating = niche == AUTO_TOPIC
+
+    // RE-SEED THE MODE FROM SETTINGS.
+    //
+    // `autoMode` is seeded once from the store, and the nav graph keeps this
+    // screen's saved state across a trip to Settings - so turning on
+    // "Default to AUTO mode" there did not reach an already-composed Create
+    // screen, and the toggle looked like it had done nothing. Guarded on
+    // autoModeTouched so a deliberate per-automation override still wins.
+    LaunchedEffect(Unit) {
+        if (!autoModeTouched) autoMode = vm.store.autoApprove
+    }
     LaunchedEffect(nicheIsKids, audienceIsChildren) {
         if (kidsRequired) {
             madeForKids = true
@@ -276,6 +329,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
         } else {
             // Leaving a kids niche for an adult one clears it.
             madeForKids = false
+            kidsConfirmed = false
             kidsAnsweredFor = ""
         }
     }
@@ -289,7 +343,10 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     // ApiClient.)
     LaunchedEffect(niche, audience, style, lengthSeconds, groupKey, language,
                    isShort) {
-        if (niche.trim().length >= 3) {
+        // NOT in Auto mode: the sentinel is not a subject, and sending it
+        // would make the profile card describe a video about
+        // "__auto_rotate__".
+        if (niche != AUTO_TOPIC && niche.trim().length >= 3) {
             delay(600)
             vm.previewNiche(niche.trim(), audience, style, lengthSeconds,
                             groupKey, language,
@@ -304,8 +361,11 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
         if (scriptSource != "live") {
             // The topic goes too: a claim filters on it, so a count that
             // ignores it promises scripts the render will not take.
+            // In Auto mode the honest count is over the whole GROUP, since
+            // every topic in it will be drawn from.
             vm.loadBank(groupKey, language,
-                if (isShort) "SHORT" else "LONGFORM", niche.trim())
+                if (isShort) "SHORT" else "LONGFORM",
+                if (niche == AUTO_TOPIC) "" else niche.trim())
         }
     }
 
@@ -453,8 +513,17 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
             // Office, phone and laptop launches, buying advice) were missing
             // from the list the user looks at first. It survives only as the
             // offline fallback.
-            options = selectedGroup?.topics
+            // Auto sits at the top, and only with a group chosen - which
+            // is how "rotation needs a group" is expressed in the UI rather
+            // than as a validation error. It has to be IN `options`:
+            // LabeledDropdown treats an out-of-list value as custom text and
+            // would open the free-text box instead.
+            options = selectedGroup?.let { listOf(AUTO_TOPIC) + it.topics }
                 ?: groups.flatMap { it.topics }.distinct().ifEmpty { NICHE_OPTIONS },
+            display = { topic ->
+                if (topic == AUTO_TOPIC) "Auto - every topic in rotation"
+                else topic
+            },
             allowOther = true,
             otherLabel = "Other topic…",
             // Selecting "Other topic…" used to appear to do nothing at all -
@@ -469,6 +538,35 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
             },
             onValueChange = { niche = it },
         )
+        // What "Auto" actually does, in the numbers of the chosen group. This
+        // is the whole explanation of the selection, so it says the lap
+        // length, where the channel and the kids answer come from, and that
+        // the cursor is not stored on the phone.
+        if (rotating) {
+            selectedGroup?.let { g ->
+                Text(
+                    "One video per run, each on the NEXT topic in " +
+                        "${g.label}. ${g.topics.size} topics, so every " +
+                        "topic gets a turn every ${g.topics.size} runs, and " +
+                        "the lap picks up where it left off even after you " +
+                        "reinstall the app. The channel and the " +
+                        "Made-for-Kids setting come from the group, so they " +
+                        "are the same for every topic. The length below " +
+                        "applies to all of them - a banked script still " +
+                        "uses its own.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        } else if (groupKey.isBlank() && groups.isNotEmpty()) {
+            Text(
+                "Pick a channel group to get the Auto topic option - " +
+                    "rotation runs inside one group, because that is what " +
+                    "fixes the channel and the Made-for-Kids answer.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (nicheIsKids) {
             Text(
                 "Child-directed niche: Made for Kids is set automatically and " +
@@ -808,17 +906,21 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                 // and the two statements below are both claims about what
                 // the backend will do with the video.
                 forcePrivate == null ->
+                    // NOT "nothing is uploaded until you approve it" - that
+                    // was only ever true while everything was forced
+                    // private, and in AUTO mode it is now false.
                     "Cannot reach the backend, so what happens on publish is " +
-                        "unknown - it may be set to force every upload " +
-                        "private. Nothing is uploaded until you approve it " +
-                        "either way."
+                        "unknown - it may publish publicly, or be set to " +
+                        "force every upload private."
                 forcePrivate == true ->
-                    "The backend is set to force private, so every upload stays " +
-                        "private and nothing is scheduled - publishing has no " +
-                        "effect until that is turned off. Useful for checking " +
-                        "that uploads work without subscribers seeing anything."
+                    "The backend is in rehearsal mode: every upload stays " +
+                        "private and nothing is scheduled, so publishing has " +
+                        "no effect until that is turned off. Useful for " +
+                        "checking that uploads work without subscribers " +
+                        "seeing anything."
                 publishMode == "immediate" ->
-                    "Uploaded as soon as you approve the video."
+                    "Published PUBLICLY as soon as the video is approved - " +
+                        "or straight away, if the mode below is Auto."
                 else ->
                     "Handed to YouTube with a scheduled publish time, so your " +
                         "phone does not need to be online for it."
@@ -852,6 +954,11 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
         }
 
         SectionTitle("Number of videos this run: $count")
+        // Four is the honest ceiling: 10,000 free quota units a day, and a
+        // published video spends 2,050 of them (1,600 to insert, 50 for the
+        // thumbnail, 400 for the caption track). The backend refuses the
+        // fifth, so a slider that offered it would be promising a video
+        // that cannot be made.
         Slider(
             value = count.toFloat(),
             onValueChange = { count = it.roundToInt() },
@@ -862,7 +969,8 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
         // ---- mode -------------------------------------------------------
         SectionTitle("Mode")
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(checked = autoMode, onCheckedChange = { autoMode = it })
+            Switch(checked = autoMode,
+                   onCheckedChange = { autoMode = it; autoModeTouched = true })
             Spacer(Modifier.height(0.dp))
             Column(Modifier.padding(start = 12.dp)) {
                 Text(
@@ -872,7 +980,14 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                 )
                 Text(
                     if (autoMode) {
-                        "Quality gate still blocks anything below your threshold."
+                        // Say the consequence. Every upload used to be
+                        // pinned private, which made AUTO mean "waiting for
+                        // you in Studio"; it now means live on the channel
+                        // with nobody having watched it.
+                        "The video goes LIVE on the channel without you " +
+                            "seeing it first. The quality gate still blocks " +
+                            "anything below your threshold, and anything the " +
+                            "fact checker flags still waits for you."
                     } else {
                         "Recommended until you trust the output."
                     },
@@ -913,13 +1028,47 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
             }
         }
 
+        // Asked ONCE PER CHANNEL GROUP, not once per automation.
+        //
+        // The backend used to satisfy this from "has an earlier run of this
+        // same automation published?" - and the Create screen mints a new
+        // automation for every one-off video, so the answer was always no
+        // and every kids video waited for approval however AUTO was set.
+        if (madeForKids) {
+            if (kidsAlreadyConfirmed) {
+                Text(
+                    "Made for Kids is already confirmed for this channel " +
+                        "group, so this video will not wait for approval.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = kidsConfirmed,
+                        onCheckedChange = { kidsConfirmed = it },
+                    )
+                    Text(
+                        "I confirm this content is directed to children. " +
+                            "YouTube disables comments, personalised ads and " +
+                            "several other features on these videos, and an " +
+                            "inaccurate classification has legal " +
+                            "consequences. Asked once per channel group.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
+            }
+        }
+
         if (busy) LoadingRow("Queueing...")
 
         Button(
             onClick = {
                 vm.start(
                     AutomationRequestDto(
-                        niche = niche.trim(),
+                        niche = if (rotating) "" else niche.trim(),
+                        topicRotate = rotating,
                         audience = audience,
                         language = language,
                         videoFormat = if (isShort) "SHORT" else "LONGFORM",
@@ -944,6 +1093,13 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                         publishMode = publishMode,
                         timezone = vm.store.timezone,
                         madeForKids = madeForKids,
+                        // Only the tick actually given IN THIS session.
+                        // OR-ing in kidsAlreadyConfirmed would assert a
+                        // human act that did not happen here, and the
+                        // backend would record a fresh confirmation for
+                        // an automation nobody confirmed. The backend's
+                        // own group record satisfies the gate already.
+                        kidsConfirmed = kidsConfirmed,
                         // The Settings threshold, which was written to device
                         // preferences and then sent to nobody - so the slider
                         // and its explanatory sentence did nothing in either
@@ -952,7 +1108,8 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                     )
                 )
             },
-            enabled = !busy && niche.trim().length >= 2,
+            enabled = !busy && (rotating || niche.trim().length >= 2) &&
+                (!madeForKids || kidsConfirmed || kidsAlreadyConfirmed),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("START AUTOMATION")
@@ -1016,6 +1173,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     madeForKids = true
+                    kidsConfirmed = true
                     answered()
                 }) { Text("Yes, made for kids") }
             },

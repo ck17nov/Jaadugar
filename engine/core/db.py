@@ -162,6 +162,14 @@ CREATE TABLE IF NOT EXISTS automations (
     days         TEXT DEFAULT '',
     upload_time  TEXT DEFAULT '',
     timezone     TEXT NOT NULL DEFAULT 'Asia/Kolkata',
+    -- Rotation cursor: the topic this automation last dispatched.
+    --
+    -- Its own column, not a key in `payload`, because the ON CONFLICT clause
+    -- below replaces the whole payload with whatever the phone last sent -
+    -- and the phone rebuilds the request from a Room table that is DESTROYED
+    -- on every schema bump. A cursor in either place restarts the lap at
+    -- topic 1 on every app upgrade.
+    last_topic   TEXT NOT NULL DEFAULT '',
     enabled      INTEGER DEFAULT 1,
     created_at   REAL NOT NULL,
     updated_at   REAL NOT NULL,
@@ -169,6 +177,19 @@ CREATE TABLE IF NOT EXISTS automations (
     payload      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_automations_enabled ON automations(enabled, created_at);
+
+-- Who has confirmed the Made-for-Kids classification, and for what.
+--
+-- `scope` is either "group:<key>" (a whole channel group) or
+-- "automation:<id>". The group scope is what makes "confirm once" true: the
+-- Create screen mints a fresh automation for every one-off video, so a
+-- confirmation remembered only against an automation id is forgotten the
+-- moment the job finishes.
+CREATE TABLE IF NOT EXISTS kids_confirmations (
+    scope        TEXT PRIMARY KEY,
+    confirmed_at REAL NOT NULL,
+    source       TEXT NOT NULL DEFAULT ''    -- create_screen | approval | api
+);
 
 -- The script bank: pre-written, human-reviewed scripts.
 --
@@ -252,6 +273,7 @@ class Database:
     # possible place for it to surface.
     ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
         ("bank_entries", "topic", "TEXT NOT NULL DEFAULT ''"),
+        ("automations", "last_topic", "TEXT NOT NULL DEFAULT ''"),
     )
 
     def _add_missing_columns(self) -> None:
@@ -316,25 +338,48 @@ class Database:
         return VideoJob.from_dict(json.loads(row["payload"])) if row else None
 
     # ---- automations -------------------------------------------------
-    def save_automation(self, request: Any) -> None:
-        """Persist a recurring automation so cancelling it survives a restart."""
+    def save_automation(self, request: Any, *, last_topic: str = "") -> None:
+        """Persist a recurring automation so cancelling it survives a restart.
+
+        `last_topic` is the rotation cursor. A BLANK never overwrites a live
+        one: every non-rotating automation sends blank, and so does any
+        re-POST that did not resolve a topic, so writing it through would
+        reset the lap on the next ordinary save.
+        """
         now = time.time()
         existing = self.get_automation(request.id)
         created = existing.get("created_at", now) if existing else now
         self.execute(
             "INSERT INTO automations(id,niche,frequency,days,upload_time,"
-            "timezone,enabled,created_at,updated_at,cancelled_at,payload) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "timezone,last_topic,enabled,created_at,updated_at,cancelled_at,"
+            "payload) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
             "niche=excluded.niche, frequency=excluded.frequency, "
             "days=excluded.days, upload_time=excluded.upload_time, "
             "timezone=excluded.timezone, updated_at=excluded.updated_at, "
+            "last_topic=COALESCE(NULLIF(excluded.last_topic,''), "
+            "                    automations.last_topic), "
             "payload=excluded.payload",
             (request.id, request.niche, request.frequency,
              ",".join(str(d) for d in (request.days or [])),
-             request.upload_time or "", request.timezone or "", 1,
+             request.upload_time or "", request.timezone or "",
+             last_topic or "", 1,
              created, now, 0,
              json.dumps(request.to_dict(), ensure_ascii=False)),
         )
+
+    def set_automation_topic(self, automation_id: str, topic: str) -> None:
+        """Move a rotating automation's cursor.
+
+        Separate from `save_automation` because a count>1 request produces
+        several videos inside ONE post, and each of them takes the next
+        topic - so the cursor advances per VIDEO, not per save.
+        """
+        if not automation_id or not topic:
+            return
+        self.execute(
+            "UPDATE automations SET last_topic=?, updated_at=? WHERE id=?",
+            (topic, time.time(), automation_id))
 
     def get_automation(self, automation_id: str) -> dict[str, Any] | None:
         row = self.query_one(
@@ -697,6 +742,48 @@ class Database:
              JobStatus.SCHEDULED.value, JobStatus.READY.value))
         return bool(row and int(row["n"]) > 0)
 
+    # ---- Made-for-Kids confirmations ---------------------------------
+    def record_kids_confirmation(self, *, group: str = "",
+                                 automation_id: str = "",
+                                 source: str = "") -> None:
+        """Remember that a human affirmed the child-directed classification.
+
+        Recorded against the CHANNEL GROUP as well as the automation,
+        because "confirm once" only means once if the memory outlives the
+        automation. The Create screen mints a new automation per video, so
+        a per-automation memory is a memory of nothing: every kids video was
+        held for a confirmation the operator had just given.
+        """
+        now = time.time()
+        scopes = []
+        if (group or "").strip():
+            scopes.append(f"group:{group.strip().lower()}")
+        if automation_id:
+            scopes.append(f"automation:{automation_id}")
+        for scope in scopes:
+            # INSERT OR IGNORE, so the FIRST confirmation keeps its
+            # timestamp: when it was confirmed is the interesting fact, not
+            # when it was last re-asserted.
+            self.execute(
+                "INSERT OR IGNORE INTO kids_confirmations"
+                "(scope,confirmed_at,source) VALUES(?,?,?)",
+                (scope, now, source))
+
+    def kids_confirmation_exists(self, *, group: str = "",
+                                 automation_id: str = "") -> bool:
+        scopes = []
+        if (group or "").strip():
+            scopes.append(f"group:{group.strip().lower()}")
+        if automation_id:
+            scopes.append(f"automation:{automation_id}")
+        if not scopes:
+            return False
+        marks = ",".join("?" for _ in scopes)
+        row = self.query_one(
+            f"SELECT COUNT(*) AS n FROM kids_confirmations "
+            f"WHERE scope IN ({marks})", tuple(scopes))
+        return bool(row and int(row["n"]) > 0)
+
     def delete_jobs(self, *, job_ids: list[str] | None = None,
                     keep_active: bool = True,
                     older_than: float | None = None) -> list[VideoJob]:
@@ -913,6 +1000,27 @@ class Database:
     def quota_used(self, day: str) -> int:
         row = self.query_one("SELECT units FROM quota_usage WHERE day=?", (day,))
         return int(row["units"]) if row else 0
+
+    def quota_detail(self, day: str) -> dict[str, int]:
+        """How many times each operation ran today.
+
+        `add_quota` has maintained this since the table existed and nothing
+        ever read it back. It is what lets the upload reserve SHRINK as the
+        day's uploads are made: a reserve that stays at its full size all day
+        charges every upload twice - once when it is spent and again as room
+        still being held for it - and the arithmetic of that is the third
+        video of the day finding no research budget left.
+        """
+        row = self.query_one("SELECT detail FROM quota_usage WHERE day=?",
+                             (day,))
+        if not row or not row["detail"]:
+            return {}
+        try:
+            data = json.loads(row["detail"])
+        except ValueError:
+            return {}
+        return {str(k): int(v) for k, v in data.items()
+                if isinstance(v, (int, float))}
 
     # ---- strategy ----------------------------------------------------
     def upsert_strategy(self, dimension: str, value: str, weight: float,

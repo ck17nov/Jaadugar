@@ -287,6 +287,9 @@ class YouTubeUploader:
                                        "videoId": result.video_id},
                     }}).execute()
                 result.playlist_added = True
+                if self.quota is not None:
+                    result.quota_units += self.quota.cost("playlist_insert")
+                    self.quota.spend("playlist_insert")
                 log_event("YOUTUBE", "added to playlist", playlist=target_playlist)
             except Exception as exc:
                 result.warnings.append(f"playlist add failed: {str(exc)[:160]}")

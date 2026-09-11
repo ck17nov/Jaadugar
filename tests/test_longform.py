@@ -2067,7 +2067,16 @@ class TestForcePrivate:
         assert body["status"]["publishAt"] == "2030-01-01T14:30:00Z"
         assert body["status"]["privacyStatus"] == "private"
 
-    def test_the_shipped_config_has_it_on(self):
-        """dry_run is off, so this is the only thing keeping videos unlisted."""
+    def test_the_shipped_config_publishes_publicly(self):
+        """Pins the INTENT, now that the channel is live.
+
+        This used to assert the opposite and called force_private "the only
+        thing keeping videos unlisted". That was true while nothing had been
+        published; the owner has since decided to post, so the shipped
+        config publishes publicly and force_private is an opt-in rehearsal
+        switch. Inverted rather than deleted, because the value of the test
+        is that a silent flip back to private would fail it.
+        """
         cfg = load_config()
-        assert cfg.get("youtube.force_private") is True
+        assert cfg.get("youtube.force_private") is False
+        assert cfg.get("youtube.default_privacy") == "public"

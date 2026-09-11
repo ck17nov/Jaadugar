@@ -41,6 +41,19 @@ data class AutomationEntity(
     @ColumnInfo(name = "upload_time") val uploadTime: String,
     val timezone: String,
     @ColumnInfo(name = "made_for_kids") val madeForKids: Boolean,
+    // Whether a human confirmed the child-directed classification. Carried
+    // per automation so a recurring run does not drop it and get held.
+    @ColumnInfo(name = "kids_confirmed") val kidsConfirmed: Boolean = false,
+    // Auto mode. Carried here for the same reason scriptSource and
+    // nicheGroup are: AutomationWorker rebuilds the request from this
+    // row, so a field missing here silently reverts to the DTO default
+    // on run 2 - and a rotating automation would quietly become a
+    // single-topic one.
+    //
+    // THE CURSOR IS NOT HERE, DELIBERATELY. `last_topic` lives on the
+    // backend: this table is destroyed on every schema bump, which
+    // would restart the rotation at topic 1 on every app upgrade.
+    @ColumnInfo(name = "topic_rotate") val topicRotate: Boolean = false,
     @ColumnInfo(name = "created_at") val createdAt: Long,
     val enabled: Boolean = true,
     // Everything below was missing, so every recurring run after the first
@@ -314,7 +327,7 @@ interface EventDao {
     // Bumped for script_source and niche_group. Same reasoning as the last
     // bump: the table is a local cache of automations the BACKEND persists,
     // so a destructive rebuild costs nothing.
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)

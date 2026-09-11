@@ -9,7 +9,8 @@ image generation, FFmpeg rendering) happens in a Python backend you run on your
 own machine or a free-tier box.
 
 **Target cost: Rs 0/month.** The binding limit is not money, it is YouTube's API
-quota — about **5 uploads/day** on a default project. See
+quota — **4 uploads/day** on a default project, because a published
+video costs 2,050 units (insert + thumbnail + captions) out of 10,000. See
 [docs/SERVICE_COSTS.md](docs/SERVICE_COSTS.md) for every service, its real free
 tier, and what it cannot do.
 
@@ -278,7 +279,9 @@ exists to stop.
 
 ### Known limits, stated plainly
 
-- **~4-5 uploads/day** on a default YouTube quota. Hard ceiling, not a bug.
+- **4 uploads/day** on a default YouTube quota - 10,000 units, and a
+  video with its thumbnail and caption track costs 2,050. Hard ceiling,
+  not a bug.
 - **YouTube refuses videos over 15 minutes** until your channel is verified.
   Verifying is free and takes a minute; the app warns you above 15 minutes.
 - **Long-form needs an LLM key.** The template builder cannot honestly fill

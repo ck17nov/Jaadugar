@@ -98,7 +98,10 @@ class AutoTubeRepository(
         db.automations().upsert(
             AutomationEntity(
                 id = ack.automationId.ifBlank { UUID.randomUUID().toString() },
-                niche = request.niche,
+                // The topic the BACKEND picked, for a rotating automation -
+                // the request sent blank. Without this the Scheduler row
+                // shows an empty niche until the next sync.
+                niche = ack.niche.ifBlank { request.niche },
                 audience = request.audience,
                 language = request.language,
                 videoFormat = request.videoFormat,
@@ -110,6 +113,8 @@ class AutoTubeRepository(
                 uploadTime = request.uploadTime,
                 timezone = request.timezone,
                 madeForKids = request.madeForKids,
+                kidsConfirmed = request.kidsConfirmed,
+                topicRotate = request.topicRotate,
                 createdAt = System.currentTimeMillis(),
                 // Carried so a recurring run repeats what was actually
                 // chosen rather than the DTO defaults.
@@ -274,6 +279,14 @@ class AutoTubeRepository(
                 uploadTime = dto.uploadTime,
                 timezone = dto.timezone,
                 madeForKids = dto.madeForKids,
+                // OR-ed with what is already local: a stale backend
+                // response must not be able to REVOKE a confirmation
+                // the operator gave on this phone.
+                kidsConfirmed = dto.kidsConfirmed || (local?.kidsConfirmed ?: false),
+                // The dto is authoritative, but a Boolean cannot tell
+                // "false" from "not sent", so a local true is not
+                // discarded by a backend that predates the field.
+                topicRotate = dto.topicRotate || (local?.topicRotate ?: false),
                 createdAt = if (dto.createdAt > 0) (dto.createdAt * 1000).toLong()
                     else local?.createdAt ?: System.currentTimeMillis(),
                 // The BACKEND decides whether this automation still runs, but

@@ -9,9 +9,13 @@ QUOTA IS THE REAL CONSTRAINT, not money.  A new Google Cloud project gets
     videos.list      =   1 unit    (up to 50 ids per call)
     channels.list    =   1 unit    (up to 50 ids per call)
     videos.insert    = 1600 units  <- an upload
-So a research run of 3 searches costs ~302 units and an upload costs 1600.
+    thumbnails.set   =   50 units  <- and every upload sets one
+    captions.insert  =  400 units  <- and attaches a caption track
+So a research run of 3 searches costs ~302 units, and a PUBLISHED video costs
+1600 + 50 + 400 = 2050 - which is why the honest ceiling is four uploads a
+day, not the six that dividing by the insert alone suggests.
 `QuotaGuard` tracks spend against the Pacific-midnight reset and refuses calls
-that would exceed the budget, reserving room for the day's uploads.
+that would exceed the budget, reserving room for the uploads still owed today.
 """
 from __future__ import annotations
 
@@ -45,10 +49,62 @@ class QuotaGuard:
         self.db = db
         self.limit = int(cfg.get("youtube.daily_quota_units", 10000))
         self.costs: dict[str, int] = dict(cfg.get("youtube.quota_costs", {}) or {})
-        # Keep room for the day's uploads so research cannot starve publishing.
-        per_upload = self.costs.get("video_insert", 1600)
-        self.reserve = per_upload * int(cfg.get("automation.daily_video_limit", 3))
         self._local = 0
+        self._local_detail: dict[str, int] = {}
+
+    # ------------------------------------------------------------------
+    @property
+    def per_upload(self) -> int:
+        """What ONE published video really costs.
+
+        The insert alone was the figure everywhere - in the reserve, in the
+        /quota endpoint, in the docs - and it is not what an upload spends.
+        Every video this pipeline publishes also sets a thumbnail and
+        attaches a caption track, so the true price is 2050, not 1600. The
+        difference is the whole gap between the "6 uploads/day" the app used
+        to promise and the 4 the quota actually buys.
+        """
+        # A worst-case figure, deliberately. The thumbnail is skipped on an
+        # unverified channel and the caption track on a video with no
+        # subtitle file, so a particular upload can cost less - but a
+        # reserve that assumes the cheap case is a reserve that runs out.
+        # The playlist add is NOT included: nothing sets a playlist by
+        # default, and charging every upload for it would shrink the
+        # research budget for a call that usually does not happen.
+        return (self.cost("video_insert") + self.cost("thumbnail_set")
+                + self.cost("captions_insert"))
+
+    @property
+    def max_uploads_per_day(self) -> int:
+        """The real ceiling. One definition, read by the API, CLI and app."""
+        return max(0, self.limit // max(self.per_upload, 1))
+
+    @property
+    def uploads_today(self) -> int:
+        if self.db is not None:
+            return int(self.db.quota_detail(pacific_day())
+                       .get("video_insert", 0))
+        return int(self._local_detail.get("video_insert", 0))
+
+    @property
+    def reserve(self) -> int:
+        """Room held back for the uploads STILL OWED today.
+
+        Not a constant. A fixed reserve is charged against research all day
+        even after the uploads it was holding room for have been made and
+        paid for out of the same budget - so the spend is counted twice and
+        the day's last job finds nothing left. Measured with the shipped
+        config: three jobs a day, the third one blocked at
+        "0 available, 6150 reserved" while 3,246 real units sat unused.
+
+        Clamped to the true ceiling: a daily_video_limit above
+        max_uploads_per_day would reserve more than the whole day's budget
+        and pin research at zero for ever.
+        """
+        wanted = int(self.cfg.get("automation.daily_video_limit", 3))
+        planned = min(max(wanted, 0), self.max_uploads_per_day)
+        still_owed = max(0, planned - self.uploads_today)
+        return self.per_upload * still_owed
 
     def cost(self, op: str) -> int:
         return int(self.costs.get(op, 1))
@@ -76,6 +132,7 @@ class QuotaGuard:
         if self.db is not None:
             return self.db.add_quota(pacific_day(), units, op)
         self._local += units
+        self._local_detail[op] = self._local_detail.get(op, 0) + 1
         return self._local
 
 

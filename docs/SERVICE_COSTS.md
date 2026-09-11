@@ -5,7 +5,7 @@ Every external service this project can use, with an honest answer to
 
 **Summary: the system runs at Rs 0/month for normal low-volume use.**
 The binding constraint is not money — it is the **YouTube API quota**, which
-caps you at about **5 uploads/day** on a default Google Cloud project.
+caps you at **4 uploads/day** on a default Google Cloud project.
 
 Prices verified against provider documentation at the time of writing. Free
 tiers change; re-check before relying on one for production.
@@ -38,12 +38,17 @@ tiers change; re-check before relying on one for production.
 
 - One research run = 3 searches + hydration ≈ **302 units**.
 - One published video with thumbnail + captions = 1600 + 50 + 400 = **2,050 units**.
-- 10,000 units/day ⇒ **~4 fully-featured uploads/day**, or 6 uploads with no
-  thumbnail/captions, *including* research.
+- 10,000 units/day ⇒ **4 fully-featured uploads/day**, *including* research.
+  (Dividing by the insert cost alone suggests 6, and that number was wrong
+  wherever it appeared: the fifth upload puts the video up and then fails to
+  attach its captions.)
 
 The code enforces this rather than discovering it at runtime: `QuotaGuard`
 tracks spend against the midnight-US-Pacific reset and **reserves**
-`daily_video_limit × 1600` units so research can never starve publishing.
+`2,050 units × the uploads still owed today` so research can never starve
+publishing. The reserve **shrinks** as the day's uploads are made - a reserve
+fixed at its full size charges every upload twice against research, and the
+arithmetic of that is the day's last job finding no budget left.
 Check it any time with `autotube quota`.
 
 You can request a quota increase from Google (free, but requires an audit and
@@ -260,8 +265,9 @@ Pixabay/Pexels *or* Pollinations *or* procedural, FFmpeg, everything local.
 
 **What will actually stop you first, in order:**
 1. **YouTube's 15-minute cap** if your account is not verified. Free to lift.
-2. **YouTube upload quota** — ~4–5 uploads/day. Hard ceiling.
-3. **Your own anti-spam limits** — `automation.daily_video_limit` defaults to 3.
+2. **YouTube upload quota** — 4 uploads/day. Hard ceiling.
+3. **Your own anti-spam limits** — `automation.daily_video_limit` defaults
+   to 4, and is clamped to the quota ceiling.
 4. **LLM free-tier tokens/day** — the first thing you notice on long-form.
 5. **Render time** — a few minutes of CPU per 45 s Short, and it scales with
    length. This is why rendering is not on the phone.

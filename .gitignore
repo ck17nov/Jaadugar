@@ -58,3 +58,7 @@ _bank_write.py
 # Names the deployed host and its key path. Local only.
 DEPLOYMENT.local.md
 HANDOVER.local.md
+
+# Batch prompts are generated from the bank on demand; only the JSONL
+# batches they produce are worth keeping.
+banks/gen/_prompt-*.txt

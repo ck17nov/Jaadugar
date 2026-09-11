@@ -224,8 +224,15 @@ fun DashboardScreen(
                         quota?.let { q ->
                             StatusLine(
                                 "YouTube quota",
+                                // "uploads" alone read as 6, because that
+                                // is 10,000 / the insert cost. A PUBLISHED
+                                // video also pays for its thumbnail and its
+                                // caption track, so the real number is 4 and
+                                // the label has to say which it means.
                                 "${q.usedToday}/${q.limit} units - " +
-                                    "max ${q.maxUploadsPerDay} uploads/day",
+                                    "${q.uploadsToday} of " +
+                                    "${q.maxUploadsPerDay} full uploads " +
+                                    "today (video + thumbnail + captions)",
                             )
                         }
                     }

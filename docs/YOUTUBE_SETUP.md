@@ -164,7 +164,9 @@ Check your spend at any time:
 .venv/Scripts/python -m backend.cli quota
 ```
 
-`QuotaGuard` reserves `daily_video_limit x 1600` units so research can never eat
+`QuotaGuard` reserves `2,050 units x the uploads still owed today`
+(1,600 insert + 50 thumbnail + 400 captions), decremented as uploads
+land, so research can never eat
 the budget you need for publishing, and refuses a call that would exceed the cap
 rather than letting Google return an opaque 403 mid-upload.
 

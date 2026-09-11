@@ -117,7 +117,13 @@ GROUPS: tuple[Group, ...] = (
                   "linux", "windows", "excel", "office", "word",
                   "powerpoint", "spreadsheet", "computer", "pc", "laptop",
                   "phone", "mobile", "gadget", "gadgets", "youtube",
-                  "channel", "app", "apps", "server", "cloud", "api"),
+                  "channel", "app", "apps", "server", "cloud", "api",
+                  "android", "iphone", "ios", "browser", "chrome",
+                  "security", "cybersecurity", "privacy", "vpn", "password",
+                  "backup", "storage", "network", "networking", "wifi",
+                  "router", "troubleshoot", "troubleshooting", "shortcut",
+                  "shortcuts", "productivity", "google", "myth", "myths",
+                  "settings", "malware", "phishing"),
         topics=(
             "youtube tips and growth",
             "pc and laptop tech",
@@ -142,6 +148,30 @@ GROUPS: tuple[Group, ...] = (
             "sql and databases",
             "programming and coding",
             "developer tools",
+            # The evergreen half of the channel, added because the bank
+            # was being asked to fill "Technical" and the only practical
+            # subjects on the list were Excel and Office. These are the
+            # searches that do not go stale: a Windows shortcut, a phone
+            # setting, what a VPN actually does. Named "tips and tricks"
+            # where the video is a sequence of steps, because
+            # bank_prompt.shape_for reads the topic name to decide whether
+            # a script is a procedure or an explainer, and getting that
+            # wrong writes an essay where a walkthrough was wanted.
+            "windows tips and tricks",
+            "android tips and tricks",
+            "iphone tips and tricks",
+            "browser tips and tricks",
+            "google tools and workspace",
+            "hidden features and shortcuts",
+            "computer troubleshooting",
+            "file management and backup",
+            "cybersecurity basics",
+            "privacy and online safety",
+            "cloud storage explained",
+            "networking basics",
+            "productivity software and apps",
+            "tech myths busted",
+            "youtube automation and monetisation",
         ),
     ),
 )
@@ -180,6 +210,26 @@ def topics(key: str) -> list[str]:
 def all_topics() -> list[str]:
     """Every topic, in group order. The Topic dropdown's full list."""
     return [t for g in GROUPS for t in g.topics]
+
+
+def rotation_order(group_key: str, after: str = "") -> list[str]:
+    """This group's topics, starting just AFTER `after`.
+
+    BY NAME, not by index. An index into Group.topics is invalidated by any
+    edit to this file, and this file gets edited - the AI/science/programming
+    merge and the fifteen tech topics added later would each have shifted a
+    saved index, silently re-serving one topic while skipping another. A name
+    that is no longer on the list starts the lap at the top, which is the only
+    sane answer to a retired topic.
+    """
+    pool = topics(group_key)
+    if not pool:
+        return []
+    wanted = (after or "").strip().lower()
+    index = next((i for i, t in enumerate(pool) if t.lower() == wanted), -1)
+    if index < 0:
+        return list(pool)
+    return list(pool[index + 1:]) + list(pool[:index + 1])
 
 
 def group_for_topic(topic: str) -> Group | None:

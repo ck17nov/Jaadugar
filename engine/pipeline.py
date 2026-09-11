@@ -28,7 +28,7 @@ from .content.retention import analyze as analyze_retention, auto_improve
 from .content.script import ScriptGenerator
 from .core.config import Config, load_config
 from .core.db import Database
-from .core.groups import group_for_topic
+from .core.groups import group as group_by_key, group_for_topic
 from .core.logging import log_event, setup_logging
 from .core.models import (AutomationRequest, ContentIdea, JobStatus, Mode,
                           QualityReport, ResearchVideo, Scene, Script,
@@ -78,9 +78,11 @@ def needs_approval(*, mode: str, config_default_requires_approval: bool,
        approved the first video of an automation has confirmed it for the
        rest.
 
-    Honouring auto is safe because `youtube.force_private` pins every upload
-    to private, so "auto" means "uploaded privately, waiting in Studio", not
-    "live to subscribers unreviewed".
+    Honouring auto now means PUBLISHING PUBLICLY without a human reading the
+    video first - `youtube.force_private`, which used to pin every upload to
+    private, is off. Three things still hold a video: the quality gate in
+    `stage_publish`, a fact-check flag, and the one-time child-directed
+    confirmation below.
 
     A fact-check flag is never auto-published, whatever the mode: that is a
     correctness risk rather than a preference.
@@ -1423,12 +1425,44 @@ class Pipeline:
         # publish without asking" in the app did nothing, which is worse than
         # either behaviour because the UI promised something it could not do.
         #
-        # Safe to honour because `youtube.force_private` pins every upload to
-        # private visibility, so "auto" means "uploaded, private, waiting for
-        # you in Studio" - not "live to subscribers unreviewed".
-        # Made for Kids needs an explicit human confirmation ONCE PER
-        # AUTOMATION, not once per video - see needs_approval().
-        kids_confirmed = self.db.automation_has_approved_run(job.automation_id)
+        # `youtube.force_private` is now OFF, so AUTO means the video goes
+        # PUBLIC with no human in the loop. What still holds a video is the
+        # quality gate above, a fact-check flag, and the one-time
+        # child-directed confirmation - not a visibility backstop.
+        #
+        # Made for Kids needs an explicit human confirmation ONCE, and
+        # "once" used to mean once per automation id. The Create screen mints
+        # a new automation for every one-off video, so that condition could
+        # never be met and every kids video was held - the exact complaint,
+        # with mode=AUTO on the wire. Three things can satisfy it now, in
+        # order of directness.
+        chosen = (group_by_key(getattr(request, "niche_group", "") or "")
+                  or group_for_topic(request.niche))
+        kids_confirmed = (
+            # 1. The operator ticked the disclosure on the Create screen.
+            bool(getattr(request, "kids_confirmed", False))
+            # 2. Somebody has already confirmed it for this channel group -
+            #    or for this automation.
+            or self.db.kids_confirmation_exists(
+                group=(chosen.key if chosen else ""),
+                automation_id=job.automation_id)
+            # 3. Legacy: an earlier run of this same automation published, so
+            #    a human passed it once. Kept so installs that already have
+            #    kids videos out do not regress into holding.
+            or self.db.automation_has_approved_run(job.automation_id))
+        # Persist ONLY an explicit confirmation - source 1.
+        #
+        # Recording whenever the gate is merely satisfied would include
+        # source 3, which counts AUTO-published sibling jobs that no human
+        # ever looked at. That would turn a status inference into a durable
+        # record of human consent, and it would spread: one auto-published
+        # kids video would silently confirm the whole channel group. Source 2
+        # is already a record, so there is nothing to write for it.
+        if bool(meta.made_for_kids) and getattr(request, "kids_confirmed",
+                                                False):
+            self.db.record_kids_confirmation(
+                group=(chosen.key if chosen else ""),
+                automation_id=job.automation_id, source="create_screen")
         approval_required, reason = needs_approval(
             mode=request.mode,
             config_default_requires_approval=bool(
@@ -1451,10 +1485,13 @@ class Pipeline:
         job_dir = Path(job.dir)
         schedule = (request.publish_mode != "immediate"
                     and (request.frequency != "once" or bool(request.upload_time)))
-        # force_private also suppresses SCHEDULING, not just the privacy field.
-        # A scheduled insert carries publishAt, and YouTube publishes on that
-        # timestamp by itself - so leaving the schedule in place would make the
-        # video public regardless of what privacyStatus said at upload.
+        # When the force_private REHEARSAL switch is on it suppresses
+        # SCHEDULING too, not just the privacy field: a scheduled insert
+        # carries publishAt and YouTube publishes on that timestamp by
+        # itself, so leaving the schedule in place would make the video
+        # public regardless of what privacyStatus said at upload. With the
+        # switch off - the normal state now - the scheduled branch below is
+        # live and real publishAt timestamps are sent.
         if self.uploader.force_private:
             schedule = False
         if schedule and request.upload_time:
@@ -1682,6 +1719,32 @@ class Pipeline:
         request = AutomationRequest.from_dict(job.request or {})
         meta = VideoMetadata.from_dict(job.metadata or {})
         log_event("APPROVAL", "approved by user", job=job_id)
+
+        # An approval IS the human act. Record it, so the next automation in
+        # this channel group is not held for the same confirmation: this was
+        # inferred from job status afterwards, which is why it could only
+        # ever be remembered against one automation id.
+        if bool(meta.made_for_kids):
+            chosen = (group_by_key(getattr(request, "niche_group", "") or "")
+                      or group_for_topic(request.niche))
+            self.db.record_kids_confirmation(
+                group=(chosen.key if chosen else ""),
+                automation_id=job.automation_id, source="approval")
+
+        # RE-STAMP PRIVACY FROM THE CURRENT CONFIG.
+        #
+        # `meta` was built when the job was rendered and carries the privacy
+        # that was configured THEN. A job that has been sitting in
+        # AWAITING_APPROVAL since before the install went public would
+        # otherwise upload private on approval, with nothing on screen to
+        # explain why. The stored value only wins if it was an explicit
+        # non-default choice, which nothing currently sets per job.
+        configured = str(self.cfg.get("youtube.default_privacy", "private"))
+        if meta.privacy != configured:
+            log_event("APPROVAL", "privacy re-stamped from config",
+                      job=job_id, was=meta.privacy, now=configured)
+            meta.privacy = configured
+
         return self.publish_now(job, request, meta)
 
     def reject(self, job_id: str, reason: str = "") -> VideoJob:

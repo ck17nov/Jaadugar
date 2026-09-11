@@ -239,8 +239,13 @@ class TestQuotaGuard:
         db = Database(tmp_path / "q.db")
         guard = QuotaGuard(cfg, db)
         try:
-            # Reserve = daily_video_limit * 1600
-            assert guard.reserve == int(cfg.get("automation.daily_video_limit")) * 1600
+            # Reserve = the uploads STILL OWED x what one really costs.
+            # 2050, not 1600: a published video also sets a thumbnail and
+            # attaches captions.
+            planned = min(int(cfg.get("automation.daily_video_limit")),
+                          guard.max_uploads_per_day)
+            assert guard.per_upload == 2050
+            assert guard.reserve == planned * 2050
             assert guard.remaining() == guard.limit - guard.reserve
             # Uploads may ignore the reserve; research may not.
             guard.check("video_insert", respect_reserve=False)
@@ -248,6 +253,63 @@ class TestQuotaGuard:
                 guard.spend("search_list")
             with pytest.raises(QuotaExceeded):
                 guard.check("search_list")
+        finally:
+            db.close()
+
+    def test_the_reserve_shrinks_as_the_day_s_uploads_are_made(self, cfg,
+                                                               tmp_path):
+        """Otherwise every upload is charged against research twice.
+
+        A reserve fixed at its full size all day is room held for videos
+        that have already been made and already paid for out of the same
+        10,000 units. Measured with the shipped config before this was
+        fixed: the THIRD job of the day found "0 available, 6150 reserved"
+        and failed, with 3,246 real units unspent.
+        """
+        from engine.research.youtube import QuotaGuard
+        db = Database(tmp_path / "q.db")
+        guard = QuotaGuard(cfg, db)
+        try:
+            planned = min(int(cfg.get("automation.daily_video_limit")),
+                          guard.max_uploads_per_day)
+            start = guard.reserve
+            for done in range(1, planned + 1):
+                for op in ("video_insert", "thumbnail_set",
+                           "captions_insert"):
+                    guard.spend(op)
+                assert guard.reserve == (planned - done) * guard.per_upload
+                # And the point of it: research still has room to run.
+                assert guard.remaining() > 0, \
+                    f"research starved after upload {done}"
+            assert guard.reserve == 0 < start
+        finally:
+            db.close()
+
+    def test_the_ceiling_counts_the_whole_upload(self, cfg):
+        """4, not 6. The app showed 6 because it divided by the insert."""
+        from engine.research.youtube import QuotaGuard
+        guard = QuotaGuard(cfg, None)
+        assert guard.per_upload == (guard.cost("video_insert")
+                                    + guard.cost("thumbnail_set")
+                                    + guard.cost("captions_insert"))
+        assert guard.max_uploads_per_day == guard.limit // guard.per_upload
+        assert guard.max_uploads_per_day == 4
+
+    def test_an_impossible_daily_limit_cannot_pin_research_at_zero(self, cfg,
+                                                                   tmp_path):
+        """daily_video_limit above the ceiling would reserve the whole day.
+
+        5 x 2050 is 10,250 - more than the entire grant - so an unclamped
+        reserve leaves remaining() at 0 permanently and no job ever
+        researches anything again.
+        """
+        from engine.research.youtube import QuotaGuard
+        db = Database(tmp_path / "q.db")
+        cfg.set("automation.daily_video_limit", 9)
+        guard = QuotaGuard(cfg, db)
+        try:
+            assert guard.reserve <= guard.limit
+            assert guard.remaining() > 0
         finally:
             db.close()
 

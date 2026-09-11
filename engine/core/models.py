@@ -127,6 +127,19 @@ class AutomationRequest(JsonMixin):
     # produce a video every day and put each one up straight away.
     publish_mode: str = "scheduled"           # scheduled | immediate
     made_for_kids: bool = False
+    # A HUMAN act, not an inference.
+    #
+    # `made_for_kids` is set by the app whenever the group is Kids or the
+    # audience is under 13, and the switch is disabled in that state - so it
+    # says "something detected kids content", never "a person affirmed the
+    # classification". The publish gate needs the second fact and had no
+    # field carrying it, so it fell back to "has an earlier run of this same
+    # automation published?" - which is always no for the one-off automation
+    # the Create screen mints per video. Every kids video was therefore held
+    # for a confirmation that the operator had already given on screen.
+    #
+    # False by default, so an older client behaves exactly as before.
+    kids_confirmed: bool = False
     keywords: list[str] = field(default_factory=list)
     # Where the script comes from.
     #   "live"       generate it now, as every version before the bank did.
@@ -140,6 +153,14 @@ class AutomationRequest(JsonMixin):
     # Which group's bank to draw from. Empty derives it from the niche, which
     # is right whenever the niche is one of the group's listed topics.
     niche_group: str = ""
+    # AUTO MODE for topics. One automation covers a whole group: each
+    # scheduled run takes the NEXT topic in `niche_group`, so nine kids
+    # topics need one automation instead of nine.
+    #
+    # The topic for a given run is resolved server-side and written into
+    # `niche` before the pipeline ever sees the request, so nothing
+    # downstream needs to know this field exists.
+    topic_rotate: bool = False
     id: str = field(default_factory=lambda: new_id("auto"))
 
 

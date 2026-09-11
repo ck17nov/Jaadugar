@@ -311,7 +311,12 @@ private fun AutomationRow(
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    automation.niche.ifBlank { "(no niche)" },
+                    if (automation.topicRotate) {
+                        "Auto - all ${automation.topicCount} " +
+                            "${automation.groupLabel} topics"
+                    } else {
+                        automation.niche.ifBlank { "(no niche)" }
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f),
@@ -340,6 +345,13 @@ private fun AutomationRow(
                         append(" - ${automation.language}")
                     }
                     append(" - ${automation.videosMade} made")
+                    // `last`, not `next`: a topic with no reviewed script
+                    // left is skipped for that lap, so the next name in the
+                    // list is not necessarily what will run.
+                    if (automation.topicRotate &&
+                        automation.lastTopic.isNotBlank()) {
+                        append(" - last: ${automation.lastTopic}")
+                    }
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

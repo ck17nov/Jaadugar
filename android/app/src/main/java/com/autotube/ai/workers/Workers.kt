@@ -200,6 +200,16 @@ class AutomationWorker(appContext: Context, params: WorkerParameters) :
             uploadTime = automation.uploadTime,
             timezone = automation.timezone,
             madeForKids = automation.madeForKids,
+            // Without this every WorkManager-fired recurring run drops
+            // the confirmation and re-triggers the hold - the same
+            // failure mode the block above documents for the voice,
+            // caption and bank fields.
+            kidsConfirmed = automation.kidsConfirmed,
+            // THIS LINE IS THE ROTATION. Without it every scheduled run
+            // re-POSTs topicRotate=false with the last resolved topic,
+            // the backend treats it as an ordinary automation, and Auto
+            // mode makes the same subject for ever.
+            topicRotate = automation.topicRotate,
             minQualityScore = automation.minQualityScore,
             // THE SAME automation, not a new one shaped like it.
             id = automation.id,
