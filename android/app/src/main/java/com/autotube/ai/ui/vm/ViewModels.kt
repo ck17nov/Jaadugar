@@ -269,8 +269,16 @@ class CreateViewModel(
      * Read here so the publish selector can say that scheduling will not take
      * effect, rather than offering a choice the backend quietly ignores.
      */
-    private val _forcePrivate = MutableStateFlow(false)
-    val forcePrivate: StateFlow<Boolean> = _forcePrivate.asStateFlow()
+    // NULL until /health answers, because `false` is a CLAIM.
+    //
+    // It defaulted to false, was only ever set on success, and was never
+    // re-checked - so an unreachable backend made the Publishing block
+    // promise "handed to YouTube with a scheduled publish time" on an
+    // install where every upload is pinned private. The app was describing
+    // behaviour the backend would not perform, which is the one thing a
+    // publishing screen must not do.
+    private val _forcePrivate = MutableStateFlow<Boolean?>(null)
+    val forcePrivate: StateFlow<Boolean?> = _forcePrivate.asStateFlow()
 
     /**
      * The brand channels available to publish to, for the channel selector.
@@ -284,16 +292,32 @@ class CreateViewModel(
     init {
         if (store.isConfigured) {
             viewModelScope.launch {
-                repo.health().onSuccess { _forcePrivate.value = it.forcePrivate }
+                repo.health()
+                    .onSuccess { _forcePrivate.value = it.forcePrivate }
+                    .onFailure { _forcePrivate.value = null }
             }
             loadChannels()
             loadGroups()
         }
     }
 
+    /**
+     * Whether the channel list could be fetched, for the same reason as
+     * [catalogueFailed]: an empty list makes the Create screen say "no
+     * channel is mapped to this group yet - map it in Settings", which
+     * sends the operator to fix a mapping that is already correct.
+     */
+    private val _channelsFailed = MutableStateFlow(false)
+    val channelsFailed: StateFlow<Boolean> = _channelsFailed.asStateFlow()
+
     fun loadChannels() {
         viewModelScope.launch {
-            repo.youtubeAccounts().onSuccess { _channels.value = it.accounts }
+            repo.youtubeAccounts()
+                .onSuccess {
+                    _channels.value = it.accounts
+                    _channelsFailed.value = false
+                }
+                .onFailure { _channelsFailed.value = true }
         }
     }
 
@@ -516,7 +540,16 @@ class ScheduleViewModel(
             // destructive schema migration on upgrade - was never restored.
             repo.syncAutomations()
                 .onSuccess { _automations.value = it.automations; _loaded.value = true }
-                .onFailure { error(it.message ?: "Could not load automations.") }
+                .onFailure {
+                    // BACK to unknown. The flag only ever went true, so
+                    // after one successful load a failed refresh left the
+                    // previous list standing as current - or, on a list
+                    // that had been empty, left "None." standing as a
+                    // fact. The screen already has the right words for
+                    // this state; it was simply never reachable again.
+                    _loaded.value = false
+                    error(it.message ?: "Could not load automations.")
+                }
         }
     }
 
@@ -592,11 +625,26 @@ class SettingsViewModel(
     private val _defaultChannel = MutableStateFlow("")
     val defaultChannel: StateFlow<String> = _defaultChannel.asStateFlow()
 
+    /**
+     * Whether the channel list could be FETCHED.
+     *
+     * An empty list was rendered as "No channels connected yet. Tap Connect
+     * YouTube above." - so a backend that could not be reached told the
+     * operator their channels were gone and invited them to reconnect an
+     * account that was already connected. "Test connection" then cleared
+     * the error banner, erasing the only signal that anything had failed.
+     */
+    private val _accountsFailed = MutableStateFlow(false)
+    val accountsFailed: StateFlow<Boolean> = _accountsFailed.asStateFlow()
+
     fun refreshAccounts() {
         runTask<YouTubeAccountListDto>({
             _accounts.value = it.accounts
             _defaultChannel.value = it.default
-        }) { repo.youtubeAccounts() }
+            _accountsFailed.value = false
+        }, onFailure = { _accountsFailed.value = true }) {
+            repo.youtubeAccounts()
+        }
     }
 
     /** The channel groups, for the per-channel mapping chips. */

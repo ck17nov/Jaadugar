@@ -444,6 +444,16 @@ class Worker:
         time.sleep(first)
 
         while True:
+            # Catch the local record up with YouTube before sweeping, so a
+            # scheduled upload that has gone live is counted as published
+            # rather than sitting in "Scheduled" for ever. Cheap: one
+            # indexed query and a timestamp comparison.
+            try:
+                self._ensure_pipeline().promote_scheduled()
+            except Exception as exc:                # noqa: BLE001
+                log_event("JANITOR", "could not promote scheduled jobs",
+                          error=str(exc)[:160])
+
             self._sweep_once(after_days=normal_days, reason="scheduled")
 
             free = self._free_gb()

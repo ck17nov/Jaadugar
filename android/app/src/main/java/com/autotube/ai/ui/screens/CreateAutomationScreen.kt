@@ -189,6 +189,9 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
     val bankFailed by vm.bankFailed.collectAsStateWithLifecycle()
     // Whether the LIVE topic catalogue could be fetched at all.
     val catalogueFailed by vm.catalogueFailed.collectAsStateWithLifecycle()
+    // Whether the CHANNEL list could be fetched, which is what makes
+    // "not mapped" a true statement rather than a guess.
+    val channelsFailed by vm.channelsFailed.collectAsStateWithLifecycle()
     // Which group that count was taken over - not always the one
     // asked for, because a blank group is resolved from the topic.
     val bankGroup by vm.bankGroup.collectAsStateWithLifecycle()
@@ -410,16 +413,28 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                     ch.niches.any { it.equals(g.key, true) }
                 }
                 Text(
-                    if (target != null) {
-                        "Publishes to ${target.title}."
-                    } else {
-                        "No channel is mapped to ${g.label} yet - it will use " +
-                            "the default channel. Map it in Settings > " +
-                            "Publishing channels."
+                    when {
+                        target != null -> "Publishes to ${target.title}."
+                        // "Not mapped" is a claim about Settings; it needs
+                        // the channel list to be true. Without it the
+                        // screen sent the operator to fix a mapping that
+                        // was already correct.
+                        channelsFailed || channels.isEmpty() ->
+                            "Cannot reach the backend, so where ${g.label} " +
+                                "publishes is unknown. It will use whatever " +
+                                "is mapped there."
+                        else ->
+                            "No channel is mapped to ${g.label} yet - it will " +
+                                "use the default channel. Map it in Settings > " +
+                                "Publishing channels."
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (target != null) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = when {
+                        target != null -> MaterialTheme.colorScheme.primary
+                        channelsFailed || channels.isEmpty() ->
+                            MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
         }
@@ -789,7 +804,15 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
         }
         Text(
             when {
-                forcePrivate ->
+                // UNKNOWN comes first. A null means /health never answered,
+                // and the two statements below are both claims about what
+                // the backend will do with the video.
+                forcePrivate == null ->
+                    "Cannot reach the backend, so what happens on publish is " +
+                        "unknown - it may be set to force every upload " +
+                        "private. Nothing is uploaded until you approve it " +
+                        "either way."
+                forcePrivate == true ->
                     "The backend is set to force private, so every upload stays " +
                         "private and nothing is scheduled - publishing has no " +
                         "effect until that is turned off. Useful for checking " +
@@ -801,8 +824,11 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                         "phone does not need to be online for it."
             },
             style = MaterialTheme.typography.bodySmall,
-            color = if (forcePrivate) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = when (forcePrivate) {
+                null -> MaterialTheme.colorScheme.error
+                true -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
         )
 
         if (frequency != "once" && publishMode == "scheduled") {

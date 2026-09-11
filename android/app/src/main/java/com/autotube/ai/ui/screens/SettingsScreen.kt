@@ -67,6 +67,9 @@ fun SettingsScreen() {
     val health by vm.health.collectAsStateWithLifecycle()
     val youtube by vm.youtube.collectAsStateWithLifecycle()
     val accounts by vm.accounts.collectAsStateWithLifecycle()
+    // Whether the list could be FETCHED - "none" and "could not
+    // ask" are different facts and must read differently.
+    val accountsFailed by vm.accountsFailed.collectAsStateWithLifecycle()
     val groups by vm.groups.collectAsStateWithLifecycle()
     val defaultChannel by vm.defaultChannel.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -405,10 +408,22 @@ fun SettingsScreen() {
         )
 
         if (accounts.isEmpty()) {
+            // "None" and "could not ask" are different facts, and telling
+            // somebody their channels are gone when the backend simply did
+            // not answer invites them to reconnect an account that is
+            // already connected.
+            val failed = accountsFailed
             Text(
-                "No channels connected yet. Tap Connect YouTube above.",
+                if (failed) {
+                    "Cannot reach the backend, so the connected channels " +
+                        "are unknown - this is NOT the same as having none. " +
+                        "Do not reconnect until it answers."
+                } else {
+                    "No channels connected yet. Tap Connect YouTube above."
+                },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (failed) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
@@ -615,9 +630,28 @@ private fun ChannelCard(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        account.title.ifBlank { "Identifying channel..." },
+                        account.title.ifBlank {
+                            "Channel not identified (${account.channelId})"
+                        },
                         style = MaterialTheme.typography.bodyLarge,
+                        color = if (account.title.isBlank())
+                            MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurface,
                     )
+                    if (account.title.isBlank()) {
+                        // It said "Identifying channel..." forever. The
+                        // backend fills the title from YouTube when the
+                        // token is usable, so a blank one means the ask
+                        // FAILED - and this is the channel every unmapped
+                        // video publishes to.
+                        Text(
+                            "The backend could not ask YouTube which channel " +
+                                "this token owns. Videos may still publish " +
+                                "here - check the token before relying on it.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     Text(
                         if (isDefault) "Default - used when a niche has no channel"
                         else account.channelId,

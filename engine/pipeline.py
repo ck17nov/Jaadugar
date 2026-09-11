@@ -1724,14 +1724,34 @@ class Pipeline:
                         after_days=days, dry_run=bool(self.cfg.dry_run))
         return [r.to_dict() for r in results]
 
+    def promote_scheduled(self) -> int:
+        """Mark SCHEDULED jobs PUBLISHED once their publish time has passed.
+
+        Split out of `collect_analytics` and called from the janitor,
+        because it was only reachable by collecting analytics - so on an
+        install where nothing did, every scheduled upload stayed SCHEDULED
+        for ever. The dashboard's "Published" tile read 0 permanently while
+        "Scheduled" counted videos YouTube had made public weeks earlier.
+
+        YouTube is what actually publishes on the slot; this is the local
+        record catching up with it.
+        """
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        promoted = 0
+        for job in self.db.list_jobs(JobStatus.SCHEDULED.value, limit=500):
+            if job.scheduled_for and job.scheduled_for <= now:
+                self._advance(job, JobStatus.PUBLISHED,
+                              "scheduled time reached")
+                promoted += 1
+        if promoted:
+            log_event("PUBLISH", "scheduled videos are now live",
+                      count=promoted)
+        return promoted
+
     def collect_analytics(self, *, days: int = 28) -> dict[str, Any]:
         collector = AnalyticsCollector(self.cfg, self.auth, self.db)
         stats = collector.collect_all(days=days)
-        for job in self.db.list_jobs(JobStatus.SCHEDULED.value, limit=200):
-            # Promote scheduled jobs whose publish time has passed.
-            if job.scheduled_for and job.scheduled_for <= time.strftime(
-                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime()):
-                self._advance(job, JobStatus.PUBLISHED, "scheduled time reached")
+        self.promote_scheduled()
         insights = self.learner.learn()
         return {"collected": [s.to_dict() for s in stats],
                 "insights": [i.to_dict() for i in insights],
