@@ -589,9 +589,7 @@ fun SettingsScreen() {
                             "and the YouTube sign-in from this phone's " +
                             "encrypted storage. This cannot be undone and " +
                             "you will have to enter them and reconnect " +
-                            "YouTube again.
-
-The backend URL is kept. " +
+                            "YouTube again.\n\nThe backend URL is kept. " +
                             "Channels already connected on the backend are " +
                             "not removed, and published videos stay up."
                     )
