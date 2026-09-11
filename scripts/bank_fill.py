@@ -26,11 +26,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from engine.content import bank_import, bank_prompt          # noqa: E402
+from engine.content.bank import BankEntry                    # noqa: E402
 from engine.core.config import load_config                   # noqa: E402
 from engine.core.db import Database                          # noqa: E402
 from engine.core.groups import GROUPS, group as get_group    # noqa: E402
@@ -177,6 +179,33 @@ def cmd_absorb(args) -> int:
             require_review=False)          # reviewed below, in this run
         after = {row["entry_id"] for row in db.bank_entries(limit=100_000)}
 
+        # WHO WROTE IT, recorded by the importer rather than claimed by
+        # the author. Every generated entry warned that this was missing,
+        # and for AI-authored content that will be published it is the one
+        # piece of provenance worth keeping.
+        # NEW ids AND replaced ones. An entry corrected and re-absorbed is
+        # stored, not added, so keying only on "ids that appeared" skipped
+        # exactly the rows a second pass was meant to fix.
+        touched = sorted((after - before) | set(report.replaced))
+        stamped = 0
+        for entry_id in touched:
+            row = next((r for r in db.bank_entries(limit=100_000)
+                        if r["entry_id"] == entry_id), None)
+            if row is None:
+                continue
+            entry = BankEntry.from_dict(json.loads(row["payload"]))
+            if entry.provenance.get("tool"):
+                continue
+            entry.provenance = {
+                **entry.provenance,
+                "tool": args.tool,
+                "batch": path.name,
+                "imported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                             time.gmtime()),
+            }
+            db.save_bank_entry(entry)
+            stamped += 1
+
         reviewed = 0
         if args.reviewer:
             # Recorded as a MACHINE review, because that is what it is.
@@ -185,13 +214,15 @@ def cmd_absorb(args) -> int:
             #
             # Only the ids this file actually added. Reviewing everything in
             # `after` would rubber-stamp the whole bank on every absorb.
-            for entry_id in sorted(after - before):
+            for entry_id in touched:
                 if bank_import.review(db, entry_id, reviewer=args.reviewer,
                                       verdict="approve", kind="machine",
                                       element=args.element):
                     reviewed += 1
 
         print(report.summary())
+        if stamped:
+            print(f"  {stamped} stamped with provenance tool={args.tool}")
         if args.reviewer:
             print(f"  {reviewed} marked machine-reviewed by {args.reviewer}")
         for warning in report.warnings[:20]:
@@ -265,6 +296,8 @@ def main() -> int:
                    help="record a machine review under this name")
     p.add_argument("--element", default="",
                    help="the human-authored contribution, if any")
+    p.add_argument("--tool", default="claude-opus-5",
+                   help="recorded as provenance.tool on every entry stored")
     p.set_defaults(func=cmd_absorb)
 
     args = parser.parse_args()
