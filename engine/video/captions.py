@@ -649,49 +649,57 @@ class CaptionEngine:
                 + chunks[where + 2:])
 
     def _split_line_chunks(self, text: str, target: int) -> list[str]:
-        """Break a sentence into lines of roughly `target` characters.
+        """Break a caption into lines of roughly `target` characters.
+
+        SENTENCE BY SENTENCE, then within each sentence. Filling greedily
+        across the whole caption put the end of one sentence and the start
+        of the next on the same line - "courtyard step. The" - which reads
+        as though the words were poured in rather than written.
 
         Aiming for a TARGET rather than filling to a maximum, because the
         renderer scales each line to a fixed width: uneven chunks come out
-        at wildly different sizes, and the type appears to jump about
-        between cues. Even chunks all land near the same scale.
+        at wildly different sizes and the type appears to jump about.
 
-        Two rules beyond that, both about where a line ENDS:
-
-        - Break after punctuation when the line is already reasonably full.
-          "His hand went in;" is a phrase; "Aarav was tossing his ball in
-          the" is a sentence someone chopped.
-        - Never leave a stub. A trailing "heavy cot." on its own is a flash
-          nobody reads, so a short tail is folded back into the line before
-          it even if that line ends up over target.
+        Within a sentence, two more rules about where a line ENDS:
+        - Break after a comma or similar when the line is already nearly
+          full, so the break lands on a natural pause.
+        - Never leave a stub. A trailing two-word line is a flash nobody
+          reads, so a short tail is folded back into the line before it.
         """
+        import re as _re
+
         target = max(10, target)
-        words = (text or "").split()
-        if not words:
+        body = (text or "").strip()
+        if not body:
             return []
 
-        enders = (".", "!", "?", ",", ";", ":", "।")
-        lines: list[str] = []
-        current = ""
-        for word in words:
-            candidate = word if not current else f"{current} {word}"
-            if len(candidate) > target and current:
-                lines.append(current)
-                current = word
-                continue
-            current = candidate
-            # A natural pause, and enough on the line to be worth holding.
-            if current.endswith(enders) and len(current) >= target * 0.78:
-                lines.append(current)
-                current = ""
-        if current:
-            lines.append(current)
+        # Keep the terminator with the sentence it ends. The danda is
+        # Hindi's full stop and has to count as one.
+        sentences = [s.strip() for s in
+                     _re.split(r"(?<=[.!?।])\s+", body)
+                     if s.strip()] or [body]
 
-        # Fold a stub tail back. Allowed to exceed target - the renderer
-        # shrinks the line to fit, and one slightly smaller line beats a
-        # two-word flash.
-        if len(lines) > 1 and len(lines[-1]) < target * 0.45:
-            lines[-2:] = [f"{lines[-2]} {lines[-1]}"]
+        enders = (",", ";", ":")
+        lines: list[str] = []
+        for sentence in sentences:
+            words_in = sentence.split()
+            current = ""
+            start_at = len(lines)
+            for word in words_in:
+                candidate = word if not current else f"{current} {word}"
+                if len(candidate) > target and current:
+                    lines.append(current)
+                    current = word
+                    continue
+                current = candidate
+                if current.endswith(enders) and len(current) >= target * 0.78:
+                    lines.append(current)
+                    current = ""
+            if current:
+                lines.append(current)
+            # Fold a stub tail back into its OWN sentence only.
+            if (len(lines) - start_at) > 1 and len(lines[-1]) < target * 0.45:
+                lines[-2:] = [f"{lines[-2]} {lines[-1]}"]
         return lines
 
     def _target_chars(self, width: int, height: int, language: str) -> int:
