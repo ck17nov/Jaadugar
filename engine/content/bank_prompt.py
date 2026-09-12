@@ -522,6 +522,18 @@ LANGUAGE AND CAPTIONS
   a viewer who does not follow the spoken language can still read along. It
   must be a natural translation of that scene's narration, not a transcription
   of it, and it must be at most 90 characters so it fits one line.""")
+    if not language.startswith("hi"):
+        # The captions on an ENGLISH entry are the Devanagari ones, and this
+        # is where the spelling goes wrong. Real errors from one batch:
+        # "सिर्य ऐक" for "सिर्फ़ एक", and "ऐआई" for "एआई".
+        parts.append("""- THE DEVANAGARI SPELLING HAS TO BE RIGHT. Captions are
+  burned into the finished video, so an error is permanent and a Hindi
+  speaker sees it immediately. Two traps in particular: write ए, not ऐ,
+  unless the word really takes ऐ - it is एक, एआई, एप, not ऐक, ऐआई, ऐप - and
+  keep the nukta where a word needs one: सिर्फ़, ज़रूरी, फ़ोन. Read each
+  caption back before you move on. If you are unsure how a technical term is
+  normally written in Hindi, use the everyday loanword in Devanagari rather
+  than guessing at a spelling.""")
     if language.startswith("hi"):
         parts.append("""- Write the Hindi narration in Devanagari. Do not
   romanise it. Everyday English loanwords that Hindi speakers actually use -
