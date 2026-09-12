@@ -323,7 +323,7 @@ def _run() -> int:
         # more - exactly the state that makes the next
         # `git pull --ff-only` fail. It also pruned workspace/bank-gen,
         # where the autofill's only copy of an entry lives until
-        # `bank_publish.py` commits it.
+        # the owner commits it.
         #
         # Pruning is a DEVELOPER operation: it ends in a commit, and
         # there is nothing here to commit to. So verify read-only, say

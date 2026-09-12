@@ -218,6 +218,16 @@ class BankEntry:
     def narrations(self) -> list[str]:
         return [s.narration for s in self.scenes if s.narration.strip()]
 
+    def beats(self) -> list[str]:
+        """The beat names, aligned index-for-index with narrations().
+
+        Same filter as narrations() on purpose. The story gate uses
+        these to look at the RIGHT scene and to skip questions a form
+        does not have - a poem has no obstacle beat - so a list that
+        drifted by one scene would be worse than no list at all.
+        """
+        return [s.beat for s in self.scenes if s.narration.strip()]
+
     def diversity_tuple(self) -> tuple[str, ...]:
         """The six axes that must not all coincide with another entry.
 

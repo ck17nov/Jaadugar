@@ -22,6 +22,8 @@ correction cannot republish a story that has already gone out.
 """
 from __future__ import annotations
 
+import re
+
 import json
 import time
 from dataclasses import dataclass, field
@@ -129,10 +131,51 @@ def import_file(path: Path, db, *, expect_group: str = "",
     return report
 
 
+# A runtime LLM handle: "<provider>:<model>", which is what every provider
+# in LLMRouter stamps into provenance.tool. The provider list is groq,
+# gemini, ollama and template (engine/content/llm.py:266,479,602,677).
+_RUNTIME_TOOL = re.compile(r"^(groq|gemini|ollama|template|openai|google)\s*:",
+                           re.I)
+
+
 def _gate(entry: BankEntry, existing: list[BankEntry], *, expect_group: str,
           require_review: bool, report: ImportReport) -> list[str]:
     """Run all the gates. Returns the fatal reasons, or [] to store."""
     fatal: list[str] = []
+
+    # ---- 0. THE BANK IS THE OWNER'S. ----
+    #
+    # An autofill loop used to top the bank up from the free LLM
+    # tier, and the owner has since said plainly that they supply
+    # every script themselves - the model may only write at render
+    # time, for an automation whose script source is "live".
+    #
+    # Deleting the generator is not enough. A stale checkout, an old
+    # staged file or a copy of the script on another machine would
+    # still import cleanly, and the entries would look exactly like
+    # the rest of the bank once they were in. So the refusal lives
+    # at the door, where every path in has to pass it.
+    # Two checks, because one literal is too easy to walk around. The
+    # batch label is what the deleted script wrote; the tool handle is what
+    # the RUNTIME writes, and it is the part a modified copy cannot avoid -
+    # every provider in the router stamps "<provider>:<model>".
+    #
+    # The anchor is a colon on purpose. The owner's own batches are tagged
+    # "gemini (external, operator-supplied)", which starts with a provider
+    # name and is NOT a runtime handle; the 276 entries they commissioned
+    # say "claude-opus-5". Both must keep importing, and both are covered
+    # by controls in tests/test_bank_is_operator_only.py.
+    provenance = entry.provenance or {}
+    tool = str(provenance.get("tool") or "").strip().lower()
+    machine_fill = (provenance.get("batch") == "autofill"
+                    or _RUNTIME_TOOL.match(tool) is not None)
+    if machine_fill:
+        fatal.append(
+            f"REJECT {entry.entry_id} [autofill] a model wrote this entry "
+            f"({tool or 'batch=autofill'}); the bank holds only what the "
+            f"owner supplied. Live generation at render time is "
+            f"unaffected.")
+        return fatal            # no point running craft gates on it
 
     # ---- 1. schema ----
     problems = validate(entry, expect_group=expect_group)
@@ -146,7 +189,15 @@ def _gate(entry: BankEntry, existing: list[BankEntry], *, expect_group: str,
     # four-hour render to discover later.
     if entry.shape in ("narrative", "poem") and entry.narrations():
         floor = max(8, (entry.word_count // max(entry.scene_count, 1)) - 6)
-        story = evaluate_story(entry.narrations(), words_per_scene_floor=floor)
+        # Beats passed through: the gate uses them to look at the
+        # right scene, and to skip a question the form does not have.
+        # Without them every poem was asked for an obstacle beat that
+        # a poem does not contain - 21 of 54 banked poems reported
+        # "nothing goes wrong anywhere", which is advisory noise that
+        # teaches an author to loosen a real check.
+        story = evaluate_story(entry.narrations(),
+                               words_per_scene_floor=floor,
+                               beats=entry.beats())
         for finding in story.blockers:
             fatal.append(f"REJECT {entry.entry_id} [story:{finding.check}] "
                          f"{finding.detail}")

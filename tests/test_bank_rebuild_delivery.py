@@ -110,7 +110,7 @@ class TestNoPromoteWritesNothing:
     the prune loop rewrites and unlinks every path in `delivered`, so a
     server run deleted six files out of `banks/gen` and modified six more.
     It also pruned `workspace/bank-gen`, where an autofilled entry is the
-    only copy in existence until `bank_publish.py` commits it.
+    only copy in existence until the owner commits it.
 
     This test reads the source rather than running a rebuild, because a
     rebuild takes ten minutes and clears the live database. The invariant is

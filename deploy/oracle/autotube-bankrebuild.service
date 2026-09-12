@@ -1,13 +1,12 @@
 [Unit]
-# Folds the autofill's output into the live bank.
+# Rebuilds the live database from the script bank shipped in git.
 #
-# The autofill stages into workspace/bank-gen, OUTSIDE the git checkout,
-# because `git pull --ff-only` refuses a dirty tree. Without this, nothing
-# imported those files and the deploy-time sync - which clears the database
-# before re-importing banks/*.jsonl - would delete them. That is the same
-# defect that cost 110 entries on the laptop, and it would have repeated
-# here on the next deploy.
-Description=Jaadugar bank rebuild (folds in autofilled entries)
+# It USED TO fold in the autofill's output from workspace/bank-gen. The
+# autofill is gone - the owner supplies every script - so this now has one
+# job: make the database agree with banks/gen after a deploy. No
+# --extra-stage, because anything outside the checkout arrived without the
+# owner asking, which is the thing that was removed.
+Description=Jaadugar bank rebuild (database follows the shipped bank)
 After=network-online.target
 
 [Service]
@@ -21,8 +20,7 @@ EnvironmentFile=/opt/autotube/.env
 # would dirty the tree and break every future deploy. The staged files
 # remain the source; only the database is rebuilt.
 ExecStart=/opt/autotube/.venv/bin/python scripts/bank_rebuild.py \
-    --confirm --no-promote \
-    --extra-stage /opt/autotube/workspace/bank-gen
+    --confirm --no-promote
 
 Nice=10
 StandardOutput=journal

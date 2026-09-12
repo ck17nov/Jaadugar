@@ -163,21 +163,22 @@ cat ~/.ssh/autotube.pub
 
 Paste that key into GitHub: **repo → Settings → Deploy keys → Add deploy key**.
 
-**Write access: it depends on whether the box publishes its own entries.**
+**Write access: leave it OFF.**
 
-| | *Allow write access* | what the box can do |
-|---|---|---|
-| deploy only | **off** | `git pull --ff-only`. Autofilled entries live on one disk and are lost with it. |
-| deploy + publish | **on** | `scripts/bank_publish.py` commits the nightly autofill and pushes it, so the entries survive the instance. |
+There used to be a reason to consider it. An autofill loop generated bank
+entries on this box from the free LLM tier, those entries existed on one
+disk, and `bank_publish.py` pushed them into git so they would survive the
+instance. That was a genuine tradeoff: a write credential on a machine that
+already holds a YouTube refresh token, in exchange for not losing content.
 
-Turn it **on** only if you want the second row - it is a write credential on
-a box that already holds a YouTube refresh token, and that is the owner's
-call, not a default. `bank_publish.py` never force-pushes and aborts a failed
-rebase rather than resolving it, so the worst case is a night with no commit,
-but a stolen key with write access can still rewrite `main`.
+The autofill is gone. The owner supplies every script, so this box GENERATES
+NOTHING and has nothing to push - the tradeoff has no upside left, only the
+credential. A read-only deploy key is all it needs:
 
-If you leave it off, do not enable `autotube-bankpublish.timer`: every run
-will fail at the push with `remote: Write access to repository not granted`.
+    git pull --ff-only          # the only git operation the box performs
+
+The nightly `autotube-bankrebuild.timer` rebuilds the database from
+`banks/gen` in the checkout. It reads nothing outside git.
 
 Then tell SSH to use it:
 
