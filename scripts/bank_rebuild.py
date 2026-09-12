@@ -293,13 +293,43 @@ def _run() -> int:
                     target.unlink()
         finally:
             shutil.rmtree(snapdir, ignore_errors=True)
-        delivered = (staged if args.no_promote
-                     else sorted(BANKS.glob("*.jsonl")))
+        # ON THE SERVER, STOP HERE - and write nothing.
+        #
+        # `delivered` used to be set to `staged` under --no-promote,
+        # and the prune loop below rewrites and unlinks every path in
+        # it. So the one flag whose whole job is "do not touch the
+        # checkout" deleted six files out of banks/gen and modified six
+        # more - exactly the state that makes the next
+        # `git pull --ff-only` fail. It also pruned workspace/bank-gen,
+        # where the autofill's only copy of an entry lives until
+        # `bank_publish.py` commits it.
+        #
+        # Pruning is a DEVELOPER operation: it ends in a commit, and
+        # there is nothing here to commit to. So verify read-only, say
+        # what a fresh database would do with the staged input, and
+        # leave the live database as step 2 built it - which is the
+        # point of --extra-stage, since the autofilled entries exist
+        # nowhere else yet.
         if args.no_promote:
             print(f"\nnot promoting (banks/ is the checkout here); "
-                  f"{len(delivered)} staged batches are the source")
-        else:
-            print(f"\nwrote {len(delivered)} delivery files")
+                  f"{len(staged)} staged batches are the source")
+            fresh = _verify(staged, reviewer=args.reviewer,
+                            tool=args.tool)
+            offered = sum(len(_lines_of(path)) for path in staged)
+            would = sum(len(ids) for ids in fresh.values())
+            stored = len(live.bank_entries(limit=100_000))
+            print(f"\nstaged lines : {offered}")
+            print(f"fresh import : {would} would land")
+            print(f"live database: {stored} entries")
+            if would != stored:
+                print(f"NOTE: the live database and a fresh import of "
+                      f"the staged set differ by {stored - would}; run "
+                      f"bank_publish.py to commit what this box "
+                      f"generated")
+            return 0
+
+        delivered = sorted(BANKS.glob("*.jsonl"))
+        print(f"\nwrote {len(delivered)} delivery files")
 
         # 4. Verify against a FRESH database, the way the server will, and
         # prune. Pruning changes the shares, so repeat until stable.
@@ -318,6 +348,9 @@ def _run() -> int:
                                         encoding="utf-8")
                     else:
                         path.unlink()
+            # Re-glob because a file that lost every line was
+            # unlinked. Only reachable on the developer path - the
+            # server returns above, before anything is written.
             delivered = sorted(BANKS.glob("*.jsonl"))
             if not dropped:
                 print("  stable - every delivered entry lands on a fresh "

@@ -98,3 +98,55 @@ def test_the_live_bank_has_one_line_per_row():
     assert not repeated, (
         f"{sum(n - 1 for n in repeated.values())} duplicate line(s) across "
         f"{len(repeated)} entry_id(s): {list(repeated)[:5]}")
+
+
+# ==========================================================================
+class TestNoPromoteWritesNothing:
+    """`--no-promote` exists for the server, where `banks/` IS the git
+    checkout - so dirtying it makes the next `git pull --ff-only` fail and
+    the deploy stops working.
+
+    It did exactly that. `delivered` was set to `staged` under the flag, and
+    the prune loop rewrites and unlinks every path in `delivered`, so a
+    server run deleted six files out of `banks/gen` and modified six more.
+    It also pruned `workspace/bank-gen`, where an autofilled entry is the
+    only copy in existence until `bank_publish.py` commits it.
+
+    This test reads the source rather than running a rebuild, because a
+    rebuild takes ten minutes and clears the live database. The invariant is
+    structural: the flag must return before the loop that writes.
+    """
+
+    def _source(self) -> str:
+        from pathlib import Path
+        return Path("scripts/bank_rebuild.py").read_text(encoding="utf-8")
+
+    def test_the_flag_returns_before_the_prune_loop(self):
+        src = self._source()
+        guard = src.index("if args.no_promote:")
+        loop = src.index("# 4. Verify against a FRESH database")
+        assert guard < loop, "the flag must be checked before the loop"
+        between = src[guard:loop]
+        assert "return 0" in between, (
+            "the --no-promote branch must return before reaching the prune "
+            "loop, not fall through into it")
+
+    def test_delivered_is_never_the_staged_paths(self):
+        """The specific bug: `delivered = staged` made the prune loop
+        rewrite the checkout and the autofill's staging directory."""
+        src = self._source()
+        assert "delivered = (staged if args.no_promote" not in src
+        assert "staged if args.no_promote" not in src
+
+    def test_the_loop_only_ever_writes_inside_banks(self):
+        """Every path the prune loop can touch comes from globbing
+        `banks/`, so the worst it can do is rewrite a delivery file the
+        developer is about to commit."""
+        src = self._source()
+        loop = src.index("# 4. Verify against a FRESH database")
+        body = src[loop:src.index("# 5. Make the live database")]
+        assert "path.write_text" in body, "the loop does still prune"
+        assert "path.unlink" in body
+        for assignment in ("delivered = sorted(BANKS.glob", ):
+            assert assignment in body
+        assert "workspace" not in body
