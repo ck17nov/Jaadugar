@@ -1,0 +1,107 @@
+[
+  {
+    "beat": "why",
+    "narration": "A statement download. A report from the billing software. A table copied off a web page.",
+    "caption": "बैंक स्टेटमेंट, बिलिंग सॉफ़्टवेयर की रिपोर्ट, या वेब से कॉपी की गई टेबल",
+    "image_brief": "Three different documents fanned out across a desk: a bank statement, a machine-printed software report, and a page torn from a magazine table, even daylight over all three.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "Those files carry passengers. A trailing space, a stray comma, a hidden non-breaking space.",
+    "caption": "उन फ़ाइलों में यात्री छिपे होते हैं: स्पेस, भटका कॉमा, या नॉन-ब्रेकिंग स्पेस",
+    "image_brief": "A single printed line of figures on cream paper with tiny stowaway marks between the digits, a comma, a blank gap and a faint dot, raking light across the page texture.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "One stray character is enough. The whole cell turns into text, silently.",
+    "caption": "एक भटका हुआ अक्षर काफ़ी है — पूरा सेल चुपचाप टेक्स्ट बन जाता है",
+    "image_brief": "A single grain of sand jammed between the teeth of two small brass gears that have stopped turning, a workshop lamp burning close above them.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "Formatting a column as Text before pasting does exactly the same damage.",
+    "caption": "पेस्ट से पहले कॉलम को टेक्स्ट फ़ॉर्मैट करना ठीक वही नुक़सान करता है",
+    "image_brief": "A rubber stamp reading TEXT pressed across the head of a fresh column of printed figures, wet ink bleeding into the paper fibres, plain office light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "Now the chain closes. Text cell, skipped cell, short total, wrong decision made downstream.",
+    "caption": "अब कड़ी पूरी हुई: टेक्स्ट सेल, छूटा सेल, कम कुल, और आगे ग़लत फ़ैसला",
+    "image_brief": "Four paper links hanging in a chain from a nail in a wall, each link printed with one word, TEXT, SKIPPED, SHORT, DECISION, dim hallway light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "AVERAGE skips it too. So does SUMIF. So does every point on your chart.",
+    "caption": "AVERAGE भी छोड़ता है, SUMIF भी, और चार्ट का हर पॉइंट भी",
+    "image_brief": "Four small bench machines in a row, each with an empty output tray beneath it, one a totting machine, one an averaging dial, one a filter box, one a plotting arm, cold bench light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "prepare",
+    "narration": "Before touching a single cell, save a second copy of the whole file.",
+    "caption": "एक भी सेल छूने से पहले पूरी फ़ाइल की दूसरी कॉपी सेव कर लें",
+    "image_brief": "Two identical card folders lying on a desk, one labelled ORIGINAL and one labelled COPY, a glass paperweight holding the first one down, warm desk light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "prepare",
+    "narration": "Conversion cannot always be undone by eye. A lost leading zero looks perfectly fine.",
+    "caption": "बदलाव आँख से हमेशा वापस नहीं होता — खोया हुआ शुरुआती ज़ीरो ठीक लगता है",
+    "image_brief": "A brass number plate stamped 00742 lying beside a second plate stamped 742, the pair almost matching until compared, hard side light across the metal.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "prepare",
+    "narration": "Next, get one independent total from outside the spreadsheet entirely.",
+    "caption": "अगला कदम: शीट के बाहर से एक अलग कुल आँकड़ा हासिल करें",
+    "image_brief": "A pocket calculator resting on top of a folded bank statement on a kitchen table, a cup of tea beside it, low evening light through a curtain.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "prepare",
+    "narration": "A calculator, the bank statement, last month's signed figure. Anything you did not compute here.",
+    "caption": "कैलकुलेटर, बैंक स्टेटमेंट, पिछले महीने का साइन किया आँकड़ा — कोई भी चलेगा",
+    "image_brief": "Three sources of one figure laid out on a cloth: a calculator with its display lit, a stamped bank slip, and a signed page from last month, even light on all three.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "prepare",
+    "narration": "Without that number you cannot tell a repair from a fresh mistake.",
+    "caption": "उस आँकड़े के बिना मरम्मत और नई ग़लती में फ़र्क़ पता नहीं चलेगा",
+    "image_brief": "A pair of balance scales on a market stall counter, one pan holding a single iron weight and the other pan completely empty and tipped high, dusty stall light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "prepare",
+    "narration": "Now list the columns that hold quantities. Amount, quantity, hours, units, rate.",
+    "caption": "अब वे कॉलम गिनें जिनमें मात्रा है: रकम, संख्या, घंटे, यूनिट, दर",
+    "image_brief": "A whiteboard in a small meeting room with a hand-drawn table, the left column headed QUANTITIES and listing amount, hours and units, flat fluorescent light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "prepare",
+    "narration": "Then list the columns that hold labels. Invoice number, employee code, pin code.",
+    "caption": "फिर वे कॉलम जिनमें लेबल हैं: इनवॉइस नंबर, कर्मचारी कोड, पिन कोड",
+    "image_brief": "The same whiteboard with a second column now filled in under the heading LABELS, listing invoice number, employee code and pin code, a marker capped on the tray, fluorescent light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "prepare",
+    "narration": "Labels stay text, permanently. Nobody has ever needed to total invoice numbers.",
+    "caption": "लेबल हमेशा टेक्स्ट रहते हैं — इनवॉइस नंबर जोड़ने की ज़रूरत किसी को नहीं पड़ी",
+    "image_brief": "An open metal filing drawer packed with index cards, each card carrying a printed code along its top edge, no totals anywhere on them, still archive room light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "prepare",
+    "narration": "Finally, switch on the status bar along the bottom edge of the window.",
+    "caption": "आख़िर में, विंडो के नीचे वाला स्टेटस बार चालू कर लें",
+    "image_brief": "A long brass strip fixed along the bottom rail of a wooden display frame, engraved with the words Sum, Average and Count, workshop light glancing off the metal.",
+    "on_screen_text": ""
+  }
+]

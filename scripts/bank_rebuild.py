@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -46,6 +47,74 @@ ROOT = Path(__file__).resolve().parents[1]
 GEN = ROOT / "banks" / "gen"
 BANKS = ROOT / "banks"
 MAX_PASSES = 4
+
+
+class Busy(RuntimeError):
+    """Another rebuild holds the lock."""
+
+
+def _lock_path() -> Path:
+    return load_config().workspace / "bank_rebuild.lock"
+
+
+def _acquire() -> Path:
+    """Refuse to run while another rebuild is in flight.
+
+    Both steps of a rebuild are destructive - it clears the live database and
+    rewrites banks/ - so two overlapping runs interleave and the result is
+    neither. Observed: two cycles minutes apart, 138 entries then 134, from a
+    staged set that only grows.
+
+    O_EXCL, so the check and the create are one operation.
+    """
+    lock = _lock_path()
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        held = ""
+        try:
+            held = lock.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+        raise Busy(f"another rebuild is running ({held or 'unknown pid'}). "
+                   f"If it is dead, delete {lock}") from None
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(f"pid={os.getpid()} at={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}")
+    return lock
+
+
+def _snapshot(files: list[Path], into: Path) -> list[Path]:
+    """Copy the staged batches, dropping a truncated final line.
+
+    The authors are still appending while this runs, so a file read
+    mid-append ends in a partial JSON object. That is a partial write, not a
+    corrupt batch: keep every line that parses and say how many were left
+    behind, rather than letting one silently vanish from the delivery copy.
+    """
+    into.mkdir(parents=True, exist_ok=True)
+    out: list[Path] = []
+    for path in files:
+        keep = []
+        dropped = 0
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            if not raw.strip():
+                continue
+            try:
+                json.loads(raw)
+            except ValueError:
+                dropped += 1
+                continue
+            keep.append(raw)
+        if dropped:
+            print(f"  {path.name}: skipped {dropped} partially written "
+                  f"line(s) - an author is still appending")
+        if not keep:
+            continue
+        target = into / path.name
+        target.write_text("\n".join(keep) + "\n", encoding="utf-8")
+        out.append(target)
+    return out
 
 
 def _group_of(name: str) -> str:
@@ -115,6 +184,21 @@ def _verify(files: list[Path], *, reviewer: str, tool: str) -> dict[str, set[str
 
 
 def main() -> int:
+    try:
+        lock = _acquire()
+    except Busy as exc:
+        print(exc)
+        return 2
+    try:
+        return _run()
+    finally:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+
+
+def _run() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--confirm", action="store_true",
                         help="write banks/ and rebuild the live database")
@@ -132,7 +216,9 @@ def main() -> int:
     if not args.confirm:
         print("DRY RUN - pass --confirm to rebuild. Importing into a "
               "throwaway database to show what would land:\n")
-        landed = _verify(staged, reviewer=args.reviewer, tool=args.tool)
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = _snapshot(staged, Path(tmp) / "gen")
+            landed = _verify(snap, reviewer=args.reviewer, tool=args.tool)
         print(f"\nwould land {sum(len(v) for v in landed.values())}")
         return 0
 
@@ -152,20 +238,29 @@ def main() -> int:
             live.delete_bank_entry(row["entry_id"])
         print(f"archived and cleared {len(rows)} entries -> {out.name}\n")
 
-        # 2. One deterministic pass over the staged batches.
-        print("importing staged batches:")
-        landed = _import_all(live, staged, reviewer=args.reviewer,
-                             tool=args.tool)
+        # 2. SNAPSHOT, then one deterministic pass. The authors are still
+        # writing banks/gen, and a file read mid-append loses its last
+        # entry - which is how two rebuilds minutes apart produced 138 and
+        # then 134 from a staged set that only grows.
+        snapdir = tempfile.mkdtemp(prefix="bank-snap-")
+        try:
+            snap = _snapshot(staged, Path(snapdir) / "gen")
+            print("importing staged batches:")
+            landed = _import_all(live, snap, reviewer=args.reviewer,
+                                 tool=args.tool)
 
-        # 3. Write the delivery copy: only what landed.
-        for path in staged:
-            keep = [raw for raw in _lines_of(path)
-                    if _id_of(raw) in landed.get(path.name, set())]
-            target = BANKS / path.name
-            if keep:
-                target.write_text("\n".join(keep) + "\n", encoding="utf-8")
-            elif target.exists():
-                target.unlink()
+            # 3. Write the delivery copy: only what landed.
+            for path in snap:
+                keep = [raw for raw in _lines_of(path)
+                        if _id_of(raw) in landed.get(path.name, set())]
+                target = BANKS / path.name
+                if keep:
+                    target.write_text("\n".join(keep) + "\n",
+                                      encoding="utf-8")
+                elif target.exists():
+                    target.unlink()
+        finally:
+            shutil.rmtree(snapdir, ignore_errors=True)
         delivered = sorted(BANKS.glob("*.jsonl"))
         print(f"\nwrote {len(delivered)} delivery files")
 

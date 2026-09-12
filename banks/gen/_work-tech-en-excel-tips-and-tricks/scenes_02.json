@@ -1,0 +1,107 @@
+[
+  {
+    "beat": "steps",
+    "narration": "Start with alignment. Click nothing, change nothing, just look at the cell edges.",
+    "caption": "शुरुआत अलाइनमेंट से — कुछ क्लिक न करें, बस सेल के किनारे देखें",
+    "image_brief": "A shelf of open-fronted wooden boxes in a row, the single block inside each box pushed hard against one side wall, quiet storeroom light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "A real number hugs the right edge of its cell. Text hugs the left.",
+    "caption": "असली नंबर सेल के दाएँ किनारे से चिपकता है, टेक्स्ट बाएँ से",
+    "image_brief": "Two identical open boxes standing next to each other, the block in one pressed to the right wall and the block in the other pressed to the left wall, bright even light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Three of Pooja's amounts sit left. That is the first clue, and it is free.",
+    "caption": "पूजा की तीन रकमें बाएँ बैठी हैं — यही पहला और मुफ़्त सुराग़ है",
+    "image_brief": "Twelve open boxes in a long line, nine blocks leaning to the right walls and three unmistakably against the left walls, overhead daylight flattening the shadows.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Now select the whole amount column, with one click on its letter header.",
+    "caption": "अब हेडर के अक्षर पर एक क्लिक से रकम का पूरा कॉलम चुनें",
+    "image_brief": "A single tall wooden column drawn out from a rack of stored columns, held upright and whole, sawdust in the air of a workshop, warm work light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "The status bar reports Sum, Average and Count for whatever you have selected.",
+    "caption": "स्टेटस बार चुने हुए हिस्से का Sum, Average और Count बताता रहता है",
+    "image_brief": "A brass instrument panel with three small glass windows, each window showing a printed figure under an engraved word, steady lamp light on the dial faces.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Put two formulas in spare cells. COUNT of that range, then COUNTA of it.",
+    "caption": "दो ख़ाली सेल में फ़ॉर्मूला डालें: उस रेंज का COUNT, फिर COUNTA",
+    "image_brief": "Two empty pigeonholes at the end of a wooden letter rack, each with a fresh blank paper label slotted into its brass holder, soft side light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "COUNT counts numbers only. COUNTA counts every cell that is not empty.",
+    "caption": "COUNT सिर्फ़ नंबर गिनता है, COUNTA हर भरा हुआ सेल गिनता है",
+    "image_brief": "Two sieves resting over two bowls on a kitchen counter, the first sieve holding back paper squares while the second lets everything through, window light from the side.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "COUNT returns nine. COUNTA returns twelve. The gap is exactly three cells.",
+    "caption": "COUNT देता है नौ, COUNTA देता है बारह — अंतर ठीक तीन सेल का",
+    "image_brief": "Two mechanical tally counters bolted to a board, one showing 9 and the other showing 12, a chalked figure 3 scrawled between them, plain workshop light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Three suspects, counted without opening a single one. Now go and name them.",
+    "caption": "तीन संदिग्ध, बिना कोई सेल खोले गिन लिए — अब उन्हें पहचानें",
+    "image_brief": "Three empty chairs pulled up to a long polished table, a folded name card lying face down at each of the three places, cool hall light from high windows.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "In a helper column beside the data, type ISTEXT of the first amount.",
+    "caption": "डेटा के बग़ल में एक हेल्पर कॉलम में पहली रकम का ISTEXT लिखें",
+    "image_brief": "A rubber stamp reading TRUE held poised just above the first row of a printed list, an ink pad open beside it, focused desk light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Fill it down the column. Every TRUE is a number that is not one.",
+    "caption": "कॉलम में नीचे तक भरें — हर TRUE वह नंबर है जो नंबर नहीं है",
+    "image_brief": "A printed page with a column of TRUE and FALSE words running down beside a column of amounts, three of the TRUEs marked with pencil ticks, daylight on the paper.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Read the heading above that column before you fix anything. Amount, or account number?",
+    "caption": "कुछ भी ठीक करने से पहले उस कॉलम का हेडिंग पढ़ें: रकम, या अकाउंट नंबर?",
+    "image_brief": "A stiff card held upright on a desk stand, the word AMOUNT printed on the face and ACCOUNT NUMBER showing faintly through from the reverse, plain flat light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Amounts get converted. Labels do not. Keep that distinction for the moment.",
+    "caption": "रकमें बदली जाती हैं, लेबल नहीं — यह फ़र्क़ आगे के लिए याद रखें",
+    "image_brief": "Two shallow sorting trays side by side on a bench, one stencilled CONVERT and the other stencilled LEAVE, a few paper slips already in each, light falling from above.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Conversion often fails on the first attempt, because the text underneath is dirty.",
+    "caption": "पहली कोशिश में बदलाव अक्सर फ़ेल होता है, क्योंकि नीचे का टेक्स्ट गंदा है",
+    "image_brief": "A brass key stopped halfway into a door lock clogged with grit and paint flakes, a hand still on the key, flat daylight on a front door.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "So clean first. Wrap the cell in TRIM inside a second helper column.",
+    "caption": "तो पहले सफ़ाई: दूसरे हेल्पर कॉलम में सेल को TRIM में लपेटें",
+    "image_brief": "A stiff-bristled brush sweeping fine dust off both ends of a long printed paper strip pinned to a workbench, angled bench light picking out the dust.",
+    "on_screen_text": ""
+  }
+]

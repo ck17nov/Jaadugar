@@ -1,0 +1,107 @@
+[
+  {
+    "beat": "hook",
+    "narration": "Pooja's total is short by twelve thousand rupees. Nothing on the screen says so.",
+    "caption": "पूजा का कुल जोड़ 12,000 रुपये कम है, और स्क्रीन पर कोई चेतावनी नहीं",
+    "image_brief": "A paper ledger page open on a wooden desk, a long column of handwritten amounts ending in a total line circled twice in red pencil, warm lamp light falling from the left.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "hook",
+    "narration": "She adds the same column again on a calculator. Fifty-three thousand five hundred, every single time.",
+    "caption": "कैलकुलेटर पर वही कॉलम फिर जोड़ा तो हर बार 53,500 ही आया",
+    "image_brief": "A desk calculator with a printed paper tape curling off the table edge onto the floor, the tape covered in a column of figures, bright morning window light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "hook",
+    "narration": "The spreadsheet insists on forty-one thousand. Same twelve rows. Same column, same file, same afternoon.",
+    "caption": "शीट कहती है 41,000 — वही बारह पंक्तियाँ, वही कॉलम, वही फ़ाइल",
+    "image_brief": "Two printed sheets lying side by side on a table, each one ending in a different total, one of the two figures boxed in blue ink, flat overhead daylight.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "hook",
+    "narration": "No error message appears. No red cell, no scolding dialogue. Nothing looks broken.",
+    "caption": "कोई एरर नहीं, कोई लाल सेल नहीं, कुछ भी टूटा हुआ नहीं दिखता",
+    "image_brief": "Twelve small white cards pegged along a taut string line across a room, each card showing an amount in neat print, no marks or flags anywhere on them, soft even light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "hook",
+    "narration": "Every amount sits there in plain sight. Each one looks exactly like a number.",
+    "caption": "हर रकम साफ़ दिख रही है और बिल्कुल नंबर जैसी लगती है",
+    "image_brief": "A shallow tray of brass tokens stamped with numbers, all of them polished to the same shine and arranged in rows, bright tabletop light from above.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "hook",
+    "narration": "Nine of the twelve really are numbers. Three of them only look like it.",
+    "caption": "बारह में से नौ सच में नंबर हैं, तीन बस नंबर जैसे दिखते हैं",
+    "image_brief": "The same tray of brass tokens, but three tokens are revealed as painted wooden copies, lighter in colour with visible grain, low side light raking across them.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "hook",
+    "narration": "And one of those three must never be converted. Hold on to that.",
+    "caption": "और उन तीन में से एक को कभी बदलना नहीं चाहिए — यह याद रखें",
+    "image_brief": "A single wooden token set apart on a dark velvet cloth with a small brass padlock resting beside it, low warm light pooling around both objects.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "SUM has exactly one rule. It adds numbers, and it steps over everything else.",
+    "caption": "SUM का एक ही नियम है: नंबर जोड़ता है, बाक़ी सब छोड़ देता है",
+    "image_brief": "A metal sorting chute above two bins, coins dropping cleanly into the near bin while flat paper squares slide past into a side tray, cool workshop light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "Text inside the range is not an error to SUM. It is furniture, quietly ignored.",
+    "caption": "रेंज में टेक्स्ट SUM के लिए एरर नहीं, बस फ़र्नीचर है जिसे वह छोड़ देता है",
+    "image_brief": "A wooden crate of numbered blocks with a folded paper napkin wedged upright between two of them, the crate's counting lever passing straight over the napkin, dusty attic light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "So the real question gets narrower. Why would a digit not be a number?",
+    "caption": "तो असली सवाल और छोटा हो जाता है: एक अंक नंबर क्यों नहीं होता?",
+    "image_brief": "A magnifying glass lying flat on a printed figure so the digits underneath swell and blur at the edges, daylight coming through a nearby window.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "Every cell stores two separate things. A value, and the kind of thing that value is.",
+    "caption": "हर सेल दो अलग चीज़ें रखता है — वैल्यू, और वह किस तरह की चीज़ है",
+    "image_brief": "A cardboard box on a shelf with two labels stapled to its side, the upper label listing the contents and the lower label naming the kind of contents, plain shelf light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "Type four thousand two hundred yourself. Excel files it away as a quantity.",
+    "caption": "आप ख़ुद 4200 टाइप करें तो एक्सेल उसे मात्रा की तरह रखता है",
+    "image_brief": "The figure 4200 pressed deep into a slab of wet clay on a workbench, the impression solid and shadowed, a shaped stylus resting alongside, workbench lamp light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "Paste the same digits out of a download. Excel may file them as a label.",
+    "caption": "वही अंक किसी डाउनलोड से पेस्ट करें तो एक्सेल उन्हें लेबल बना सकता है",
+    "image_brief": "A thin paper sticker printed 4200 peeling away at one corner from a smooth grey metal plate, cold storeroom light from a high window.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "The label reads 4200 on screen. It can be shown, sorted, printed. Never added.",
+    "caption": "लेबल स्क्रीन पर 4200 दिखाता है — दिख सकता है, जुड़ नहीं सकता",
+    "image_brief": "A shop price tag hanging from a string above a brass balance pan, the tag resting on the pan without tipping it at all, showroom light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "why",
+    "narration": "Where does a label like that come from? Almost always from somewhere outside your file.",
+    "caption": "ऐसा लेबल कहाँ से आता है? लगभग हमेशा आपकी फ़ाइल के बाहर से",
+    "image_brief": "A cardboard carton standing on a doorstep with a courier label and a foreign postmark across it, early morning light stretching a long shadow across the tiles.",
+    "on_screen_text": ""
+  }
+]
