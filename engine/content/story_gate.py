@@ -196,8 +196,21 @@ _COMPLICATION = re.compile(
     # 1. Somebody else takes or keeps it.
     r"took|take|takes|taking|taken|claim\w*|grabb\w*|snatch\w*|kept|keeps|"
     r"wants it too|wants the same|"
-    # 2. The thing breaks, empties or ends.
+    # 2. The thing breaks, empties, ends - or simply comes down.
+    #
+    # "shifted and dropped", "collapsed straight downward", "rolled
+    # sideways, knocking her drink" are all real obstacles that were
+    # refused, because the scene also said "heavy" or "tight" and
+    # nothing here recognised the event.
     r"broke|broken|snap\w*|crack\w*|spilled|spilt|tore|torn|rips?|"
+    r"dropp\w*|drops|collaps\w*|roll\w*|knock\w*|slid|slipp\w*|"
+    r"gave way|came down|toppl\w*|tumbl\w*|tipp\w*|"
+    # A sensation belonging to a THIRD PARTY or an animal is not the
+    # protagonist feeling something, and the scene around it is a real
+    # event: "cold wind seeped through the loose frame", "the
+    # shivering puppy scrambled out onto the floor".
+    r"seep\w*|crept|creep\w*|scrambl\w*|wriggl\w*|"
+    r"escap\w*|got out|climbed out|pull\w*|push\w*|"
     r"ran out|runs out|used up|empt\w*|locked|shut|gone|lost|"
     # 3. A limit appears.
     r"last one|only one|not enough|no more|nothing left|drops to|"

@@ -119,14 +119,37 @@ _BENIGN_DEAD = re.compile(
     re.I)
 
 
+# STRONG violence words with an unambiguous innocent use. Narrow on
+# purpose: bare "knife" stays flagged, because a kids story that mentioned
+# a knife in the kitchen was correctly refused once and that precedent is
+# worth more than the entries it costs.
+#
+# Found by vetting a real batch: "will the green shoot sprout?" was refused
+# as violence, and `shoot` is in the strong list, which is decisive on its
+# own - so there was no benign path for a plant at all.
+_BENIGN_STRONG = re.compile(
+    # a plant shoot
+    r"\b(green|new|young|tender|bamboo|first|tiny)\s+shoots?\b"
+    r"|\bshoots?\s+(sprout|sprouts|sprouting|appear|appears|up through|"
+    r"push|pushes|poking|poke)\b"
+    r"|\bshoots?\s+(of|from)\s+(the\s+)?(seed|soil|earth|bulb|stem|plant)\b"
+    # a table utensil
+    r"|\b(butter|plastic|toy|wooden|blunt|palette|putty)\s+knife\b",
+    re.I)
+
+
 def violence_in(text: str) -> bool:
     """Whether the violence pattern fires for a reason that is not benign.
 
     A function rather than a cleverer regex because `re` has no
     variable-width lookbehind, and "battery ... is dead" needs one.
     """
-    if re.search(_VIOLENCE_STRONG, text, re.I):
-        return True                     # decisive on its own
+    benign_strong = [(m.start(), m.end())
+                     for m in _BENIGN_STRONG.finditer(text)]
+    for match in re.finditer(_VIOLENCE_STRONG, text, re.I):
+        if not any(lo <= match.start() and match.end() <= hi
+                   for lo, hi in benign_strong):
+            return True                 # decisive on its own
     benign = [(m.start(), m.end()) for m in _BENIGN_DEAD.finditer(text)]
     for match in re.finditer(_VIOLENCE_WEAK, text, re.I):
         if not any(lo <= match.start() and match.end() <= hi
