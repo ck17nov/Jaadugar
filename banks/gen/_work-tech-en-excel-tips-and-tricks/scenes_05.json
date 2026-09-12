@@ -1,0 +1,107 @@
+[
+  {
+    "beat": "boundary",
+    "narration": "Beside Pooja's amounts sits a column of employee codes. Those are text too.",
+    "caption": "पूजा की रकमों के बग़ल में कर्मचारी कोड का कॉलम है — वे भी टेक्स्ट हैं",
+    "image_brief": "A row of stamped metal employee badges hanging on a rail above a tray of loose currency notes on a locker room bench, cool overhead light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "One code reads zero zero seven four two. Two of its characters are zeros.",
+    "caption": "एक कोड ऐसा पढ़ा जाता है: ज़ीरो ज़ीरो सात चार दो",
+    "image_brief": "A punched metal tag stamped 00742 hanging from a hook on a workshop board among empty hooks, angled work light on the stamped grooves.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "Convert it and Excel stores seven hundred and forty-two instead.",
+    "caption": "उसे बदल दें तो एक्सेल उसकी जगह सात सौ बयालीस रख लेता है",
+    "image_brief": "The same metal tag lying on an anvil, re-stamped to read 742 with the two leading zeros hammered flat into the surface, hard bench light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "Both zeros are gone, with no warning. Payroll now points at a stranger.",
+    "caption": "दोनों ज़ीरो ग़ायब, कोई चेतावनी नहीं — पेरोल अब किसी अजनबी पर लगा है",
+    "image_brief": "A payroll envelope on an office desk with an unfamiliar name showing through its address window, a tray of other envelopes behind it, plain office light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "The same trap arrives with long digits. Excel keeps fifteen significant digits, no more.",
+    "caption": "वही जाल लंबे अंकों के साथ आता है: एक्सेल पंद्रह सार्थक अंक ही रखता है",
+    "image_brief": "A long paper strip printed with a run of sixteen digits stretched across a table, the final digit fading into blank paper, even daylight along the strip.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "A sixteen-digit account number quietly loses its final digit to a zero.",
+    "caption": "सोलह अंकों का अकाउंट नंबर चुपचाप अपना आख़िरी अंक ज़ीरो कर देता है",
+    "image_brief": "A card-sized metal plate on a bank counter with its last digit position replaced by an empty blank slot, a rubber stamp lying beside it, counter light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "A label like three point ten becomes three point one. Some codes become dates.",
+    "caption": "3.10 जैसा लेबल 3.1 बन जाता है, और कुछ कोड तारीख़ बन जाते हैं",
+    "image_brief": "Three parcel labels lined up on a sorting bench, one reading 3.10, the next reading 3.1, the third printed as a calendar date, bright sorting room light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "So the rule is short. If you never do arithmetic on it, leave it text.",
+    "caption": "नियम छोटा है: जिस पर गणित नहीं करते, उसे टेक्स्ट ही रहने दें",
+    "image_brief": "A wooden signboard at a fork in a country road, one arm painted DO ARITHMETIC and the other LEAVE AS TEXT, wide open afternoon light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "Identifiers are text on purpose. That is not a defect waiting for your repair.",
+    "caption": "पहचान कोड जान-बूझकर टेक्स्ट होते हैं — यह सुधारने वाली ख़राबी नहीं है",
+    "image_brief": "A rack of luggage tags hanging at a railway parcel office, each tag carrying a printed code and not one carrying a price, dim station light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "The common mistake? Selecting the whole sheet and converting everything in one sweep.",
+    "caption": "आम ग़लती? पूरी शीट चुनकर सब कुछ एक ही झटके में बदल देना",
+    "image_brief": "A broad felt marker dragged in one long stroke right across an entire printed sheet of ruled cells on a desk, ink still glistening, sharp desk light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "That repairs three cells and silently wrecks a whole column of codes. Worse than before.",
+    "caption": "वह तीन सेल सुधारता है और चुपचाप कोड का पूरा कॉलम बरबाद कर देता है",
+    "image_brief": "Three carefully mended cups standing on a shelf with a long row of shattered code tags scattered on the shelf below them, even light across both shelves.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "One more limit. A cleaned sheet stays clean only until the next export lands.",
+    "caption": "एक और सीमा: साफ़ की हुई शीट अगले एक्सपोर्ट तक ही साफ़ रहती है",
+    "image_brief": "A swept and empty workbench with an unopened wooden crate stencilled NEXT MONTH standing right beside it, plain storeroom light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "If the file arrives monthly, set the column types during the import instead.",
+    "caption": "फ़ाइल हर महीने आती है? तो इंपोर्ट के वक़्त ही कॉलम टाइप सेट करें",
+    "image_brief": "An intake desk where each column of a form is marked with a type stamp before the papers are passed further along the counter, bright reception light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "cta",
+    "narration": "Try it now. Select one amount column and put COUNT beside COUNTA.",
+    "caption": "अभी करके देखें: एक रकम कॉलम चुनें और COUNT के साथ COUNTA रखें",
+    "image_brief": "An open workbook on a kitchen table with one column outlined in pencil and two fresh formulas written at its foot, morning light across the page.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "cta",
+    "narration": "If they disagree, your total was never wrong. It was answering a smaller question.",
+    "caption": "अगर दोनों अलग हैं, तो कुल ग़लत नहीं था — वह छोटे सवाल का जवाब दे रहा था",
+    "image_brief": "A ledger page with its inked total on the bottom line and a single pencilled question mark added in the margin beside it, low lamp light.",
+    "on_screen_text": ""
+  }
+]

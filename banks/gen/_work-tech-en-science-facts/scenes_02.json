@@ -1,0 +1,107 @@
+[
+{
+  "beat": "mechanism",
+  "narration": "But not all of it. Between roughly eight and thirteen micrometres, dry air barely absorbs anything.",
+  "caption": "पर पूरा नहीं। लगभग आठ से तेरह माइक्रोमीटर के बीच सूखी हवा कुछ भी नहीं सोखती।",
+  "image_brief": "A vast dry salt flat under a completely cloudless sky, cracked white crust stretching to the horizon, no moisture haze anywhere in the air.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "That empty band has a name: the atmospheric window. About five micrometres wide. A hole in the ceiling.",
+  "caption": "इस ख़ाली पट्टी का नाम है वायुमंडलीय खिड़की। लगभग पाँच माइक्रोमीटर चौड़ी। छत में छेद।",
+  "image_brief": "One open square skylight in a thick mud-brick ceiling seen from inside a dark room, a clean patch of night sky and stars visible through the opening.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "Remember where a warm surface glows hardest? Ten micrometres. Right through the middle. Dead centre.",
+  "caption": "याद है गर्म सतह सबसे ज़्यादा कहाँ चमकती है? दस माइक्रोमीटर। ठीक बीचों-बीच।",
+  "image_brief": "A cooling iron bar lying across an anvil in a dim workshop, the middle section still glowing faint orange while both ends have gone dark grey.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "Radiation in that band leaves, and the air does not hand it back. It continues.",
+  "caption": "उस पट्टी की गर्मी निकल जाती है और हवा उसे वापस नहीं देती। वह आगे बढ़ती रहती है।",
+  "image_brief": "A thin column of pale smoke rising from an open village chimney flue into the night air, thinning and disappearing well above the rooftop.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "Continues where? Out of the atmosphere. Space returns almost nothing, only three kelvin.",
+  "caption": "कहाँ तक? वायुमंडल के बाहर। अंतरिक्ष कुछ वापस नहीं भेजता, सिर्फ़ तीन केल्विन।",
+  "image_brief": "The thin blue edge of Earth's atmosphere seen from far above, the curved planet below the haze line and flat black emptiness above it.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "Add it up. Through that window the sky behaves like something tens of degrees colder.",
+  "caption": "जोड़ लो। उस खिड़की से आसमान हवा से कई डिग्री ठंडी चीज़ जैसा बरताव करता है।",
+  "image_brief": "A frozen high-altitude lake at night, the ice sheet reflecting starlight, bare rock peaks ringing the shore, not a single cloud overhead.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "So an upward surface loses more than it gains. Around eighty watts per square metre.",
+  "caption": "तो ऊपर खुली सतह जितना पाती है उससे ज़्यादा खोती है। लगभग अस्सी वाट प्रति वर्ग मीटर।",
+  "image_brief": "A steel water tank on a flat rooftop at night, a fine mist of condensation gathered on its upward-facing lid, the dark city beyond the parapet.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "Losing heat, it cools. Soon it is colder than the air sitting on it. Below the reading.",
+  "caption": "गर्मी खोकर वह ठंडी होती है। जल्दी ही वह ऊपर बैठी हवा से भी ठंडी हो जाती है।",
+  "image_brief": "A polished metal spoon left face up on a stone balcony rail at night, one bead of dew forming in its bowl while the rail stays dry.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "Now air molecules strike it and hand heat back. Contact, not radiation. A second channel.",
+  "caption": "अब हवा के अणु टकराकर गर्मी लौटाते हैं। यह संपर्क है, विकिरण नहीं। दूसरा रास्ता।",
+  "image_brief": "A cast-iron pot of hot water standing in a shallow tray of cool water on a tiled kitchen floor at night, faint steam drifting off the pot.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "Drained by the sky, refilled by the air, the surface settles where the two match.",
+  "caption": "आसमान खींचता है, हवा भरती है। सतह वहीं ठहरती है जहाँ दोनों बराबर हो जाएँ।",
+  "image_brief": "A stone irrigation channel where two small streams arrive from opposite directions and the water level between them sits perfectly flat and still.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "Thin things reach that point fastest. A car roof. A grass blade. A shallow pan.",
+  "caption": "पतली चीज़ें उस बिंदु पर सबसे जल्दी पहुँचती हैं। कार की छत। घास की पत्ती। उथला तवा।",
+  "image_brief": "A galvanised sheet-metal awning over a shuttered shopfront at dawn, frost coating the thin metal while the thick stone step below stays clear.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "Anything touching soil never gets there. The ground is a huge warm reservoir. It keeps feeding.",
+  "caption": "मिट्टी से जुड़ी चीज़ वहाँ कभी नहीं पहुँचती। नीचे ज़मीन का बड़ा गर्म भंडार है।",
+  "image_brief": "A garden bed cut open at the edge of a path so the dark moist soil layers show in section, with pale frost only on the topmost crumbs.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "That answers the road. Your car roof has air beneath it. The road has earth.",
+  "caption": "सड़क का जवाब यही है। कार की छत के नीचे हवा है। सड़क के नीचे ज़मीन।",
+  "image_brief": "A car parked half on tarmac and half on grass at dawn, heavy frost across the roof and bonnet, the tarmac directly beneath it dark and clear.",
+  "on_screen_text": ""
+},
+{
+  "beat": "mechanism",
+  "narration": "But reaching zero is not the same as making ice. Water still has to surrender something.",
+  "caption": "पर शून्य तक पहुँचना बर्फ़ बनना नहीं है। पानी को अब भी कुछ छोड़ना पड़ता है।",
+  "image_brief": "A tumbler of water with one ice cube floating in it on a wooden table, condensation tracks running down the outside of the glass, plain daylight.",
+  "on_screen_text": ""
+},
+{
+  "beat": "worked_example",
+  "narration": "Here is the whole night as arithmetic. Round numbers, chosen to be easy, but honest.",
+  "caption": "अब पूरी रात का हिसाब। नंबर गोल किए हैं, आसानी के लिए, पर ईमानदार हैं।",
+  "image_brief": "A slate slab leaning against a wall beside a shallow metal pan of water, a glass measuring jug and a small kitchen scale set out on the floor.",
+  "on_screen_text": ""
+}
+]

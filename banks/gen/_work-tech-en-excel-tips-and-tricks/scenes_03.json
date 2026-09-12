@@ -1,0 +1,107 @@
+[
+  {
+    "beat": "steps",
+    "narration": "TRIM strips the leading spaces, the trailing spaces, and doubled spaces inside the text.",
+    "caption": "TRIM आगे-पीछे के स्पेस और बीच के दोहरे स्पेस हटा देता है",
+    "image_brief": "A long paper strip pinned flat on a craft table, scissors snipping the blank ends away while the gaps in the middle close up, bright craft lamp light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Some cells resist TRIM completely. Those ones hold a non-breaking space instead.",
+    "caption": "कुछ सेल TRIM से बिल्कुल नहीं मानते — उनमें नॉन-ब्रेकिंग स्पेस होता है",
+    "image_brief": "A wire brush lifted away from a paper strip it has swept clean except for one pale mark that remains stuck fast to the paper, hard bench light from one side.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "It looks identical to an ordinary space, and behaves nothing at all like one.",
+    "caption": "वह आम स्पेस जैसा ही दिखता है और चलता बिल्कुल उसके जैसा नहीं",
+    "image_brief": "Two identical white pebbles resting on dark cloth, one rolling freely and the other held immovable by a magnet hidden under the fabric, cool even light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Substitute it out, using the character numbered one hundred and sixty.",
+    "caption": "उसे SUBSTITUTE से हटाएँ, अक्षर संख्या एक सौ साठ का इस्तेमाल करके",
+    "image_brief": "Fine tweezers lifting a transparent chip out of a printed row of digits, a small brass tag stamped 160 lying on the bench beside it, bench lamp light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Tables copied from web pages are full of them. Downloaded reports too.",
+    "caption": "वेब पेज से कॉपी की टेबल में ये भरे होते हैं, डाउनलोड रिपोर्ट में भी",
+    "image_brief": "A printed web page and a machine-printed report pinned side by side on a corkboard, both speckled with faint transparent flecks across the figures, plain office light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Now convert. The fastest route is the small green triangle in a cell corner.",
+    "caption": "अब बदलें — सबसे तेज़ रास्ता है सेल के कोने का छोटा हरा त्रिकोण",
+    "image_brief": "A small green enamel triangle badge pinned to the top corner of a plain paper card standing on a desk, sharp desk light catching its edge.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Select every flagged cell, open that warning menu, and choose Convert to Number.",
+    "caption": "हर फ़्लैग वाला सेल चुनें, चेतावनी मेनू खोलें, Convert to Number चुनें",
+    "image_brief": "A hinged flap on the corner of a cardboard box lifted open to reveal a short printed list of choices inside the lid, steady desk light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Watch the alignment jump right. That jump is your confirmation, not the total.",
+    "caption": "अलाइनमेंट को दाईं तरफ़ छलकते देखें — वही छलाँग पुष्टि है, कुल नहीं",
+    "image_brief": "A wooden block caught mid-slide across the floor of its open box, from the left wall towards the right, fine dust trailing behind it, clear bright light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "No triangle appearing anywhere? Then use Text to Columns instead. It never fails.",
+    "caption": "कहीं त्रिकोण नहीं दिख रहा? तब Text to Columns इस्तेमाल करें, यह कभी फ़ेल नहीं होता",
+    "image_brief": "The bare corner of a paper card where a badge should sit, and behind it a whole pinned sheet of cards carrying no flags at all, flat overcast light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Select one single column, on its own. Data tab, then Text to Columns.",
+    "caption": "सिर्फ़ एक कॉलम चुनें, अकेला। Data टैब, फिर Text to Columns",
+    "image_brief": "One wooden column lifted clear of a leaning stack and laid alone across two sawhorses in a workshop, the stack out of the way behind, warm work light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Choose Delimited. Click Next, click Next again, and set the format to General.",
+    "caption": "Delimited चुनें। Next, फिर Next, और फ़ॉर्मैट General पर सेट करें",
+    "image_brief": "A metal sorting frame with three sliding levers pushed along in sequence and a final round dial turned to a setting engraved GENERAL, hard factory light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Finish. Excel re-reads every cell as though you had just typed it yourself.",
+    "caption": "Finish दबाएँ। एक्सेल हर सेल को ऐसे पढ़ता है जैसे आपने अभी टाइप किया हो",
+    "image_brief": "A conveyor belt carrying printed cards back into the mouth of a reading machine, each card entering from its first character again, cold plant light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "That is precisely why it works. The same characters, a completely fresh reading.",
+    "caption": "यही वजह है कि यह काम करता है — वही अक्षर, पूरी तरह नई समझ",
+    "image_brief": "A typewriter retyping a column of figures onto crisp fresh paper while the old creased sheet lies pushed aside on the desk, close study lamp light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "For cells scattered across several columns, multiply the whole lot by one.",
+    "caption": "कई कॉलमों में बिखरे सेल के लिए, पूरे ढेर को एक से गुणा कर दें",
+    "image_brief": "Paper cards scattered unevenly across a wide pegboard in several loose columns, each card marked with a small pencil cross, broad hall light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Type the number one into any empty cell, then copy that cell.",
+    "caption": "किसी भी ख़ाली सेल में एक लिखें, फिर उस सेल को कॉपी करें",
+    "image_brief": "A single small card printed with the numeral one lying alone at the centre of a dark table, a narrow beam of light falling only on the card.",
+    "on_screen_text": ""
+  }
+]

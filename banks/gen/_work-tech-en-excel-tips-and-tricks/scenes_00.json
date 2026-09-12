@@ -1,8 +1,8 @@
 [
   {
     "beat": "hook",
-    "narration": "Pooja's total is short by twelve thousand rupees. Nothing on the screen says so.",
-    "caption": "पूजा का कुल जोड़ 12,000 रुपये कम है, और स्क्रीन पर कोई चेतावनी नहीं",
+    "narration": "Pooja's total is short by more than twelve thousand rupees. Nothing on screen says so.",
+    "caption": "पूजा का कुल जोड़ 12,000 रुपये से ज़्यादा कम है, स्क्रीन पर कोई चेतावनी नहीं",
     "image_brief": "A paper ledger page open on a wooden desk, a long column of handwritten amounts ending in a total line circled twice in red pencil, warm lamp light falling from the left.",
     "on_screen_text": ""
   },
@@ -43,9 +43,9 @@
   },
   {
     "beat": "hook",
-    "narration": "And one of those three must never be converted. Hold on to that.",
-    "caption": "और उन तीन में से एक को कभी बदलना नहीं चाहिए — यह याद रखें",
-    "image_brief": "A single wooden token set apart on a dark velvet cloth with a small brass padlock resting beside it, low warm light pooling around both objects.",
+    "narration": "And one whole column must never be converted. Hold on to that one.",
+    "caption": "और एक पूरे कॉलम को कभी बदलना नहीं चाहिए — यह बात याद रखें",
+    "image_brief": "A narrow rack of wooden tokens standing apart from the brass trays, a small padlock closed across the rack's lid, low warm light pooling around it.",
     "on_screen_text": ""
   },
   {

@@ -1,0 +1,107 @@
+[
+  {
+    "beat": "steps",
+    "narration": "Select your whole range. Paste Special, tick Multiply, then press OK.",
+    "caption": "अपनी पूरी रेंज चुनें। Paste Special, Multiply पर टिक, फिर OK",
+    "image_brief": "A hand-crank multiplying machine clamped to a bench, a paper card feeding into one side and a freshly stamped figure emerging from the other, warm workshop light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Arithmetic forces a decision, and Excel always decides in favour of the number.",
+    "caption": "गणित फ़ैसला करवाता है, और एक्सेल हमेशा नंबर के पक्ष में फ़ैसला करता है",
+    "image_brief": "Two painted paths on a warehouse floor converging at a single steel gate stencilled ARITHMETIC, one path open through it and the other barred, high bay light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "steps",
+    "narration": "Safest of all is a VALUE formula, then paste the results back as values.",
+    "caption": "सबसे सुरक्षित है VALUE फ़ॉर्मूला, फिर नतीजे वैल्यू बनाकर वापस पेस्ट करना",
+    "image_brief": "A growing column of fresh paper slips laid out beside an untouched original page on a quiet desk, both held down by smooth river stones, soft desk light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "verify",
+    "narration": "Re-run COUNT. It should return twelve now, matching COUNTA exactly.",
+    "caption": "COUNT फिर चलाएँ — अब बारह आना चाहिए, ठीक COUNTA जितना",
+    "image_brief": "Two mechanical tally counters mounted side by side on a wooden board, both dials now reading 12, even workshop light across the brass faces.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "verify",
+    "narration": "That equality is the real test. Not the total. The count.",
+    "caption": "यही बराबरी असली जाँच है — कुल नहीं, गिनती",
+    "image_brief": "A slate propped against a wall with a single chalk equals sign drawn between two painted counter dials, dust on the slate ledge, plain daylight.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "verify",
+    "narration": "Now read the total again. Fifty-three thousand five hundred, on the screen.",
+    "caption": "अब कुल फिर पढ़ें — स्क्रीन पर 53,500",
+    "image_brief": "A ledger page with a freshly inked total written on the ruled line at the foot of a long column, the nib still resting beside it, warm lamp light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "verify",
+    "narration": "It matches the calculator tape, rupee for rupee. Nothing was rounded away.",
+    "caption": "कैलकुलेटर की पर्ची से एक-एक रुपये तक मेल खाता है, कुछ गोल नहीं हुआ",
+    "image_brief": "A printed calculator tape and a ledger page laid edge to edge on a desk so their two final figures sit immediately next to each other, steady desk light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "verify",
+    "narration": "The difference was twelve thousand five hundred, and it was never a mystery.",
+    "caption": "फ़र्क़ पूरे 12,500 रुपये का था, और यह कोई रहस्य नहीं था",
+    "image_brief": "Balance scales on a market counter with three small paper slips in one pan exactly balancing a single larger slip in the other, dusty stall light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "verify",
+    "narration": "Three cells held it: four thousand two hundred, three thousand eight hundred, four thousand five hundred.",
+    "caption": "यह तीन सेल में था: 4,200, 3,800 और 4,500",
+    "image_brief": "Three stiff cards laid in a row on a bare table, each hand-written with one large amount in thick marker, flat daylight from a window above.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "verify",
+    "narration": "Add those three together and you get the gap precisely. No coincidence there.",
+    "caption": "इन तीन को जोड़ें तो ठीक वही अंतर मिलता है — यह संयोग नहीं है",
+    "image_brief": "A pencil addition worked out in the wide margin of a printed page, three figures stacked above a ruled line with their sum below, close desk lamp light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "verify",
+    "narration": "Those figures are illustrative, of course. The arithmetic behind them is the real point.",
+    "caption": "ये आँकड़े उदाहरण के लिए हैं, पर उनके पीछे का गणित ही असली बात है",
+    "image_brief": "A small card stamped ILLUSTRATIVE resting on the corner of a worked example page held down by a paperclip, plain flat light on the paper.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "verify",
+    "narration": "Sort the column next. Numbers sort by size, and text sorts alphabetically.",
+    "caption": "अब कॉलम को सॉर्ट करें — नंबर आकार से, और टेक्स्ट अक्षर क्रम से",
+    "image_brief": "Numbered wooden tiles dropping one by one through a narrow sorting slot into a graded rack, the heaviest tiles settling at the far end, table light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "verify",
+    "narration": "If a hundred lands above ninety, something in that column is still text.",
+    "caption": "अगर सौ नब्बे के ऊपर बैठा है, तो उस कॉलम में कुछ अभी भी टेक्स्ट है",
+    "image_brief": "Two shelves of numbered tiles in a shop, the upper shelf arranged by size and the lower one alphabetically so a hundred sits above a ninety, store light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "verify",
+    "narration": "Last check: delete the helper columns, save, and confirm the total has not moved.",
+    "caption": "आख़िरी जाँच: हेल्पर कॉलम हटाएँ, सेव करें, और देखें कुल नहीं बदला",
+    "image_brief": "Loose helper pages being drawn out of a card folder while the remaining page keeps its unchanged total at the foot, quiet evening desk light.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "boundary",
+    "narration": "Now the column you must never convert. It was waiting all along.",
+    "caption": "अब वह कॉलम जिसे कभी बदलना नहीं चाहिए — वह शुरू से इंतज़ार कर रहा था",
+    "image_brief": "A whole column of paper cards standing face down inside a locked glass case on a wooden plinth in an otherwise empty room, cool museum light from above.",
+    "on_screen_text": ""
+  }
+]
