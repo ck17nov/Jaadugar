@@ -181,6 +181,121 @@ def build(only_group: str) -> str:
     w("A rejected entry is not a small loss - it can never become a video.")
     w("Ten that import cleanly beat twenty where six are refused.")
     w("")
+    w("## READ THIS FIRST: what actually refuses entries")
+    w("")
+    w("A 357-entry batch written against an earlier version of this spec")
+    w("had 79 entries refused. They were not spread evenly - **69 of the 79")
+    w("were one cause**, and it was not craft or safety. It was repeating")
+    w("the same story shape.")
+    w("")
+    arc_cap = max(1, int(TARGET * variety.MAX_ARC_SHARE))
+    out_cap = max(1, int(TARGET * variety.MAX_OUTCOME_SHARE))
+    turn_cap = max(1, int(TARGET * variety.MAX_TURN_SHARE))
+    w(f"### 1. Spread `arc_variant` and `outcome_class` - the counts, "
+      f"for {TARGET} entries")
+    w("")
+    w(f"| field | no more than | out of {TARGET} |")
+    w("|---|---|---|")
+    w(f"| the same `arc_variant` | **{arc_cap}** | "
+      f"{int(variety.MAX_ARC_SHARE * 100)}% |")
+    w(f"| the same `outcome_class` | **{out_cap}** | "
+      f"{int(variety.MAX_OUTCOME_SHARE * 100)}% |")
+    w(f"| `turn_kind` of `notice` | **{turn_cap}** | "
+      f"{int(variety.MAX_TURN_SHARE * 100)}% |")
+    w("")
+    w("These are shares of the WHOLE topic, and the bank already holds")
+    w("entries, so treat the numbers above as a ceiling and aim lower.")
+    w("Spread deliberately - count as you go.")
+    w("")
+    w("**THE DEFAULT TRAP.** The obvious children's story is *the child")
+    w("solves it alone and gets what they wanted* - `arc_variant: alone`")
+    w(f"with `outcome_class: got_it`. In the real batch that was 42% and")
+    w("43% respectively, which is more than double the cap, and it is why")
+    w("69 good scripts were refused. Every value below is a different, real")
+    w("story. Use them:")
+    w("")
+    w("| `arc_variant` | the shape it names |")
+    w("|---|---|")
+    for name, gloss in (
+            ("alone", "they work it out by themselves"),
+            ("by_helping", "they get what they want by helping someone else"),
+            ("cooperate", "they and another child solve it together"),
+            ("reframe", "they solve a different problem than the one they "
+                        "started with"),
+            ("wrong_want", "what they wanted turns out not to be the thing"),
+            ("noticed", "someone notices their effort and it changes things"),
+            ("granted_early", "they get it early and that creates the "
+                              "problem"),
+            ("gave_it_away", "they end up giving it away")):
+        if name in ARC_VARIANTS:
+            w(f"| `{name}` | {gloss} |")
+    w("")
+    w("| `outcome_class` | the ending it names |")
+    w("|---|---|")
+    for name, gloss in (
+            ("got_it", "they get the thing they wanted"),
+            ("got_better", "they get something better than they wanted"),
+            ("changed_mind", "they stop wanting it"),
+            ("helped_another", "someone else ends up better off"),
+            ("gave_away", "they give it away and are glad"),
+            ("shared", "it is shared")):
+        if name in OUTCOME_CLASSES:
+            w(f"| `{name}` | {gloss} |")
+    w("")
+    w("### 2. The obstacle is an EVENT, not a sensation")
+    w("")
+    w("This is a BLOCKING check and it refused nine entries. Something must")
+    w("get measurably worse **in the world**: someone else takes the thing,")
+    w("a limit appears, the attempt breaks something, a thing drops or")
+    w("collapses or is knocked over.")
+    w("")
+    w("What does NOT count: *his chest felt tight*, *her arms ached*, *he")
+    w("was tired*. A feeling is a fine second sentence and it is not a")
+    w("complication, because nothing about the situation has changed.")
+    w("")
+    w("### 3. The turn is something they DO")
+    w("")
+    w("Also blocking. They use a thing for a job it was not made for,")
+    w("combine two things, trade, ask differently, or change what they")
+    w("want. **Not** *she realised*, *he noticed*, *she saw that*. Two")
+    w("entries were refused for writing a real invention as a realisation -")
+    w("if the child combines two things, say that they combined them.")
+    w("")
+    w("### 4. These words will refuse your entry")
+    w("")
+    w("The safety check is deliberately blunt, because it guards children's")
+    w("content. It is not guessable, so here it is. A real batch lost a poem")
+    w("about a seedling to the word *shoot*.")
+    w("")
+    w("| avoid | why | say instead |")
+    w("|---|---|---|")
+    w("| `shoot` alone | reads as violence | `green shoot`, `new shoots` "
+      "(these are allowed) |")
+    w("| `knife` | reads as violence | `butter knife`, `plastic knife` "
+      "(allowed); or avoid |")
+    w("| `kiss` | reads as romance | no substitute - rewrite the line |")
+    w("| `scary`, `monster`, `nightmare` | frightening | describe the dark, "
+      "not a threat |")
+    w("| `dead`, `die` | violence, unless the subject is a torch, lamp, "
+      "battery or flame | `the torch went out` |")
+    w("| `stupid`, `idiot`, `shut up` | inappropriate | - |")
+    w("| `buy now`, `click the link` | commercial pressure | - |")
+    w("")
+    w("### 5. Every line must be valid JSON on its own")
+    w("")
+    w("Three lines of the real batch were malformed - a delimiter broken")
+    w("part way through a long object - and were simply dropped. Before")
+    w("handing the file over, check that every line parses:")
+    w("")
+    w("```")
+    w("python -c \"import json,sys;"
+      "[json.loads(l) for l in open(sys.argv[1],encoding='utf-8') if l.strip()]"
+      "\" your-file.jsonl")
+    w("```")
+    w("")
+    w("Silence means every line is good. Also: each `refrain` must be")
+    w("unique - not just against the bank, but within your own batch.")
+    w("")
     w("## The fields")
     w("")
     w("| field | when | requirement |")
