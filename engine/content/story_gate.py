@@ -69,16 +69,56 @@ _WANT = re.compile(
     re.I)
 
 _OBSTACLE = re.compile(
-    r"\b(but|however|still|instead|too (high|tall|far|heavy|small)|"
+    # WHAT AN OBSTACLE IS, not the words a writer uses to apologise for one.
+    #
+    # This was a contrast-and-negation matcher - but, however, still,
+    # couldn't, didn't - and concrete writing does not need any of them.
+    # Measured on 43 narrative entries, it flagged 18 as "nothing goes wrong
+    # anywhere", among them "The crack split wide open. The can emptied onto
+    # the path. The tap was locked." and "Two more hands land on Priya's
+    # drum. Three want one. The beat breaks."
+    #
+    # It also told two authors that the fix was to add "but" to scene 2. A
+    # check satisfiable by inserting a filler conjunction teaches the
+    # opposite of what it exists for, which is the same mistake as the beat
+    # table that produced nine body-ache obstacles in a row.
+    #
+    # Three families, plus the original negation vocabulary - "the boat
+    # would not float" is still a real obstacle.
+    r"\b(but|however|still|instead|too (high|tall|far|heavy|small|narrow)|"
     r"could ?n[o']t|did ?n[o']t|was ?n[o']t|would ?n[o']t|misses|missed|"
     r"fails?|failed|stuck|wobbl\w*|slipp\w*|"
-    # PHYSICAL failure, not just negation. A well-written scene says what
-    # happened - "the boat tipped over sideways" - rather than saying that
-    # something did not happen, and the negation-only pattern scored a story
-    # with a real failed attempt as having no obstacle at all.
+    # 1. SOMEBODY ELSE TAKES IT. The commonest real obstacle in this bank,
+    # and the beat table asks for it by name: "a second person who wants it
+    # too".
+    r"claim\w*|took|takes|taken|grabb\w*|snatch\w*|kept|keeps|"
+    r"someone else|somebody else|another\w*|other \w+ wants|wants it too|"
+    # 2. THE THING BREAKS, EMPTIES OR ENDS.
     r"tipp\w*|topple\w*|fell|spill\w*|tangl\w*|jamm\w*|refuse\w*|"
-    r"tried again|once more|nothing but)\b"
-    r"|लेकिन|मगर|फिर भी|नहीं|बहुत ऊँच|बहुत दूर|टिक नहीं|गिर|पलट",
+    r"snap\w*|broke\w*|breaks?|crack\w*|split|tore|torn|rips?|"
+    r"empt\w*|drain\w*|ran out|runs out|used up|gone|lost|locked|shut|"
+    r"dries?|dried|melt\w*|shrank|shrink\w*|smaller|"
+    # 3. A LIMIT APPEARS, or a count runs down.
+    # "only <n> left" was too rigid to match "only one mango was
+    # left" - three words between, not one. Caught by its own test.
+    r"only (one|two|three|a few|\w+)( \w+){0,2} (was |were )?left|"
+    r"(was|were) left\b|last one|no more|nothing left|not enough|"
+    r"drops to|down to|stopped|stops|halted|vanish\w*|disappear\w*|"
+    # "once more" dropped: "she rang it once more for the fun of it" is
+    # a success repeated, not an obstacle, and the original list scored
+    # it as one. "tried again" stays - it implies a prior failure.
+    r"tried again|nothing but)\b"
+    # Hindi. The original list was five contrast words and three failures,
+    # which is why a Devanagari story describing a real mishap scored zero.
+    r"|लेकिन|मगर|फिर भी|नहीं|बहुत ऊँच|बहुत दूर|टिक नहीं|गिर|पलट"
+    # NUKTA AND INFLECTION. खाली was listed and ख़ाली was not, so a poem
+    # whose obstacle is "दादी की बारी ख़ाली रही" scored as having none - the
+    # same class of Devanagari trap as the perception-turn regex that never
+    # fired. Stems, not whole words, because Hindi inflects: रुक covers
+    # रुकी, रुका and रुक गया.
+    r"|टूट|छूट|फिसल|फँस|फंस|लुढ़क|भीग|बिखर|खाली|ख़ाली|खत्म|ख़त्म|"
+    r"रुक|थम|छीन|ले लिया|ले ली|"
+    r"बंद|बच गय|बाकी|बची|कम पड़|सिर्फ़ एक|आखिरी|आख़िरी|रुक गय|थम गय",
     re.I)
 
 _PARTICIPATION = re.compile(
@@ -139,11 +179,33 @@ _BODY_ONLY = re.compile(
 # Something that CHANGES THE SITUATION: another person who wants the same
 # thing, a limit appearing, or the attempt breaking something.
 _COMPLICATION = re.compile(
-    r"\b(another|someone else|too\b.*\b(also|as well)|now (also|both)|"
-    r"broke|broken|snapped|cracked|spilled|spilt|tore|torn|ran out|"
-    r"last one|only one|before (the|it)|had to choose|started to cry|"
+    # THE ESCAPE HATCH FOR A BLOCKING CHECK, so a gap here rejects good
+    # writing. It had no word for somebody TAKING something - the first
+    # example of a good obstacle in the beat table - so this scene was
+    # blocked:
+    #
+    #   "His sister took one chair for her dolls. Four corners, one
+    #    roof, hold tight."
+    #
+    # The obstacle is the sister taking the chair. It failed because the
+    # refrain riding along in the same scene says "tight", and nothing
+    # here matched "took". The author renamed the refrain to get past
+    # it, which is the gate editing the writing for the wrong reason.
+    r"\b(another|someone else|somebody else|"
+    r"too\b.*\b(also|as well)|now (also|both)|"
+    # 1. Somebody else takes or keeps it.
+    r"took|take|takes|taking|taken|claim\w*|grabb\w*|snatch\w*|kept|keeps|"
+    r"wants it too|wants the same|"
+    # 2. The thing breaks, empties or ends.
+    r"broke|broken|snap\w*|crack\w*|spilled|spilt|tore|torn|rips?|"
+    r"ran out|runs out|used up|empt\w*|locked|shut|gone|lost|"
+    # 3. A limit appears.
+    r"last one|only one|not enough|no more|nothing left|drops to|"
+    r"before (the|it)|had to choose|started to cry|"
     r"began to cry|crying|shouted|called out)\b"
-    r"|और भी|दूसरा भी|टूट|फट|गिर पड़|रोने लग|चिल्ला|आख़िरी|बस एक ही",
+    r"|और भी|दूसरा भी|टूट|फट|गिर पड़|रोने लग|चिल्ला|आख़िरी|बस एक ही"
+    r"|छीन|ले लिया|ले ली|माँग|मांग|खींचातानी|फँस|लुढ़क|ख़ाली|खाली"
+    r"|कम पड़|बस एक|सिर्फ़ एक",
     re.I)
 
 # Refrains made of ideas rather than things. A child cannot point at
