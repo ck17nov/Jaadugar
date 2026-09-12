@@ -451,8 +451,14 @@ def main() -> int:
                        help="stop after this long, whatever is left")
         p.add_argument("--give-up-after", type=int, default=3,
                        help="skip a cell after this many empty batches")
-        p.add_argument("--wait-seconds", type=float, default=70.0,
-                       help="how long to wait out a rate limit")
+        # LONGER THAN THE LIMIT IT IS WAITING FOR. At 70s this woke just
+        # before Groq's models reset - they report retry_after=90 - found
+        # them still limited, and waited again, indefinitely: 40 waits, no
+        # entries. The wait has to clear the window, not land inside it.
+        p.add_argument("--wait-seconds", type=float, default=120.0,
+                       help="how long to wait out a rate limit; must exceed "
+                            "the provider retry_after, which Groq reports "
+                            "as 90s")
         p.add_argument("--stage-dir", default="",
                        help="where to append accepted entries; must be "
                             "OUTSIDE the git checkout on the server")
