@@ -93,7 +93,21 @@ def _snapshot(files: list[Path], into: Path) -> list[Path]:
     behind, rather than letting one silently vanish from the delivery copy.
     """
     into.mkdir(parents=True, exist_ok=True)
-    out: list[Path] = []
+
+    # MERGE, do not overwrite. The snapshot is keyed on the file NAME, and
+    # the autofill stages into workspace/bank-gen using the same cell names
+    # as banks/gen - so with --extra-stage there are genuinely two files
+    # called kids-en-short-kids-alphabet-learning.jsonl. Writing
+    # `into / path.name` per file meant the second silently replaced the
+    # first: on the server, 8 autofill files holding 32 lines clobbered the
+    # 8 largest kids cells holding ~390, and the rebuild landed 654 entries
+    # where the same input landed 1020 on a developer machine. It reported
+    # "seen=4" for a 58-line file, which is the only reason it was caught.
+    #
+    # Two files with one cell name are two BATCHES of that cell, so the
+    # lines concatenate in staged order - committed first, tonight's
+    # autofill after it.
+    merged: dict[str, list[str]] = {}
     for path in files:
         keep = []
         dropped = 0
@@ -111,8 +125,15 @@ def _snapshot(files: list[Path], into: Path) -> list[Path]:
                   f"line(s) - an author is still appending")
         if not keep:
             continue
-        target = into / path.name
-        target.write_text("\n".join(keep) + "\n", encoding="utf-8")
+        if path.name in merged:
+            print(f"  {path.name}: merging {len(keep)} more line(s) from "
+                  f"{path.parent}")
+        merged.setdefault(path.name, []).extend(keep)
+
+    out: list[Path] = []
+    for name, lines in merged.items():
+        target = into / name
+        target.write_text("\n".join(lines) + "\n", encoding="utf-8")
         out.append(target)
     return out
 
@@ -313,19 +334,23 @@ def _run() -> int:
         if args.no_promote:
             print(f"\nnot promoting (banks/ is the checkout here); "
                   f"{len(staged)} staged batches are the source")
-            fresh = _verify(staged, reviewer=args.reviewer,
-                            tool=args.tool)
+            # Report from the import that just happened, rather than
+            # verifying a second time. `_verify` keys its result on the
+            # file NAME, so handing it the original staged paths - two of
+            # which can share a name across staging directories - would
+            # measure the wrong thing, and it costs another five minutes
+            # to learn nothing step 2 has not already shown.
             offered = sum(len(_lines_of(path)) for path in staged)
-            would = sum(len(ids) for ids in fresh.values())
+            landed_ids = set()
+            for ids in landed.values():
+                landed_ids |= ids
             stored = len(live.bank_entries(limit=100_000))
             print(f"\nstaged lines : {offered}")
-            print(f"fresh import : {would} would land")
+            print(f"landed       : {len(landed_ids)}")
             print(f"live database: {stored} entries")
-            if would != stored:
-                print(f"NOTE: the live database and a fresh import of "
-                      f"the staged set differ by {stored - would}; run "
-                      f"bank_publish.py to commit what this box "
-                      f"generated")
+            if stored < len(landed_ids):
+                print("NOTE: fewer rows than entries that landed - two "
+                      "staged lines share a content hash")
             return 0
 
         delivered = sorted(BANKS.glob("*.jsonl"))

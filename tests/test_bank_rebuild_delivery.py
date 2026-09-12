@@ -150,3 +150,88 @@ class TestNoPromoteWritesNothing:
         for assignment in ("delivered = sorted(BANKS.glob", ):
             assert assignment in body
         assert "workspace" not in body
+
+
+# ==========================================================================
+class TestSnapshotMergesCollidingCellNames:
+    """The autofill stages into `workspace/bank-gen` using the SAME cell
+    names as `banks/gen`, so `--extra-stage` genuinely produces two files
+    called `kids-en-short-kids-alphabet-learning.jsonl`.
+
+    `_snapshot` wrote `into / path.name` once per file, so the second
+    silently replaced the first. On the server that meant 8 autofill files
+    holding 32 lines clobbered the 8 largest kids cells holding about 390:
+    the rebuild landed 654 entries where the identical input landed 1020 on
+    a developer machine. The only visible symptom was `seen=4` in the log
+    for a file with 58 lines - no error, no warning, 366 entries gone.
+
+    Two files with one cell name are two BATCHES of that cell, so they
+    concatenate.
+    """
+
+    def _batch(self, narration: str) -> str:
+        return json.dumps({
+            "group": "kids", "language": "en",
+            "topic": "kids alphabet learning", "shape": "drill",
+            "video_format": "SHORT", "made_for_kids": True,
+            "title": narration[:20],
+            "scenes": [{"narration": narration, "beat": "open"}],
+        }, ensure_ascii=False)
+
+    def test_two_staging_dirs_with_one_cell_name_keep_every_line(self,
+                                                                 tmp_path):
+        from scripts.bank_rebuild import _lines_of, _snapshot
+
+        name = "kids-en-short-kids-alphabet-learning.jsonl"
+        committed = tmp_path / "gen"
+        committed.mkdir()
+        (committed / name).write_text(
+            "\n".join(self._batch(f"A is for apple number {i}.")
+                      for i in range(58)) + "\n", encoding="utf-8")
+
+        autofill = tmp_path / "bank-gen"
+        autofill.mkdir()
+        (autofill / name).write_text(
+            "\n".join(self._batch(f"B is for ball number {i}.")
+                      for i in range(4)) + "\n", encoding="utf-8")
+
+        # staged order is the real one: committed first, extras appended.
+        out = _snapshot([committed / name, autofill / name],
+                        tmp_path / "snap")
+
+        assert len(out) == 1, "one cell name means one snapshot file"
+        lines = _lines_of(out[0])
+        assert len(lines) == 62, (
+            f"expected 58 committed + 4 autofilled, got {len(lines)} - the "
+            f"second batch overwrote the first")
+        assert "apple number 0" in lines[0], "committed batch comes first"
+        assert "ball number 3" in lines[-1], "autofill appended after"
+
+    def test_distinct_cell_names_are_untouched(self, tmp_path):
+        from scripts.bank_rebuild import _lines_of, _snapshot
+
+        stage = tmp_path / "gen"
+        stage.mkdir()
+        for cell, count in (("kids-en-short-kids-alphabet-learning.jsonl", 3),
+                            ("kids-en-short-kids-numbers-and-counting.jsonl",
+                             2)):
+            (stage / cell).write_text(
+                "\n".join(self._batch(f"{cell} line {i}")
+                          for i in range(count)) + "\n", encoding="utf-8")
+
+        out = _snapshot(sorted(stage.glob("*.jsonl")), tmp_path / "snap")
+        assert len(out) == 2
+        assert sorted(len(_lines_of(p)) for p in out) == [2, 3]
+
+    def test_a_truncated_line_is_still_dropped(self, tmp_path):
+        """Merging must not lose the partial-write guard it replaced."""
+        from scripts.bank_rebuild import _lines_of, _snapshot
+
+        stage = tmp_path / "gen"
+        stage.mkdir()
+        path = stage / "kids-en-short-kids-alphabet-learning.jsonl"
+        path.write_text(self._batch("A is for apple.") + "\n"
+                        + '{"group": "kids", "scen',
+                        encoding="utf-8")
+        out = _snapshot([path], tmp_path / "snap")
+        assert len(_lines_of(out[0])) == 1
