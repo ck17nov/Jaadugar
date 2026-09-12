@@ -1,0 +1,14 @@
+[Unit]
+Description=Fold autofilled entries into the bank, nightly
+
+[Timer]
+# 03:20 local, which is after the free tiers reset and well before any
+# scheduled upload slot - a rebuild clears and repopulates the table, and
+# doing that underneath a claim would be asking for it.
+OnCalendar=*-*-* 03:20:00
+# The box is not always up at 03:20; run on the next boot if it was missed.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

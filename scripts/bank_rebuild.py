@@ -202,11 +202,23 @@ def _run() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--confirm", action="store_true",
                         help="write banks/ and rebuild the live database")
+    parser.add_argument("--extra-stage", action="append", default=[],
+                        metavar="DIR",
+                        help="another staging directory to import, e.g. the "
+                             "server's workspace/bank-gen. Repeatable.")
+    parser.add_argument("--no-promote", action="store_true",
+                        help="do not rewrite banks/. Required on the server, "
+                             "where banks/ is the git checkout and dirtying "
+                             "it breaks git pull --ff-only.")
     parser.add_argument("--reviewer", default="claude-opus-5")
     parser.add_argument("--tool", default="claude-opus-5")
     args = parser.parse_args()
 
     staged = sorted(GEN.glob("*.jsonl"))
+    for extra in args.extra_stage:
+        found = sorted(Path(extra).glob("*.jsonl"))
+        print(f"  + {len(found)} batches from {extra}")
+        staged += found
     if not staged:
         print(f"nothing staged in {GEN}")
         return 1
@@ -250,7 +262,10 @@ def _run() -> int:
                                  tool=args.tool)
 
             # 3. Write the delivery copy: only what landed.
-            for path in snap:
+            #
+            # Skipped on the server: banks/ there IS the git checkout, and a
+            # dirty tree makes the next `git pull --ff-only` fail.
+            for path in ([] if args.no_promote else snap):
                 keep = [raw for raw in _lines_of(path)
                         if _id_of(raw) in landed.get(path.name, set())]
                 target = BANKS / path.name
@@ -261,8 +276,13 @@ def _run() -> int:
                     target.unlink()
         finally:
             shutil.rmtree(snapdir, ignore_errors=True)
-        delivered = sorted(BANKS.glob("*.jsonl"))
-        print(f"\nwrote {len(delivered)} delivery files")
+        delivered = (staged if args.no_promote
+                     else sorted(BANKS.glob("*.jsonl")))
+        if args.no_promote:
+            print(f"\nnot promoting (banks/ is the checkout here); "
+                  f"{len(delivered)} staged batches are the source")
+        else:
+            print(f"\nwrote {len(delivered)} delivery files")
 
         # 4. Verify against a FRESH database, the way the server will, and
         # prune. Pruning changes the shares, so repeat until stable.

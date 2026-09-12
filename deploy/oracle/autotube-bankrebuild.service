@@ -1,0 +1,33 @@
+[Unit]
+# Folds the autofill's output into the live bank.
+#
+# The autofill stages into workspace/bank-gen, OUTSIDE the git checkout,
+# because `git pull --ff-only` refuses a dirty tree. Without this, nothing
+# imported those files and the deploy-time sync - which clears the database
+# before re-importing banks/*.jsonl - would delete them. That is the same
+# defect that cost 110 entries on the laptop, and it would have repeated
+# here on the next deploy.
+Description=Jaadugar bank rebuild (folds in autofilled entries)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=autotube
+Group=autotube
+WorkingDirectory=/opt/autotube
+EnvironmentFile=/opt/autotube/.env
+
+# --no-promote because banks/ here IS the git checkout, and rewriting it
+# would dirty the tree and break every future deploy. The staged files
+# remain the source; only the database is rebuilt.
+ExecStart=/opt/autotube/.venv/bin/python scripts/bank_rebuild.py \
+    --confirm --no-promote \
+    --extra-stage /opt/autotube/workspace/bank-gen
+
+Nice=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=autotube-bankrebuild
+
+[Install]
+WantedBy=multi-user.target
