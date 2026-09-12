@@ -266,8 +266,25 @@ def _run() -> int:
             # Skipped on the server: banks/ there IS the git checkout, and a
             # dirty tree makes the next `git pull --ff-only` fail.
             for path in ([] if args.no_promote else snap):
-                keep = [raw for raw in _lines_of(path)
-                        if _id_of(raw) in landed.get(path.name, set())]
+                # ONE LINE PER STORED ROW. `landed` is a set of entry_ids,
+                # so a membership filter kept BOTH copies whenever two
+                # staged lines hashed the same - while the database, keyed
+                # on entry_id, held one row. An outside batch with 15
+                # repeated scripts therefore produced a 1020-line delivery
+                # copy against 1005 rows, and step 5 correctly called it a
+                # mismatch. First occurrence wins, so the result stays
+                # deterministic in file order.
+                want = landed.get(path.name, set())
+                seen: set[str] = set()
+                keep = []
+                for raw in _lines_of(path):
+                    entry_id = _id_of(raw)
+                    if entry_id in want and entry_id not in seen:
+                        seen.add(entry_id)
+                        keep.append(raw)
+                if len(seen) != len(want):
+                    print(f"  {path.name}: {len(want) - len(seen)} stored "
+                          f"row(s) had no line to write")
                 target = BANKS / path.name
                 if keep:
                     target.write_text("\n".join(keep) + "\n",

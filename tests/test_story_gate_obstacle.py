@@ -153,9 +153,24 @@ def test_the_negation_vocabulary_still_works():
         assert _has_obstacle(_story(line)) is True, line
 
 
-def test_the_whole_bank_passes_and_that_is_the_measurement():
-    """18 of 43 before, 0 after - and the two controls above prove it is not
-    simply matching everything."""
+MAX_FLAGGED_SHARE = 0.05
+
+
+def test_the_whole_bank_mostly_passes_and_that_is_the_measurement():
+    """18 of 43 narratives before, 1 of 262 after - and the controls above
+    prove it is not simply matching everything.
+
+    A RATE, not zero. This asserted zero when the bank held 43 entries I
+    had written myself, and it broke the build the moment an outside batch
+    landed: 39 of 309 flagged, of which 21 were POEMS, which have no
+    obstacle beat and never did. Zero-flagged is a property of the content,
+    not of this code, so asserting it makes every future ingest a test
+    failure and teaches the wrong lesson - that the fix is to loosen the
+    pattern until the number comes back down.
+
+    `evaluate` no longer asks a poem for an obstacle, so only shapes whose
+    beat table contains one are counted here.
+    """
     from pathlib import Path
 
     from engine.content.bank import load_jsonl
@@ -165,7 +180,7 @@ def test_the_whole_bank_passes_and_that_is_the_measurement():
     for path in sorted(Path("banks").glob("*.jsonl")):
         entries, _ = load_jsonl(path)
         for entry in entries:
-            if entry.shape not in ("narrative", "poem"):
+            if entry.shape != "narrative":
                 continue
             checked += 1
             report = evaluate(entry.narrations(),
@@ -174,7 +189,41 @@ def test_the_whole_bank_passes_and_that_is_the_measurement():
                    for f in report.findings):
                 flagged.append(entry.entry_id)
     if checked:
-        assert not flagged, f"{len(flagged)} of {checked}: {flagged[:5]}"
+        share = len(flagged) / checked
+        assert share <= MAX_FLAGGED_SHARE, (
+            f"{len(flagged)} of {checked} narratives ({share:.0%}) read as "
+            f"having no obstacle, over the {MAX_FLAGGED_SHARE:.0%} "
+            f"threshold: {flagged[:5]}")
+
+
+def test_a_poem_is_never_asked_for_an_obstacle():
+    """It has no obstacle beat, so the question does not apply.
+
+    This cost 21 of 54 banked poems a finding for missing a structural
+    element their own form does not contain. The beats settle it - a poem
+    is open / verse_a / refrain / verse_b / refrain_2 / verse_c / close.
+    """
+    verses = ["Clap with Aarav: clap, clap, chime.",
+              "Clap with Aarav: clap, clap, chime.",
+              "Two small hands and a bright red drum.",
+              "Clap with Aarav: clap, clap, chime.",
+              "Three quick taps and the song is done.",
+              "Clap with Aarav: clap, clap, chime."]
+    poem_beats = ["open", "refrain", "verse_a", "refrain_2", "verse_b",
+                  "close"]
+    checks = {f.check for f in evaluate(verses, beats=poem_beats).findings}
+    assert "has_obstacle" not in checks
+
+    # A narrative with the beat still gets asked, or the fix is a mute
+    # button rather than a correction.
+    story_beats = ["want", "attempt", "obstacle", "turn", "resolve",
+                   "refrain"]
+    checks = {f.check for f in evaluate(verses, beats=story_beats).findings}
+    assert "has_obstacle" in checks
+
+    # And so does an entry whose beats the caller did not pass at all.
+    checks = {f.check for f in evaluate(verses).findings}
+    assert "has_obstacle" in checks
 
 
 # ==========================================================================

@@ -107,6 +107,19 @@ _INANIMATE = (r"battery|batteries|torch|phone|light|lights|lamp|lantern|bulb|"
               r"candle|flame|fire|screen|radio|clock|watch|engine|signal|"
               r"line|music|sound|wind|breeze|echo")
 
+# A DIE IS A DICE. `die` is in the weak violence list and the benign list
+# below only knows about things that can die, so "six dots mark a wooden
+# game die" was refused as violence in a counting drill - ordinary material
+# for the topic. Only the NOUN is exempted: "the flame will die" still
+# fires.
+_BENIGN_DIE_NOUN = re.compile(
+    r"\b(a|an|the|one|each|every|wooden|plastic|game|number|numbered|"
+    r"six-sided|loaded)\s+(game\s+|wooden\s+|plastic\s+)?die\b"
+    r"|\bdie\s+(shows|showed|lands|landed|rolls|rolled|has|and)\b"
+    r"|\bon\s+(a|the|each|every|one)\s+die\b"
+    r"|\bdots?\s+(on|mark|marks)\s+(a|an|the|each|every)?\s*\w*\s*die\b",
+    re.I)
+
 _BENIGN_DEAD = re.compile(
     # "dead battery", "dead end", "dead silence"
     r"\bdead\s+(battery|batteries|end|ends|line|lines|weight|leaf|leaves|"
@@ -151,6 +164,8 @@ def violence_in(text: str) -> bool:
                    for lo, hi in benign_strong):
             return True                 # decisive on its own
     benign = [(m.start(), m.end()) for m in _BENIGN_DEAD.finditer(text)]
+    benign += [(m.start(), m.end())
+               for m in _BENIGN_DIE_NOUN.finditer(text)]
     for match in re.finditer(_VIOLENCE_WEAK, text, re.I):
         if not any(lo <= match.start() and match.end() <= hi
                    for lo, hi in benign):

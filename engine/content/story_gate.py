@@ -104,6 +104,16 @@ _OBSTACLE = re.compile(
     r"only (one|two|three|a few|\w+)( \w+){0,2} (was |were )?left|"
     r"(was|were) left\b|last one|no more|nothing left|not enough|"
     r"drops to|down to|stopped|stops|halted|vanish\w*|disappear\w*|"
+    # 4. WORSE BY DEGREE, not only by event. "The sharp tapping echoed even
+    # louder" and "the low vibration travelled straight through the
+    # mattress" are real complications - something intensifying - and
+    # nothing above recognised a situation escalating rather than breaking.
+    #
+    # Deliberately not `grew`, `closer` or `tried harder`: a seed growing
+    # and a child trying harder are not complications, and an advisory
+    # check that fires on them stops meaning anything.
+    r"louder|worse|stronger|even more|more and more|kept \w+ing|"
+    r"straight through|right through|"
     # "once more" dropped: "she rang it once more for the fun of it" is
     # a success repeated, not an obstacle, and the original list scored
     # it as one. "tried again" stays - it implies a prior failure.
@@ -118,7 +128,21 @@ _OBSTACLE = re.compile(
     # रुकी, रुका and रुक गया.
     r"|टूट|छूट|फिसल|फँस|फंस|लुढ़क|भीग|बिखर|खाली|ख़ाली|खत्म|ख़त्म|"
     r"रुक|थम|छीन|ले लिया|ले ली|"
-    r"बंद|बच गय|बाकी|बची|कम पड़|सिर्फ़ एक|आखिरी|आख़िरी|रुक गय|थम गय",
+    r"बंद|बच गय|बाकी|बची|कम पड़|सिर्फ़ एक|आखिरी|आख़िरी|रुक गय|थम गय|"
+    # MORE HINDI EVENT VERBS. After the poem fix, every entry still flagged
+    # "nothing goes wrong anywhere" was Hindi - 16 of them - and every one
+    # described a real event: पन्ना फट गया, बुर्ज ढह गया, रस्सी अटक गई,
+    # डोरी उलझ गई, लट्टू टकराया, कील खिसक गई. The English side had words
+    # for tearing, collapsing, sticking and tangling; the Hindi side did
+    # not, so the same obstacle passed in one language and failed in the
+    # other.
+    r"फट|ढह|अटक|उलझ|टकरा|मुड़|खिसक|ढील|ढीली|"
+    # Escalation, matching the English `louder|worse` family.
+    r"बढ़ ग|बढ़ने|बढ़कर|तेज़ चल|तेज़ हो|शोर से भर|"
+    # A limit of heat or cold, and a thing carried off or pounced on.
+    # `उड़` is NOT here on its own - a kite flying is the success, not the
+    # obstacle - only the completive "blew away".
+    r"तपकर|बहुत गर्म|उड़ ग|कूद पड़",
     re.I)
 
 _PARTICIPATION = re.compile(
@@ -453,10 +477,19 @@ def evaluate(narrations: list[str], *, words_per_scene_floor: int = 12,
         if not _WANT.search(early) else "want stated early"))
 
     # ---- 3. something in the way --------------------------------- advisory
-    report.findings.append(Finding(
-        "has_obstacle", bool(_OBSTACLE.search(joined)), False,
-        "nothing goes wrong anywhere - a story needs a failed attempt"
-        if not _OBSTACLE.search(joined) else "obstacle present"))
+    #
+    # ONLY WHERE THE FORM HAS ONE. A poem is open / verse_a / refrain /
+    # verse_b / refrain_2 / verse_c / close - there is no obstacle beat in
+    # it, and asking anyway flagged 21 of 54 banked poems for missing a
+    # structural element they are not supposed to contain. The beats are
+    # the evidence, so read them rather than taking the shape on trust;
+    # with no beats given, the question still applies.
+    beat_names = {str(b).lower() for b in (beats or [])}
+    if (not beat_names) or any("obstacle" in b for b in beat_names):
+        report.findings.append(Finding(
+            "has_obstacle", bool(_OBSTACLE.search(joined)), False,
+            "nothing goes wrong anywhere - a story needs a failed attempt"
+            if not _OBSTACLE.search(joined) else "obstacle present"))
 
     # ---- 4. a verbatim refrain ----------------------------------- BLOCKING
     refrain, repeats = _find_refrain(narrations)
