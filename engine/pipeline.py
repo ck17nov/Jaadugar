@@ -359,24 +359,23 @@ class Pipeline:
                       niche=request.niche)
             return None
 
+        # NO DURATION FILTER. The entry's own measured narration is the
+        # duration - see the note below, which has always been true - so
+        # filtering the pool on a requested length refused good scripts for
+        # a number that was about to be discarded. The Create screen no
+        # longer even asks for a length when the source is the bank, so the
+        # value arriving here is a default nobody chose.
+        #
+        # `video_format` still narrows it, which is the distinction that
+        # actually matters: a SHORT request cannot claim a 90-scene
+        # long-form entry.
         claim = bank_use.claim(
             self.db, group=group, language=request.language,
             video_format=request.video_format, job_id=job.job_id,
-            topics=[request.niche], near_seconds=float(request.duration_seconds),
+            topics=[request.niche], near_seconds=0.0,
             require_review=bool(self.cfg.get("bank.require_review", True)),
             require_human=bool(self.cfg.get("bank.require_human_review",
                                             False)))
-        if claim is None:
-            # Retry without the duration filter before giving up: a bank with
-            # only 30-second stories in it should still serve a 45-second
-            # request, since the entry's own length is what gets used anyway.
-            claim = bank_use.claim(
-                self.db, group=group, language=request.language,
-                video_format=request.video_format, job_id=job.job_id,
-                topics=[request.niche], near_seconds=0.0,
-                require_review=bool(self.cfg.get("bank.require_review", True)),
-                require_human=bool(self.cfg.get("bank.require_human_review",
-                                                False)))
         if claim is None:
             counts = {f"{r['grp']}/{r['language']}/{r['video_format']}":
                       f"{r['unused']}/{r['total']}"

@@ -769,6 +769,26 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
             )
         }
 
+        // NOT ASKED when the script comes from the bank.
+        //
+        // A banked entry's own measured narration IS the duration - the
+        // pipeline recomputes it and discards whatever the request said, so
+        // this slider was asking a question and then throwing the answer
+        // away. It was also doing harm: the claim used the number as a
+        // +/-25% filter, so asking for 45s refused a good 70s story on the
+        // first attempt and only found it on the retry.
+        val lengthIsAsked = scriptSource == "live"
+        if (!lengthIsAsked) {
+            SectionTitle("Length")
+            Text(
+                "Taken from the script itself. A reviewed script is written " +
+                    "to a word count, and the narration decides how long " +
+                    "the video runs - so there is nothing to choose here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (lengthIsAsked) {
         SectionTitle("Length: ${formatLength(lengthSeconds)}")
         Slider(
             value = lengthSeconds.toFloat(),
@@ -804,6 +824,7 @@ fun CreateAutomationScreen(onStarted: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
         }
 
         LabeledDropdown(
