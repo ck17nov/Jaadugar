@@ -1,8 +1,8 @@
 [
 {
 "beat": "turn",
-"narration": "He wedges the torch on top, face up. It points at the ceiling.",
-"caption": "वह टॉर्च को सबसे ऊपर फँसा देता है, मुँह ऊपर। वह छत की तरफ़ देखती है।",
+"narration": "Ishaan wedges the torch on top, face up. It points at the ceiling.",
+"caption": "इशान टॉर्च को सबसे ऊपर फँसा देता है, मुँह ऊपर। वह छत की तरफ़ देखती है।",
 "image_brief": "The torch standing upright and wedged on a stack of four books on the stool, its beam shooting straight up.",
 "on_screen_text": ""
 },
@@ -36,8 +36,8 @@
 },
 {
 "beat": "turn",
-"narration": "The jaws unroll from the door to the window.",
-"caption": "जबड़ा दरवाज़े से खिड़की तक फैल जाता है।",
+"narration": "Ishaan's jaws unroll from the door to the window.",
+"caption": "इशान का जबड़ा दरवाज़े से खिड़की तक फैल जाता है।",
 "image_brief": "An enormous crocodile jaw shadow stretching across the whole ceiling from above the door to above the window.",
 "on_screen_text": ""
 },
@@ -50,8 +50,8 @@
 },
 {
 "beat": "turn",
-"narration": "But the stripe is narrow. The legs fall outside it.",
-"caption": "पर पट्टी पतली है। पैर उसके बाहर रह जाते हैं।",
+"narration": "But the stripe is narrow. Ishaan's crocodile loses its legs.",
+"caption": "पर पट्टी पतली है। इशान के मगरमच्छ के पैर ग़ायब हो जाते हैं।",
 "image_brief": "The ceiling crocodile with its body inside the band of light and its leg shapes lost in the dark beside the band.",
 "on_screen_text": ""
 },
@@ -71,22 +71,22 @@
 },
 {
 "beat": "turn",
-"narration": "Two ears slide in under his jaws. She holds them still.",
-"caption": "दो कान उसके जबड़े के नीचे आ जाते हैं। वह उन्हें स्थिर रखती है।",
+"narration": "Two ears slide in under Ishaan's jaws. She holds them still.",
+"caption": "दो कान इशान के जबड़े के नीचे आ जाते हैं। वह उन्हें स्थिर रखती है।",
 "image_brief": "The sister's two-fingered rabbit hand entering the beam just below Ishaan's joined hands, both sets of fingers lit.",
 "on_screen_text": ""
 },
 {
 "beat": "turn",
-"narration": "Now you say it with Ishaan, out loud.",
-"caption": "अब तुम इशान के साथ ज़ोर से बोलो।",
+"narration": "Say it with Ishaan, out loud.",
+"caption": "इशान के साथ ज़ोर से बोलो।",
 "image_brief": "Two children's hands together in one upward beam of light, their mouths open mid-word, the bright ceiling above.",
 "on_screen_text": ""
 },
 {
 "beat": "turn",
-"narration": "Both of them say it. One snap, two snap, crocodile!",
-"caption": "दोनों साथ बोलते हैं। एक चटक, दो चटक, मगरमच्छ!",
+"narration": "Ishaan says it with her. One snap, two snap, crocodile!",
+"caption": "इशान उसके साथ बोलता है। एक चटक, दो चटक, मगरमच्छ!",
 "image_brief": "Ishaan and his sister kneeling side by side at the stool, faces lit from below, the ceiling crocodile shut above them.",
 "on_screen_text": ""
 },
@@ -99,8 +99,8 @@
 },
 {
 "beat": "turn",
-"narration": "Then she edges her hands nearer. Her rabbit fills the ceiling too.",
-"caption": "फिर वह अपने हाथ और पास ले जाती है। उसका खरगोश भी पूरी छत भर देता है।",
+"narration": "Then she edges her hands nearer. Her rabbit fills Ishaan's ceiling too.",
+"caption": "फिर वह अपने हाथ और पास ले जाती है। उसका खरगोश भी इशान की छत भर देता है।",
 "image_brief": "A giant rabbit shadow with tall ears filling the ceiling band, the sister's hands close over the torch, Ishaan leaning back.",
 "on_screen_text": ""
 }

@@ -1,17 +1,107 @@
 [
-{"beat":"attempt","narration":"Still the ceiling above it is bare. Bare as a plate.","caption":"उसके ऊपर छत अब भी ख़ाली है। थाली जैसी ख़ाली।","image_brief":"The upper wall bright with crocodile shadow while the flat ceiling above stays empty, the light stopping at the corner join.","on_screen_text":""},
-{"beat":"attempt","narration":"Ishaan drags the stool nearer the cot. The circle slides up.","caption":"इशान स्टूल को खाट के पास खींचता है। रोशनी का गोला ऊपर सरक जाता है।","image_brief":"Ishaan dragging the wooden stool across the floorboards with the torch wobbling on top, the light circle sliding upward.","on_screen_text":""},
-{"beat":"attempt","narration":"He tries holding the torch under his chin. It slips out.","caption":"वह टॉर्च को ठुड्डी के नीचे दबाने की कोशिश करता है। वह फिसल जाती है।","image_brief":"Ishaan tucking the torch under his chin with both hands raised, the beam pointing crookedly down at the floorboards.","on_screen_text":""},
-{"beat":"attempt","narration":"One hand on the torch leaves one hand free. One hand makes a duck.","caption":"एक हाथ टॉर्च पर, तो सिर्फ़ एक हाथ बचता है। एक हाथ से बत्तख़ बनती है।","image_brief":"Ishaan gripping the torch in one fist and making a one-handed duck shadow with the other hand on the wall.","on_screen_text":""},
-{"beat":"attempt","narration":"A crocodile needs two hands. Someone must hold the torch.","caption":"मगरमच्छ के लिए दो हाथ चाहिए। टॉर्च कोई और पकड़े।","image_brief":"Both of Ishaan's empty hands held open in the beam, the torch standing alone on the stool between his wrists.","on_screen_text":""},
-{"beat":"attempt","narration":"So Ishaan asks his sister to hold it. She sits up.","caption":"तो इशान बहन से टॉर्च पकड़ने को कहता है। वह उठ बैठती है।","image_brief":"Ishaan passing the torch to his little sister across the gap between the two cots, light swinging between their faces.","on_screen_text":""},
-{"beat":"obstacle","narration":"She takes it and turns it on her own hands.","caption":"वह टॉर्च लेकर उसे अपने ही हाथों की तरफ़ घुमा देती है।","image_brief":"The sister holding the torch turned toward her own raised fingers, a rabbit shadow appearing on her side of the room.","on_screen_text":""},
-{"beat":"obstacle","narration":"His sister wants the ceiling too. For a rabbit.","caption":"बहन को भी छत चाहिए। अपने खरगोश के लिए।","image_brief":"The sister kneeling on her cot pointing the torch upward, a thin stretched rabbit shadow wobbling above her head.","on_screen_text":""},
-{"beat":"obstacle","narration":"Now two children want one small torch. Nobody lets go.","caption":"अब दो बच्चे एक छोटी टॉर्च चाहते हैं। कोई नहीं छोड़ता।","image_brief":"Both children's hands gripping the same torch in the middle of the dark bedroom, the beam pinched between their fingers.","on_screen_text":""},
-{"beat":"obstacle","narration":"Ishaan pulls. His sister pulls harder.","caption":"इशान खींचता है। बहन उससे ज़्यादा ज़ोर से खींचती है।","image_brief":"A tug of war over the torch between Ishaan and his sister, her blanket sliding off the cot, light streaking over the ceiling.","on_screen_text":""},
-{"beat":"obstacle","narration":"The torch drops onto the floorboards. It rolls.","caption":"टॉर्च फ़र्श के तख़्तों पर गिर जाती है। वह लुढ़कती है।","image_brief":"The torch fallen on bare floorboards, still lit, rolling past a pair of slippers, its beam sweeping the room.","on_screen_text":""},
-{"beat":"obstacle","narration":"The ring at its front twists loose. The glass slides sideways.","caption":"उसके आगे का छल्ला ढीला हो जाता है। काँच बगल में सरक जाता है।","image_brief":"The fallen torch on the floor with its front ring unscrewed and the round glass disc tilted out of place.","on_screen_text":""},
-{"beat":"obstacle","narration":"The wide yellow circle is gone. Now the light comes out in a stripe.","caption":"चौड़ा पीला गोला ग़ायब है। अब रोशनी पट्टी बनकर निकलती है।","image_brief":"A narrow bar of torchlight lying across the floorboards, the walls and ceiling of the bedroom in darkness.","on_screen_text":""},
-{"beat":"obstacle","narration":"Three fingers wide. The circle had covered half the wall.","caption":"तीन उँगली चौड़ी। पहले गोला आधी दीवार ढक लेता था।","image_brief":"Ishaan holding three fingers against the thin stripe of light on the floor to measure how wide it is.","on_screen_text":""},
-{"beat":"obstacle","narration":"Ishaan's whole crocodile will not fit in a stripe. Only its nose.","caption":"इशान का पूरा मगरमच्छ पट्टी में नहीं समाता। सिर्फ़ उसकी नाक।","image_brief":"Ishaan's joined hands inside the narrow band of light with only a small crocodile nose showing as shadow on the wall.","on_screen_text":""}
+{
+"beat": "attempt",
+"narration": "Still the ceiling above Ishaan is bare. Bare as a plate.",
+"caption": "इशान के ऊपर छत अब भी ख़ाली है। थाली जैसी ख़ाली।",
+"image_brief": "The upper wall bright with crocodile shadow while the flat ceiling above stays empty, the light stopping at the corner join.",
+"on_screen_text": ""
+},
+{
+"beat": "attempt",
+"narration": "Ishaan drags the stool nearer the cot. The circle slides up.",
+"caption": "इशान स्टूल को खाट के पास खींचता है। रोशनी का गोला ऊपर सरक जाता है।",
+"image_brief": "Ishaan dragging the wooden stool across the floorboards with the torch wobbling on top, the light circle sliding upward.",
+"on_screen_text": ""
+},
+{
+"beat": "attempt",
+"narration": "Ishaan tries holding the torch under his chin. It slips out.",
+"caption": "इशान टॉर्च को ठुड्डी के नीचे दबाने की कोशिश करता है। वह फिसल जाती है।",
+"image_brief": "Ishaan tucking the torch under his chin with both hands raised, the beam pointing crookedly down at the floorboards.",
+"on_screen_text": ""
+},
+{
+"beat": "attempt",
+"narration": "One hand on the torch leaves one hand free. One hand makes a duck.",
+"caption": "एक हाथ टॉर्च पर, तो सिर्फ़ एक हाथ बचता है। एक हाथ से बत्तख़ बनती है।",
+"image_brief": "Ishaan gripping the torch in one fist and making a one-handed duck shadow with the other hand on the wall.",
+"on_screen_text": ""
+},
+{
+"beat": "attempt",
+"narration": "A crocodile needs two hands. Someone must hold Ishaan's torch.",
+"caption": "मगरमच्छ के लिए दो हाथ चाहिए। इशान की टॉर्च कोई और पकड़े।",
+"image_brief": "Both of Ishaan's empty hands held open in the beam, the torch standing alone on the stool between his wrists.",
+"on_screen_text": ""
+},
+{
+"beat": "attempt",
+"narration": "So Ishaan asks his sister to hold it. She sits up.",
+"caption": "तो इशान बहन से टॉर्च पकड़ने को कहता है। वह उठ बैठती है।",
+"image_brief": "Ishaan passing the torch to his little sister across the gap between the two cots, light swinging between their faces.",
+"on_screen_text": ""
+},
+{
+"beat": "obstacle",
+"narration": "She takes it and turns it on her own hands.",
+"caption": "वह टॉर्च लेकर उसे अपने ही हाथों की तरफ़ घुमा देती है।",
+"image_brief": "The sister holding the torch turned toward her own raised fingers, a rabbit shadow appearing on her side of the room.",
+"on_screen_text": ""
+},
+{
+"beat": "obstacle",
+"narration": "Ishaan's sister wants the ceiling too. For a rabbit.",
+"caption": "इशान की बहन को भी छत चाहिए। अपने खरगोश के लिए।",
+"image_brief": "The sister kneeling on her cot pointing the torch upward, a thin stretched rabbit shadow wobbling above her head.",
+"on_screen_text": ""
+},
+{
+"beat": "obstacle",
+"narration": "Now two children want one small torch. Nobody lets go.",
+"caption": "अब दो बच्चे एक छोटी टॉर्च चाहते हैं। कोई नहीं छोड़ता।",
+"image_brief": "Both children's hands gripping the same torch in the middle of the dark bedroom, the beam pinched between their fingers.",
+"on_screen_text": ""
+},
+{
+"beat": "obstacle",
+"narration": "Ishaan pulls. His sister pulls harder.",
+"caption": "इशान खींचता है। बहन उससे ज़्यादा ज़ोर से खींचती है।",
+"image_brief": "A tug of war over the torch between Ishaan and his sister, her blanket sliding off the cot, light streaking over the ceiling.",
+"on_screen_text": ""
+},
+{
+"beat": "obstacle",
+"narration": "The torch drops onto the floorboards. It rolls.",
+"caption": "टॉर्च फ़र्श के तख़्तों पर गिर जाती है। वह लुढ़कती है।",
+"image_brief": "The torch fallen on bare floorboards, still lit, rolling past a pair of slippers, its beam sweeping the room.",
+"on_screen_text": ""
+},
+{
+"beat": "obstacle",
+"narration": "The ring at its front twists loose. The glass slides sideways.",
+"caption": "उसके आगे का छल्ला ढीला हो जाता है। काँच बगल में सरक जाता है।",
+"image_brief": "The fallen torch on the floor with its front ring unscrewed and the round glass disc tilted out of place.",
+"on_screen_text": ""
+},
+{
+"beat": "obstacle",
+"narration": "The wide yellow circle is gone. Now the light comes out in a stripe.",
+"caption": "चौड़ा पीला गोला ग़ायब है। अब रोशनी पट्टी बनकर निकलती है।",
+"image_brief": "A narrow bar of torchlight lying across the floorboards, the walls and ceiling of the bedroom in darkness.",
+"on_screen_text": ""
+},
+{
+"beat": "obstacle",
+"narration": "Three fingers wide. The circle had covered half the wall.",
+"caption": "तीन उँगली चौड़ी। पहले गोला आधी दीवार ढक लेता था।",
+"image_brief": "Ishaan holding three fingers against the thin stripe of light on the floor to measure how wide it is.",
+"on_screen_text": ""
+},
+{
+"beat": "obstacle",
+"narration": "Ishaan's whole crocodile will not fit in a stripe. Only its nose.",
+"caption": "इशान का पूरा मगरमच्छ पट्टी में नहीं समाता। सिर्फ़ उसकी नाक।",
+"image_brief": "Ishaan's joined hands inside the narrow band of light with only a small crocodile nose showing as shadow on the wall.",
+"on_screen_text": ""
+}
 ]
