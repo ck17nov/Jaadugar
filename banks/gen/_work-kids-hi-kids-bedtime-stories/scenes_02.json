@@ -8,8 +8,8 @@
   },
   {
     "beat": "attempt",
-    "narration": "खरगोश लौट आया। बड़ा, मगर फिर भी धुँधला।",
-    "caption": "The rabbit came back. Big, but still blurred.",
+    "narration": "पारो का खरगोश लौट आया। बड़ा, मगर फिर भी धुँधला।",
+    "caption": "Paro's rabbit came back. Big, but still blurred.",
     "image_brief": "The wall holding a large soft-edged rabbit shadow whose ears can only just be guessed at.",
     "on_screen_text": ""
   },
@@ -22,15 +22,15 @@
   },
   {
     "beat": "attempt",
-    "narration": "एक हाथ लैंप पर लगा, तो कान बनाने के लिए हाथ ही नहीं बचे।",
-    "caption": "With one hand on the lamp, no hands are left to build the ears.",
+    "narration": "पारो का एक हाथ लैंप पर लगा, तो कान बनाने के लिए हाथ ही नहीं बचे।",
+    "caption": "With one of Paro's hands on the lamp, no hands are left for the ears.",
     "image_brief": "One of Paro's hands resting on the lamp while the other waves alone in the air, an unfinished shape on the wall beyond.",
     "on_screen_text": ""
   },
   {
     "beat": "attempt",
-    "narration": "देर तक हाथ ऊपर रखने से उसके हाथ दुखने लगे।",
-    "caption": "From holding her hands up so long, her arms began to ache.",
+    "narration": "देर तक हाथ ऊपर रखने से पारो के हाथ दुखने लगे।",
+    "caption": "From holding them up so long, Paro's arms began to ache.",
     "image_brief": "Paro's arms lowered into her lap, the lamp glowing beside her knee, the cream wall in front of her empty.",
     "on_screen_text": ""
   },

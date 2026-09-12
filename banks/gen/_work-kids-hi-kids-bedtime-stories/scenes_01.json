@@ -1,8 +1,8 @@
 [
   {
     "beat": "attempt",
-    "narration": "छाया और छोटी हो गई। मटर के दाने जितनी।",
-    "caption": "The shadow got even smaller. No bigger than a pea.",
+    "narration": "पारो की छाया और छोटी हो गई। मटर के दाने जितनी।",
+    "caption": "Paro's shadow got even smaller. No bigger than a pea.",
     "image_brief": "The cream wall with a pea-sized rabbit shadow on it, the lamp glowing right at the wall's base below.",
     "on_screen_text": ""
   },
@@ -57,8 +57,8 @@
   },
   {
     "beat": "attempt",
-    "narration": "दूर से रोशनी कमज़ोर पहुँचती है। दीवार धुँधली सी लगती है।",
-    "caption": "From far away the light arrives weak. The wall looks hazy.",
+    "narration": "दूर से रोशनी कमज़ोर पहुँचती है। पारो की दीवार धुँधली सी लगती है।",
+    "caption": "From far away the light arrives weak. Paro's wall looks hazy.",
     "image_brief": "The whole bedroom in weak light, the lamp small in the far door corner, both low beds dim.",
     "on_screen_text": ""
   },
@@ -71,8 +71,8 @@
   },
   {
     "beat": "attempt",
-    "narration": "अब खरगोश दरवाज़े जितना बड़ा है! पूरी दीवार भर गई।",
-    "caption": "Now the rabbit is as big as the door! The whole wall is filled.",
+    "narration": "अब पारो का खरगोश दरवाज़े जितना बड़ा है! पूरी दीवार भर गई।",
+    "caption": "Now Paro's rabbit is as big as the door! The whole wall is filled.",
     "image_brief": "A huge rabbit shadow covering the cream wall from floor to ceiling, Paro tiny on the bed in front of it.",
     "on_screen_text": ""
   },
@@ -99,8 +99,8 @@
   },
   {
     "beat": "attempt",
-    "narration": "उसके सिर की छाया पूरे खरगोश को निगल जाती है।",
-    "caption": "The shadow of her own head swallows the whole rabbit.",
+    "narration": "पारो के सिर की छाया पूरे खरगोश को निगल जाती है।",
+    "caption": "The shadow of Paro's own head swallows the whole rabbit.",
     "image_brief": "A large dark shadow of Paro's head and shoulders covering the wall, only a sliver of the rabbit shape left at its side.",
     "on_screen_text": ""
   }

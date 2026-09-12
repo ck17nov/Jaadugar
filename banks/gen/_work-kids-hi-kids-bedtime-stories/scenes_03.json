@@ -8,8 +8,8 @@
   },
   {
     "beat": "obstacle",
-    "narration": "वह तार को दोनों हाथों से खींचती है।",
-    "caption": "She pulls at the wire with both hands.",
+    "narration": "पारो तार को दोनों हाथों से खींचती है।",
+    "caption": "Paro pulls at the wire with both hands.",
     "image_brief": "Both of Paro's hands gripping the lamp's wire and hauling on it, her knuckles pale with the effort.",
     "on_screen_text": ""
   },
@@ -50,8 +50,8 @@
   },
   {
     "beat": "obstacle",
-    "narration": "कोई छाया नहीं बनी। न कान, न कोई किनारा।",
-    "caption": "No shadow formed at all. No ears, no edge.",
+    "narration": "पारो के हाथ हिले, पर कोई छाया नहीं बनी। न कान, न कोई किनारा।",
+    "caption": "Paro's hands moved, but no shadow formed. No ears, no edge.",
     "image_brief": "Paro's hands shaping ears in front of the bare bulb while the wall behind them shows nothing at all.",
     "on_screen_text": ""
   },
