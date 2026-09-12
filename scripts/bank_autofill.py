@@ -283,11 +283,18 @@ def _one_batch(router: LLMRouter, db: Database, cell: dict, *,
                                       for r in report.rejected[:3]]
 
 
+# Where accepted entries are staged. Overridden with --stage-dir, which
+# the SERVER needs: its repo is updated with `git pull --ff-only`, and that
+# refuses to run against a dirty working tree - so an autofill appending
+# into banks/gen there would break every future deploy.
+STAGE_DIR = ROOT / "banks" / "gen"
+
+
 def _stage(cell: dict, lines: list[str]) -> None:
     """Append accepted entries to this cell's staged batch file."""
     slug = cell["topic"].lower().replace(" ", "-")
     fmt = "short" if cell["format"] == "SHORT" else "longform"
-    path = (ROOT / "banks" / "gen" /
+    path = (STAGE_DIR /
             f"{cell['group']}-{cell['language']}-{fmt}-{slug}.jsonl")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
@@ -446,6 +453,9 @@ def main() -> int:
                        help="skip a cell after this many empty batches")
         p.add_argument("--wait-seconds", type=float, default=70.0,
                        help="how long to wait out a rate limit")
+        p.add_argument("--stage-dir", default="",
+                       help="where to append accepted entries; must be "
+                            "OUTSIDE the git checkout on the server")
         p.add_argument("--patience", type=int, default=40,
                        help="consecutive rate limits before concluding the "
                             "daily quota is gone")
@@ -454,6 +464,10 @@ def main() -> int:
                             "recorded as its reviewer")
         p.set_defaults(func=fn)
     args = parser.parse_args()
+    if getattr(args, "stage_dir", ""):
+        global STAGE_DIR
+        STAGE_DIR = Path(args.stage_dir)
+        STAGE_DIR.mkdir(parents=True, exist_ok=True)
     return args.func(args)
 
 

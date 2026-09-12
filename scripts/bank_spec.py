@@ -31,6 +31,10 @@ from engine.content.bank import (ARC_VARIANTS, MAX_SCENES,      # noqa: E402
 from engine.core.groups import GROUPS, group as get_group       # noqa: E402
 
 SECONDS = {"SHORT": 50, "LONGFORM": 480}
+
+# Entries wanted per (group, language, format) cell. Stated in the spec so
+# an outside tool knows the size of the job; changeable with --target.
+TARGET = 50
 LANGS = {"kids": ("en", "hi"), "finance": ("en",), "tech": ("en",)}
 LIVE_ONLY = {"finance news", "AI news", "new phone and laptop launches"}
 
@@ -159,6 +163,24 @@ def build(only_group: str) -> str:
     w("which gates every line, keeps what passes, and reports the rest.")
     w("")
 
+    w("## How many to write")
+    w("")
+    w(f"**{TARGET} per cell** - that is {TARGET} entries for each row of the")
+    w("table below, so a topic that appears twice (English and Hindi) wants")
+    w(f"{TARGET} of each, and Shorts and long-form are counted separately.")
+    w("")
+    w("**Write them in batches of 10-20, not in one block.** This is not a")
+    w("style preference, it is how the caps work: the variety limits at the")
+    w("bottom of this file are shares of the WHOLE group, not of your batch.")
+    w("A single large block written blind will have entries refused on")
+    w(f"`arc_variant` exceeding {int(variety.MAX_ARC_SHARE * 100)}% or")
+    w(f"`outcome_class` exceeding {int(variety.MAX_OUTCOME_SHARE * 100)}%,")
+    w("however well written each one is. Smaller batches let the earlier")
+    w("ones land first, which moves the shares and makes room.")
+    w("")
+    w("A rejected entry is not a small loss - it can never become a video.")
+    w("Ten that import cleanly beat twenty where six are refused.")
+    w("")
     w("## The fields")
     w("")
     w("| field | when | requirement |")
@@ -359,8 +381,12 @@ def build(only_group: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--group", default="")
+    parser.add_argument("--target", type=int, default=50,
+                        help="entries wanted per cell, stated in the spec")
     parser.add_argument("--out", default="")
+    global TARGET
     args = parser.parse_args()
+    TARGET = args.target
     text = build(args.group)
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
