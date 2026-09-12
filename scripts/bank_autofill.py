@@ -250,7 +250,9 @@ def _one_batch(router: LLMRouter, db: Database, cell: dict, *,
                                          require_review=False)
         after = {r["entry_id"] for r in db.bank_entries(limit=200_000)}
 
-    for entry_id in sorted(after - before):
+    landed = sorted(after - before)
+    staged: list[str] = []
+    for entry_id in landed:
         row = next((r for r in db.bank_entries(limit=200_000)
                     if r["entry_id"] == entry_id), None)
         if row is None:
@@ -264,9 +266,33 @@ def _one_batch(router: LLMRouter, db: Database, cell: dict, *,
         # kind="machine" and the MODEL's name, because that is who wrote it.
         bank_import.review(db, entry_id, reviewer=model, verdict="approve",
                            kind="machine")
+        staged.append(json.dumps(entry.to_dict(), ensure_ascii=False))
 
-    return len(after - before), report.seen, [str(r)[:160]
-                                              for r in report.rejected[:3]]
+    # STAGE IT, or the next rebuild deletes it.
+    #
+    # `bank_rebuild` clears the database and re-imports from banks/gen -
+    # that is what makes it deterministic and what keeps the delivery files
+    # and the database in agreement. Storing straight to the database and
+    # staging nothing made the two disagree about what the bank IS, and a
+    # rebuild removed 110 entries this tool had just written. The archive
+    # caught them; the fix is to be a normal writer.
+    if staged:
+        _stage(cell, staged)
+
+    return len(landed), report.seen, [str(r)[:160]
+                                      for r in report.rejected[:3]]
+
+
+def _stage(cell: dict, lines: list[str]) -> None:
+    """Append accepted entries to this cell's staged batch file."""
+    slug = cell["topic"].lower().replace(" ", "-")
+    fmt = "short" if cell["format"] == "SHORT" else "longform"
+    path = (ROOT / "banks" / "gen" /
+            f"{cell['group']}-{cell['language']}-{fmt}-{slug}.jsonl")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        for line in lines:
+            fh.write(line + "\n")
 
 
 # ---------------------------------------------------------------------------
