@@ -149,6 +149,11 @@ _TRANSIENT_LLM = re.compile(
 _TIMEOUT = re.compile(r"(timed? ?out|timeout|deadline exceeded)", re.I)
 
 
+# What to wait when a 429 does not say. Long enough to clear a per-minute
+# window, short enough not to waste a daily quota that has just reset.
+UNKNOWN_RETRY_AFTER = 90.0
+
+
 def _is_transient_llm(message: str, *, retry_timeouts: bool = True) -> bool:
     """True if waiting could plausibly fix it.
 
@@ -390,11 +395,25 @@ class GroqProvider:
         if limited and len(limited) == len(candidates):
             # EVERY model is throttled. Raise with the SHORTEST reported wait
             # so the retry layer sleeps exactly that long instead of guessing.
-            soonest = min(limited, key=lambda e: e.retry_after)
+            #
+            # A 429 does not always say when it resets, and the parsed value
+            # is then 0 - the one number that cannot be true, since a limit
+            # that had reset would not have refused the call. Reporting it
+            # as "resets in 0.0s" made every caller's wait meaningless: an
+            # unattended filler on the server logged forty consecutive waits
+            # and wrote nothing. Say unknown, and hand back a wait long
+            # enough to clear a per-minute window.
+            known = [e for e in limited if e.retry_after > 0]
+            if known:
+                soonest = min(known, key=lambda e: e.retry_after)
+                raise RateLimited(
+                    f"every groq model is rate-limited; the soonest resets "
+                    f"in {soonest.retry_after:.1f}s",
+                    retry_after=soonest.retry_after)
             raise RateLimited(
-                f"every groq model is rate-limited; the soonest resets in "
-                f"{soonest.retry_after:.1f}s",
-                retry_after=soonest.retry_after)
+                "every groq model is rate-limited and none reported a reset "
+                "time; assuming a per-minute window",
+                retry_after=UNKNOWN_RETRY_AFTER)
         raise last or LLMError("no usable groq model")
 
     def _call(self, model: str, prompt: str, system: str, json_mode: bool,
