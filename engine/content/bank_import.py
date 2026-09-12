@@ -138,6 +138,13 @@ _RUNTIME_TOOL = re.compile(r"^(groq|gemini|ollama|template|openai|google)\s*:",
                            re.I)
 
 
+# A refrain that grades the viewer. Kept tight on purpose - these are the
+# words that actually appeared, not every way of being encouraging.
+_SELF_VERDICT = re.compile(
+    r"सही|बिल्कुल|शाबाश"
+    r"|\b(correct|well done|that'?s right|you got it|good job)\b", re.I)
+
+
 def _gate(entry: BankEntry, existing: list[BankEntry], *, expect_group: str,
           require_review: bool, report: ImportReport) -> list[str]:
     """Run all the gates. Returns the fatal reasons, or [] to store."""
@@ -205,6 +212,59 @@ def _gate(entry: BankEntry, existing: list[BankEntry], *, expect_group: str,
             report.warnings.append(
                 f"warn   {entry.entry_id} [story:{finding.check}] "
                 f"{finding.detail}")
+
+    # ---- 2b. a refrain has to BE a refrain, whatever the shape ----
+    #
+    # Gate 2 above runs for narrative and poem only, so 540 of 893 banked
+    # entries - every drill, explainer and procedure - get no craft check
+    # at all. That is where 119 of the 122 entries the owner threw out as
+    # "not engaging" were sitting: 66 explainers, 24 procedures, 29 drills,
+    # 3 narratives. The autofill found the hole and filled it.
+    #
+    # Most of what separates those 122 from the 893 kept entries cannot be
+    # turned into a gate, and the honest reason is that provenance is
+    # perfectly collinear with the verdict - no Groq entry was kept and no
+    # Claude or Gemini entry was rejected, so a measured "difference"
+    # identifies the model as easily as the flaw. Curly apostrophes
+    # separate the two sets as well as any craft feature does.
+    #
+    # THIS check is different, and that is why it is the only one here: it
+    # is an entry contradicting ITSELF. A refrain named in the refrain field
+    # and then spoken once is not a refrain, no matter who wrote it. 11 of
+    # the 32 rejected entries with a declared refrain did exactly that,
+    # against 0 of the 721 kept ones - and `verbatim_refrain` already
+    # BLOCKS this for narrative and poem. Drills were simply never asked.
+    #
+    # Only fires when the entry declares one, so it cannot reject a shape
+    # that legitimately has no refrain.
+    if entry.refrain and entry.narrations():
+        spoken = " ".join(entry.narrations()).count(entry.refrain)
+        if spoken < 2:
+            fatal.append(
+                f"REJECT {entry.entry_id} [refrain_not_repeated] the "
+                f"refrain {entry.refrain!r} is declared but appears "
+                f"{spoken} time(s) in the narration - repeat it WORD FOR "
+                f"WORD in at least two scenes, or clear the field")
+
+    # ---- 2c. do not tell the child they were right ----------- advisory
+    #
+    # Every one of the 10 rejected Hindi drills had a refrain containing
+    # सही or बिल्कुल - "म म म, सही शब्द!" - against 0 of the 721 kept
+    # entries. In call-and-response the refrain is the line the child says
+    # WITH the narrator, so a refrain that asserts the answer was correct
+    # congratulates them before they have spoken.
+    #
+    # ADVISORY, not blocking, because a celebration line after the child
+    # answers is a legitimate choice and only its use as the repeated
+    # refrain is the mistake. The separation is perfect but the judgement
+    # is not, and a blocking check would decide it for the owner.
+    if entry.group == "kids" and entry.refrain and _SELF_VERDICT.search(
+            entry.refrain):
+        report.warnings.append(
+            f"warn   {entry.entry_id} [refrain_grades_the_child] the "
+            f"refrain {entry.refrain!r} tells the viewer they were right. "
+            f"The refrain is the line the child says along with the "
+            f"narrator, so it lands before they have answered")
 
     # ---- 3. variety, against the catalogue ----
     for issue in variety.check_new(entry, existing):

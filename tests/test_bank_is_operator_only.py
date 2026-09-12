@@ -180,3 +180,112 @@ class TestLiveGenerationNeverBanks:
         assert "--extra-stage" not in " ".join(lines), (
             "the nightly rebuild must not import a staging directory "
             "outside git - that was how autofilled entries reached the bank")
+
+
+# ==========================================================================
+class TestARefrainHasToBeARefrain:
+    """Gate 2 (story shape) runs for narrative and poem only, so every
+    drill, explainer and procedure - 540 of 893 banked entries - got no
+    craft check at all. That is where 119 of the 122 entries the owner
+    rejected as "not engaging" were sitting.
+
+    Only one measured difference became a gate, and deliberately so. Most of
+    them cannot: provenance is perfectly collinear with the verdict (no Groq
+    entry was kept, no Claude or Gemini entry was rejected), so a measured
+    difference identifies the model as readily as the flaw - curly
+    apostrophes separate the two sets as well as any craft feature.
+
+    A refrain declared and then spoken once is different in kind. The entry
+    contradicts its own field. Measured: 11 of the 32 rejected entries with
+    a declared refrain, against 0 of the 721 kept ones.
+    """
+
+    def _drill(self, refrain: str, lines: list[str]) -> dict:
+        return {
+            "group": "kids", "language": "en",
+            "topic": "kids alphabet learning", "shape": "drill",
+            "video_format": "SHORT", "made_for_kids": True,
+            "title": "Say the letter B with me", "refrain": refrain,
+            "scenes": [{"beat": "call", "narration": n,
+                        "caption": "बी से बॉल", "image_brief": "a red ball"}
+                       for n in lines],
+        }
+
+    def test_a_refrain_spoken_once_is_refused(self, db, tmp_path):
+        path = _write(tmp_path, self._drill("B says buh", [
+            "B says buh. Say it with me.",
+            "B is for ball, round and red.",
+            "B is for bus, big and yellow."]))
+        report = bank_import.import_file(path, db, expect_group="kids")
+        assert report.stored == 0
+        assert any("[refrain_not_repeated]" in r for r in report.rejected), \
+            report.rejected
+
+    def test_a_refrain_spoken_twice_lands(self, db, tmp_path):
+        path = _write(tmp_path, self._drill("B says buh", [
+            "B says buh. Say it with me.",
+            "B is for ball, round and red.",
+            "B says buh. Say it again."]))
+        report = bank_import.import_file(path, db, expect_group="kids")
+        assert report.stored == 1, report.rejected
+
+    def test_a_shape_with_no_refrain_is_not_asked_for_one(self, db,
+                                                          tmp_path):
+        """The check must only fire on a DECLARED refrain, or it would
+        reject every explainer and procedure in the bank."""
+        entry = self._drill("", [
+            "B is for ball, round and red.",
+            "B is for bus, big and yellow.",
+            "B is for bird, small and blue."])
+        entry["shape"] = "explainer"
+        entry["group"] = "tech"
+        entry["topic"] = "windows tips and tricks"
+        entry["made_for_kids"] = False
+        entry["language"] = "en"
+        for scene in entry["scenes"]:
+            scene["caption"] = scene["narration"][:20]
+        path = _write(tmp_path, entry)
+        report = bank_import.import_file(path, db, expect_group="tech")
+        assert not any("refrain_not_repeated" in r for r in report.rejected), \
+            report.rejected
+
+    def test_grading_the_child_warns_but_does_not_block(self, db, tmp_path):
+        """Every one of the 10 rejected Hindi drills had सही or बिल्कुल in
+        its refrain. Advisory, because a celebration line after the answer
+        is a legitimate choice - only using it AS the refrain is the
+        mistake, and that judgement is the owner's."""
+        path = _write(tmp_path, self._drill("Correct, that is B!", [
+            "Correct, that is B! Say it with me.",
+            "B is for ball, round and red.",
+            "Correct, that is B! Say it again."]))
+        report = bank_import.import_file(path, db, expect_group="kids")
+        assert report.stored == 1, report.rejected
+        assert any("[refrain_grades_the_child]" in w
+                   for w in report.warnings), report.warnings
+
+    def test_the_whole_kept_bank_passes_both_checks(self):
+        """The measurement that decides whether these checks are safe.
+
+        A check that rejects what the owner chose to keep is worse than no
+        check. Zero of 893 when this was written - and stated as zero
+        rather than a rate, because unlike a content property this one is
+        the gate's own behaviour on a fixed corpus.
+        """
+        from engine.content.bank import BankEntry
+        from engine.content.bank_import import _SELF_VERDICT
+
+        blocked = []
+        for path in sorted(Path("banks").glob("*.jsonl")):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                entry = BankEntry.from_dict(json.loads(line))
+                if not (entry.refrain and entry.narrations()):
+                    continue
+                if " ".join(entry.narrations()).count(entry.refrain) < 2:
+                    blocked.append((path.name, entry.entry_id,
+                                    entry.refrain[:40]))
+        assert not blocked, (
+            f"{len(blocked)} entries the owner kept would now be refused: "
+            f"{blocked[:5]}")
+        assert _SELF_VERDICT.search("सही") is not None, "pattern alive"
