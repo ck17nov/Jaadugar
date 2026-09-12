@@ -123,12 +123,17 @@ _BENIGN_DIE_NOUN = re.compile(
 _BENIGN_DEAD = re.compile(
     # "dead battery", "dead end", "dead silence"
     r"\bdead\s+(battery|batteries|end|ends|line|lines|weight|leaf|leaves|"
+    r"still|centre|center|straight|on|ahead|level|"
     r"air|calm|silence|pixel|zone|slow|stop)\b"
     # "the battery is dead", "his phone went dead"
     rf"|\b({_INANIMATE})\b[^.!?]{{0,24}}?"
     r"\b(is|are|was|were|went|goes|going)\s+dead\b"
     # "the flame dies", "the lantern died", "the music dies away"
-    rf"|\b({_INANIMATE})\b[^.!?]{{0,24}}?\b(dies|die|died)\b",
+    rf"|\b({_INANIMATE})\b[^.!?]{{0,24}}?\b(dies|die|died)\b"
+    # "stopped the spinning disc DEAD" - an intensifier, not a death.
+    # A yo-yo story was refused for it. "dead weight" was already here;
+    # the trailing adverb was not.
+    r"|\b(stop\w*|halt\w*|froze|frozen|stood|jamm\w*)\b[^.!?]{0,30}?\bdead\b",
     re.I)
 
 
@@ -147,8 +152,43 @@ _BENIGN_STRONG = re.compile(
     r"push|pushes|poking|poke)\b"
     r"|\bshoots?\s+(of|from)\s+(the\s+)?(seed|soil|earth|bulb|stem|plant)\b"
     # a table utensil
-    r"|\b(butter|plastic|toy|wooden|blunt|palette|putty)\s+knife\b",
+    r"|\b(butter|plastic|toy|wooden|blunt|palette|putty)\s+knife\b"
+    # PHOTOGRAPHY. "Shoot with Kavya as she tries to twist the
+    # rotating lens" - a toy-camera story, refused as violence. The
+    # window is deliberately local rather than whole-text: a camera
+    # mentioned three scenes away must not licence a real shooting.
+    r"|\bshoot\w*\b[^.!?]{0,60}?\b(camera|lens|photo\w*|picture|film|snap|portrait|selfie)\b"
+    r"|\b(camera|lens|photo\w*|picture|film|snap|portrait|selfie)\b[^.!?]{0,60}?\bshoot\w*\b",
     re.I)
+
+
+# If a weapon is anywhere in the text, no innocent reading of "shoot" is
+# on offer. The photography exemption above needs a 60-character window to
+# reach the word it depends on ("Shoot with Kavya as she tries to twist the
+# rotating lens" - 46 characters), and a window that wide would otherwise
+# let "shoot him with the pistol while the camera films" through.
+_WEAPON = re.compile(
+    r"""\b(gun|guns|rifle|pistol|revolver|bullet|bullets|ammo|"""
+    r"""weapon|weapons|arrow|arrows|crossbow|blade|dagger|sword|"""
+    r"""grenade|bomb|bombs|trigger|holster|sniper)\b""", re.I)
+
+
+# Weapons with no innocent reading, checked on their own because the
+# violence vocabulary never had them: `gun`, `shoot`, `knife` and `blood`
+# were in it, and `rifle`, `pistol` and `grenade` were not - so "she aimed
+# the rifle" passed a KIDS safety gate silently. Found while writing a
+# control for something else, and confirmed pre-existing by stashing.
+#
+# This list is the unambiguous subset only, and the exclusions are the
+# reason it is safe. Measured across 893 banked entries plus a 145-entry
+# batch: these words appear 0 times, while `arrow` appears as a direction
+# arrow, `blade` as a blade of grass, and `bullet` as a bullet point - 59
+# entries between them, every one innocent. Those three stay OUT of this
+# check and remain only in the _WEAPON veto above, where a false match
+# costs nothing but normal strictness.
+_WEAPON_DECISIVE = re.compile(
+    r"\b(rifles?|pistols?|revolvers?|shotguns?|firearms?|"
+    r"grenades?|snipers?|daggers?|machetes?)\b", re.I)
 
 
 def violence_in(text: str) -> bool:
@@ -157,8 +197,11 @@ def violence_in(text: str) -> bool:
     A function rather than a cleverer regex because `re` has no
     variable-width lookbehind, and "battery ... is dead" needs one.
     """
-    benign_strong = [(m.start(), m.end())
-                     for m in _BENIGN_STRONG.finditer(text)]
+    benign_strong = ([] if _WEAPON.search(text)
+                     else [(m.start(), m.end())
+                           for m in _BENIGN_STRONG.finditer(text)])
+    if _WEAPON_DECISIVE.search(text):
+        return True                     # no innocent reading exists
     for match in re.finditer(_VIOLENCE_STRONG, text, re.I):
         if not any(lo <= match.start() and match.end() <= hi
                    for lo, hi in benign_strong):

@@ -174,6 +174,31 @@ _OPENING_QUESTION = re.compile(
 # simply pans. The test is: if the turn can be restated as "they looked
 # somewhere else", it is not a turn, and a five-year-old cannot copy it
 # tomorrow.
+# THE ESCAPE HATCH THE TURN CHECK NEVER HAD.
+#
+# The obstacle check next door is `_BODY_ONLY and not _COMPLICATION` - it
+# learned that a blocking check needs a way out. The turn check was a bare
+# match, so a sentence that names a perception FIRST and the invention
+# second was refused for the perception:
+#
+#   "Tara noticed the grooved feet on each figure, interlocking them
+#    into one tall tower."
+#   "Finn noticed the extra loop at the axle, inventing a loose spool."
+#
+# Both DO what the spec asks - the child combines two things and says so -
+# and four entries in one batch were rejected for the leading verb. A bare
+# "Tara noticed the dots" still fails, because there is no action in it.
+_INVENTION = re.compile(
+    # CONSTRUCTING, COMBINING OR EXCHANGING - the four things the spec
+    # asks a turn to be. Kept tight on purpose: an earlier draft had
+    # `us\w*`, `mak\w*` and `turn\w*`, which match "usually",
+    # "making do" and "turned away" - wide enough that almost any
+    # sentence would escape a BLOCKING check.
+    r"\b(interlock|combin|invent|twist|trad|swap|tie|tied|tying|"
+    r"stack|thread|wedg|hook|clip|join|link|attach|fold|slot|"
+    r"balanc|prop|wrap|weav|knot|build|built|rebuil)\w*\b", re.I)
+
+
 _PERCEPTION_TURN = re.compile(
     r"^\s*(then\s+|so\s+|at last\s+|suddenly\s+)?"
     r"[\w']+\s+(just\s+|then\s+|finally\s+)?"
@@ -219,6 +244,10 @@ _COMPLICATION = re.compile(
     r"too\b.*\b(also|as well)|now (also|both)|"
     # 1. Somebody else takes or keeps it.
     r"took|take|takes|taking|taken|claim\w*|grabb\w*|snatch\w*|kept|keeps|"
+    # A mechanism SEIZING is a complication: "the spring wound too
+    # tight, locking the front wheels" was read as a body feeling
+    # because of "tight", with nothing here matching "locking".
+    r"lock\w*|seiz\w*|jamm\w*|stuck fast|wedg\w*|"
     r"wants it too|wants the same|"
     # 2. The thing breaks, empties, ends - or simply comes down.
     #
@@ -551,7 +580,8 @@ def evaluate(narrations: list[str], *, words_per_scene_floor: int = 12,
     # blocks now - which is the point: the next weak batch is rejected
     # before anyone renders it.
     turn = _turn_scene(narrations, beats)
-    perception = bool(turn and _PERCEPTION_TURN.match(turn.strip()))
+    perception = bool(turn and _PERCEPTION_TURN.match(turn.strip())
+                      and not _INVENTION.search(turn))
     report.findings.append(Finding(
         "turn_is_an_idea", not perception, True,
         (f"the turn is a perception, not an idea: {turn.strip()[:60]!r} - "
