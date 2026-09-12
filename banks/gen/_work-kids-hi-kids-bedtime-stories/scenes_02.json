@@ -1,0 +1,107 @@
+[
+  {
+    "beat": "attempt",
+    "narration": "पारो घुटनों पर बैठ जाती है। सिर की छाया नीचे उतर जाती है।",
+    "caption": "Paro drops onto her knees. The shadow of her head slides down.",
+    "image_brief": "Paro kneeling low on the bed with her arms raised above her, her head below the lamp's light line, the wall ahead brightly washed.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "attempt",
+    "narration": "खरगोश लौट आया। बड़ा, मगर फिर भी धुँधला।",
+    "caption": "The rabbit came back. Big, but still blurred.",
+    "image_brief": "The wall holding a large soft-edged rabbit shadow whose ears can only just be guessed at.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "attempt",
+    "narration": "पारो हथेली से लैंप को घेरती है। रोशनी उँगलियों से छनकर निकलती है।",
+    "caption": "Paro cups a palm around the lamp. The light leaks out between her fingers.",
+    "image_brief": "Paro's cupped palm curved around the glowing lamp, bright light slipping through the gaps between her fingers.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "attempt",
+    "narration": "एक हाथ लैंप पर लगा, तो कान बनाने के लिए हाथ ही नहीं बचे।",
+    "caption": "With one hand on the lamp, no hands are left to build the ears.",
+    "image_brief": "One of Paro's hands resting on the lamp while the other waves alone in the air, an unfinished shape on the wall beyond.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "attempt",
+    "narration": "देर तक हाथ ऊपर रखने से उसके हाथ दुखने लगे।",
+    "caption": "From holding her hands up so long, her arms began to ache.",
+    "image_brief": "Paro's arms lowered into her lap, the lamp glowing beside her knee, the cream wall in front of her empty.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "attempt",
+    "narration": "बड़ा या साफ़, दोनों एक साथ नहीं। यही पहेली है।",
+    "caption": "Big or sharp, never both at once. That is the puzzle.",
+    "image_brief": "Paro sitting cross-legged facing the bare wall with her chin propped on a fist, lamp light coming from her side.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "obstacle",
+    "narration": "उसी पल दूसरे बिस्तर पर छोटी बहन जाग जाती है।",
+    "caption": "At that moment her little sister wakes up on the other bed.",
+    "image_brief": "The second low bed across the room, a younger girl with tousled hair sitting up under a thin blanket, dim light on her face.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "obstacle",
+    "narration": "छोटी बहन उठकर बैठ जाती है। उसे भी खरगोश चाहिए।",
+    "caption": "The little sister sits up. She wants a rabbit too.",
+    "image_brief": "The younger sister rubbing one eye and turning toward Paro's lit wall, her own wall dark behind her head.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "obstacle",
+    "narration": "छोटी बोली, खरगोश मेरी दीवार पर भी चाहिए।",
+    "caption": "The little one said, I want a rabbit on my wall as well.",
+    "image_brief": "The younger sister pointing up at the bare wall above her own bed, the lamp's light reaching only halfway across the floor.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "obstacle",
+    "narration": "अब दो बहनें हैं, दो दीवारें हैं, और लैंप सिर्फ़ एक।",
+    "caption": "Now there are two sisters, two walls, and only one lamp.",
+    "image_brief": "Both low beds in one frame with a bare wall behind each, and the single small lamp on the floor between them.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "obstacle",
+    "narration": "पारो लैंप छोटी की तरफ़ घुमाती है। बारी बारी, यही तय होता है।",
+    "caption": "Paro turns the lamp toward her sister. Turn by turn, that is the deal.",
+    "image_brief": "Paro leaning over to swivel the lamp's head toward her sister's side of the room, both girls watching the light move.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "obstacle",
+    "narration": "पर तार छोटा है। करीब चार कदम, उससे आगे नहीं।",
+    "caption": "But the wire is short. About four steps, and no further.",
+    "image_brief": "The lamp's wire pulled straight and taut across the floor to a low socket, with no slack left in it.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "obstacle",
+    "narration": "लैंप एक ही दीवार तक पहुँचता है। दोनों तक नहीं।",
+    "caption": "The lamp reaches one wall only. Not both of them.",
+    "image_brief": "The lamp sitting at the far end of its stretched wire, its glow landing on one wall while the opposite wall stays dark.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "obstacle",
+    "narration": "छोटी की दीवार पर खरगोश आया। पारो की दीवार अँधेरी हो गई।",
+    "caption": "A rabbit arrived on the little one's wall. Paro's wall went dark.",
+    "image_brief": "The sister's wall carrying a rabbit shadow while Paro's wall on the other side of the room lies in darkness.",
+    "on_screen_text": ""
+  },
+  {
+    "beat": "obstacle",
+    "narration": "पारो ने ताली बजाकर कहा, दो ताली, एक खरगोश! दीवार अँधेरी ही रही।",
+    "caption": "Paro clapped and said, two claps, one rabbit! Her wall stayed dark.",
+    "image_brief": "Paro's hands caught mid-clap in the unlit half of the room, her blank wall behind them in shadow.",
+    "on_screen_text": ""
+  }
+]
