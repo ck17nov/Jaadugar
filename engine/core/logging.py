@@ -14,7 +14,27 @@ _SECRET_KEYS = re.compile(
     r"(api[_-]?key|token|secret|password|client[_-]?secret|refresh[_-]?token|authorization)",
     re.I,
 )
-_LONG_KEYISH = re.compile(r"\b(?:AIza|gsk_|sk-|ya29\.)[A-Za-z0-9_\-\.]{8,}")
+# Credential SHAPES, for when a secret arrives as a bare string rather than
+# under a telltale key name. `_SECRET_KEYS` above only helps when the dict
+# key is named - `{"refresh_token": ...}` is caught, `f"got {token}"` is not.
+#
+# The list used to be AIza / gsk_ / sk- / ya29. and it missed the most
+# valuable string in the project: a Google OAuth REFRESH token starts `1//`,
+# and this box's is 103 characters carrying youtube.upload scope. Anything
+# logging it - a traceback, a debug line, an httpx error body - wrote it to
+# the journal in full, and a refresh token does not expire on its own.
+#
+# `1//` needs no \b: it starts with a digit but `\b` before `1` only matches
+# after a non-word character, which a line start or a space both are, while
+# `="1//..."` would not match. Anchored on the literal instead.
+_LONG_KEYISH = re.compile(
+    r"(?:AIza|gsk_|sk-|ya29\.|GOCSPX-)[A-Za-z0-9_\-\.]{8,}"
+    # Google OAuth refresh token.
+    r"|1//[A-Za-z0-9_\-]{20,}"
+    # A JWT: three base64url segments. Covers Bearer id/access tokens.
+    r"|eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"
+    # A bare 32+ hex digest, which is the shape of most other API keys.
+    r"|\b[0-9a-fA-F]{32,}\b")
 
 _HANDLER_READY = False
 _JSONL_PATH: Path | None = None

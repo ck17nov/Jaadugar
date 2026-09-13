@@ -10,14 +10,36 @@ __pycache__/
 # owns: the Oracle SSH key and the Google OAuth client secrets. They live
 # INSIDE the repo so that moving or clearing Downloads cannot break a
 # deploy, and they are ignored here so that convenience never turns into a
-# published private key. Three patterns rather than one, because a single
-# directory rule is one `git add -f` away from being bypassed.
+# published private key. THIS REPOSITORY IS PUBLIC.
+#
+# The directory rule is what protects the files in .secrets/ - git does not
+# descend into an ignored directory, so the patterns below are never even
+# consulted for them. (An earlier comment here claimed three patterns made
+# it harder to bypass with `git add -f`. That was wrong: -f overrides every
+# matching rule, so pattern count buys nothing against it.)
+#
+# The patterns below exist for the mistake that is actually likely: a key
+# saved somewhere ELSE in the tree, in a hurry, under whatever name the
+# download gave it. Names matter here - an audit found that `oracle_private`,
+# `deploy_id` and `credentials.yaml` were all stageable.
 .secrets/
 *.key
 !*.key.pub
 *.pem
+*.ppk
+*_rsa
+*_dsa
+*_ecdsa
+*_ed25519
+id_rsa*
+id_ed25519*
+*private*key*
+credentials*.json
+credentials*.yaml
+credentials*.yml
+*refresh_token*
 .env
-token*.json
+*token*.json
 client_secret*.json
 
 # ---- Runtime output ----
