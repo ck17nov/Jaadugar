@@ -44,6 +44,17 @@ client_secret*.json
 
 # ---- Runtime output ----
 workspace/
+# Pre-rebuild snapshots of the live bank database. bank_rebuild.py and
+# bank_reset.py write one before clearing, and NOTHING reads them back -
+# they are a manual recovery net, used once to recover 110 entries.
+#
+# 45 of them had been committed, 64 MB, and they were the six largest
+# tracked files in the repo. They are superseded by construction: every
+# script is in banks/gen, and the only thing an archive holds that no JSONL
+# does - used_at / used_job_id - is live in the database it was copied
+# from. An untracked local snapshot is worth keeping; a committed history
+# of them is not.
+banks/archive/
 *.db
 *.db-journal
 
