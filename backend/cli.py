@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -239,12 +240,68 @@ def auth_import(refresh_token: str = typer.Argument(...)) -> None:
 
 
 @auth_app.command("channels")
-def auth_channels() -> None:
-    """List the authorised account's channels."""
+def auth_channels(
+    live: bool = typer.Option(False, "--live",
+                              help="ask YouTube what the default token can "
+                                   "see, instead of listing what is stored"),
+) -> None:
+    """List every channel connected for publishing, and when each expires.
+
+    This used to call `YouTubeAuth.channels()`, which answers a different
+    question: what the DEFAULT token can see. A YouTube token is bound to
+    one channel, so that always printed exactly one line - and with three
+    channels connected it read as though two were missing. The real list
+    lives in the channel store, one refresh token per channel.
+
+    The expiry column is the thing worth showing. While the Google OAuth
+    consent screen sits in "Testing" publishing status, a refresh token
+    expires 7 days after it was GRANTED - not 7 days after last use - so a
+    working connection gives no warning before it stops working. Publishing
+    the app (which is unrelated to the Play Store) removes the limit.
+    """
     from engine.youtube.auth import YouTubeAuth
-    for ch in YouTubeAuth(load_config()).channels():
-        console.print(f"{ch['channel_id']}  {ch['title']}  "
-                      f"{ch['subscribers']:,} subs")
+
+    auth = YouTubeAuth(load_config())
+    if live:
+        for ch in auth.channels():
+            console.print(f"{ch['channel_id']}  {ch['title']}  "
+                          f"{ch['subscribers']:,} subs")
+        return
+
+    store = auth.channels_store
+    rows = store.all()
+    if not rows:
+        console.print("[yellow]no channels connected[/yellow]")
+        return
+    default_id = store.default_id()
+
+    table = Table(title="Connected channels")
+    for col in ("", "Channel", "Niches", "Granted", "Testing-mode expiry"):
+        table.add_column(col)
+    now = time.time()
+    for ch in rows:
+        age_days = (now - ch.added_at) / 86400.0 if ch.added_at else None
+        if age_days is None:
+            granted, expiry = "unknown", "[dim]unknown[/dim]"
+        else:
+            granted = f"{age_days:.1f}d ago"
+            left = 7.0 - age_days
+            if left < 0:
+                expiry = f"[red]expired {-left:.1f}d ago[/red]"
+            elif left < 2:
+                expiry = f"[red]{left:.1f}d left[/red]"
+            elif left < 4:
+                expiry = f"[yellow]{left:.1f}d left[/yellow]"
+            else:
+                expiry = f"{left:.1f}d left"
+        table.add_row("*" if ch.channel_id == default_id else "",
+                      ch.title or ch.channel_id,
+                      ", ".join(ch.niches or []) or "-",
+                      granted, expiry)
+    console.print(table)
+    console.print("[dim]* default. Expiry assumes the OAuth consent screen "
+                  "is still in Testing; publishing the app removes the 7-day "
+                  "limit and is unrelated to the Play Store.[/dim]")
 
 
 @auth_app.command("logout")
