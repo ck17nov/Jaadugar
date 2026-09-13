@@ -445,14 +445,56 @@ def reject(job_id: str = typer.Argument(...),
 @app.command()
 def upload(job: str = typer.Option(..., "--job"),
            publish_now: bool = typer.Option(False, "--now",
-                                            help="ignore the schedule")) -> None:
-    """Upload an existing READY job."""
-    from engine.core.models import VideoMetadata
+                                            help="ignore the schedule"),
+           force: bool = typer.Option(False, "--force",
+                                      help="publish even if the job was "
+                                           "rejected or is not READY")) -> None:
+    """Upload an existing READY job.
+
+    THE DOCSTRING USED TO BE THE ONLY THING ENFORCING "READY". This command
+    called `publish_now` directly, which is the same function the approval
+    flow uses AFTER stage_publish has run the quality and safety gates - so
+    `autotube upload --job <id>` would happily publish a job the quality
+    gate had REJECTED, or one still mid-render, straight to a public
+    channel. The gates were never bypassed by a bug; they were simply not
+    on this path.
+
+    Now the status and the stored quality verdict are both checked, and
+    --force exists for the operator who has looked and means it.
+    """
+    from engine.core.models import JobStatus, VideoMetadata
     pipe = _pipeline()
     video_job = pipe.db.get_job(job)
     if video_job is None:
         console.print(f"[red]unknown job {job}[/red]")
         raise typer.Exit(1)
+
+    publishable = (JobStatus.READY.value, JobStatus.AWAITING_APPROVAL.value,
+                   JobStatus.SCHEDULED.value)
+    status = str(getattr(video_job, "status", "") or "")
+    quality = dict(getattr(video_job, "quality", None) or {})
+    passed = quality.get("passed")
+    blockers = quality.get("blockers") or []
+
+    if not force:
+        if status not in publishable:
+            console.print(f"[red]job {job} is {status or 'unknown'}, not one "
+                          f"of {', '.join(publishable)}[/red]")
+            console.print("re-run with --force only if you have checked it "
+                          "yourself.")
+            raise typer.Exit(1)
+        if passed is False:
+            console.print(f"[red]job {job} FAILED the quality gate[/red]")
+            for b in blockers[:5]:
+                console.print(f"  - {b}")
+            console.print("re-run with --force only if you have checked it "
+                          "yourself.")
+            raise typer.Exit(1)
+    elif status not in publishable or passed is False:
+        console.print(f"[yellow]--force: publishing {job} anyway "
+                      f"(status={status or 'unknown'}, "
+                      f"quality_passed={passed})[/yellow]")
+
     request = AutomationRequest.from_dict(video_job.request or {})
     if publish_now:
         request.upload_time = ""

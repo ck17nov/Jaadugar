@@ -454,20 +454,43 @@ class VideoComposer:
             else:
                 runs.append([i])
 
+        # EVERY stream entering the chain gets the same timebase, and that
+        # is not cosmetic - it is the difference between a video and no
+        # video at all.
+        #
+        # A single-clip run used to enter xfade as a raw `[N:v]`, carrying
+        # the file's own timebase (1/15360 here), while a multi-shot run
+        # entered as a `concat` output, which normalises to AV_TIME_BASE
+        # (1/1000000). ffmpeg 6 tolerated the mismatch. ffmpeg 9 does not:
+        #
+        #   First input link main timebase (1/15360) do not match the
+        #   corresponding second input link xfade timebase (1/1000000)
+        #   Nothing was written into output file
+        #
+        # So renders passed on the server (ffmpeg 6.1.1) and failed on a
+        # laptop with ffmpeg 9 - which meant the failure was invisible
+        # exactly where it would be noticed, and waiting on the box for
+        # whenever apt next upgraded ffmpeg.
+        #
+        # `settb=AVTB` on every label makes the graph state its own
+        # contract instead of inheriting whatever the inputs happened to
+        # carry.
         parts: list[str] = []
         labels: list[str] = []
         spans: list[float] = []
         for n, run in enumerate(runs):
             spans.append(sum(lengths[i] for i in run))
             if len(run) == 1:
-                labels.append(f"[{run[0]}:v]")
+                label = f"[vs{n}]"
+                parts.append(f"[{run[0]}:v]settb=AVTB{label}")
+                labels.append(label)
                 continue
             # A hard cut. `concat` needs matching parameters, which is true
             # by construction: every clip came out of the same encoder
             # settings at the same resolution and frame rate.
             ins = "".join(f"[{i}:v]" for i in run)
             label = f"[vc{n}]"
-            parts.append(f"{ins}concat=n={len(run)}:v=1:a=0{label}")
+            parts.append(f"{ins}concat=n={len(run)}:v=1:a=0,settb=AVTB{label}")
             labels.append(label)
 
         if len(labels) == 1:

@@ -5,6 +5,17 @@ __pycache__/
 .pytest_cache/
 
 # ---- Secrets (never commit) ----
+#
+# .secrets/ holds the credentials this project needs to reach machines it
+# owns: the Oracle SSH key and the Google OAuth client secrets. They live
+# INSIDE the repo so that moving or clearing Downloads cannot break a
+# deploy, and they are ignored here so that convenience never turns into a
+# published private key. Three patterns rather than one, because a single
+# directory rule is one `git add -f` away from being bypassed.
+.secrets/
+*.key
+!*.key.pub
+*.pem
 .env
 token*.json
 client_secret*.json

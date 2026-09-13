@@ -1390,10 +1390,23 @@ class Pipeline:
         # device preferences and was read by nothing at all. Applied here so
         # the sentence is true. Restored afterwards because the gate is shared
         # across runs on this Pipeline instance.
+        # RAISE ONLY. The slider used to replace the configured minimum
+        # outright, in either direction, so a client posting
+        # min_quality_score=1 lowered the publish bar from the configured 80
+        # to 1 for that run - the one number in the system whose whole job
+        # is to be a floor was the easiest thing on the wire to move.
+        #
+        # A request may now demand MORE quality than the server requires and
+        # never less. Anything below the configured minimum is ignored, and
+        # said so, rather than silently honoured.
         requested_minimum = int(getattr(request, "min_quality_score", 0) or 0)
         previous_minimum = self.quality_gate.minimum
-        if requested_minimum:
+        if requested_minimum > previous_minimum:
             self.quality_gate.minimum = float(requested_minimum)
+        elif requested_minimum:
+            log_event("QUALITY", "ignoring a request to lower the bar",
+                      requested=requested_minimum,
+                      configured=previous_minimum, job=job.job_id)
         try:
             quality = self.quality_gate.evaluate(
                 video=video, metadata=meta, script=script, profile=profile,

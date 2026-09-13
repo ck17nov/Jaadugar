@@ -90,8 +90,25 @@ PROHIBITED_PATTERNS: list[tuple[str, str]] = [
 # not violent content. Dropping the words entirely would open the case that
 # actually matters ("the bird is dead"), so instead a weak-word match has to
 # survive the benign collocations below.
-_VIOLENCE_STRONG = (r"\b(kill|kills|killed|blood|bloody|death|dying|gun|guns|"
-                    r"knife|knives|weapon|weapons|war|murder|stab|shoot)\b")
+# INFLECTIONS, because the list was bare stems and nothing said so. It held
+# `stab` but not "stabbed", `shoot` but not "shooting", `murder` but not
+# "murdered" - so the most natural past tense of almost every word in a
+# violence check for CHILDREN'S content matched nothing at all. No exemption
+# was involved and no benign rule was at fault; the vocabulary simply had no
+# entry, and "the wolf stabbed him" passed.
+#
+# Spelled out rather than stemmed with \w*, because `stab\w*` matches
+# "stable" and `war\w*` matches "warm", "ward" and "warn" - a bedtime story
+# is full of all three.
+_VIOLENCE_STRONG = (r"\b(kill|kills|killed|killing|"
+                    r"blood|bloody|bleeding|"
+                    r"death|deaths|dying|"
+                    r"gun|guns|gunshot|gunshots|"
+                    r"knife|knives|weapon|weapons|war|wars|"
+                    r"murder|murders|murdered|murdering|"
+                    r"stab|stabs|stabbed|stabbing|"
+                    r"strangle|strangled|strangling|"
+                    r"shoot|shoots|shooting|shootings)\b")
 # "died" was missing from the original list entirely, so "the dog died" was
 # never flagged at all. It belongs among the WEAK words rather than the strong
 # ones, because a candle dies too.
@@ -146,19 +163,41 @@ _BENIGN_DEAD = re.compile(
 # as violence, and `shoot` is in the strong list, which is decisive on its
 # own - so there was no benign path for a plant at all.
 _BENIGN_STRONG = re.compile(
+    # NAMED GROUPS on purpose: only the span of the word that EARNED the
+    # exemption is exempt, never the whole match.
+    #
+    # The photography clause can span 60 characters, and the caller used to
+    # exempt every strong word inside that span. So one innocent camera
+    # reference cleared anything violent sitting beside it in the same
+    # sentence - "he was killed, then she took a photo" went quiet. The
+    # caller now reads m.span() of the specific token group.
+    #
     # a plant shoot
-    r"\b(green|new|young|tender|bamboo|first|tiny)\s+shoots?\b"
-    r"|\bshoots?\s+(sprout|sprouts|sprouting|appear|appears|up through|"
-    r"push|pushes|poking|poke)\b"
-    r"|\bshoots?\s+(of|from)\s+(the\s+)?(seed|soil|earth|bulb|stem|plant)\b"
+    r"\b(?:green|new|young|tender|bamboo|first|tiny)\s+(?P<tok1>shoots?)\b"
+    r"|\b(?P<tok2>shoots?)\s+(?:sprout|sprouts|sprouting|appear|appears|"
+    r"up through|push|pushes|poking|poke)\b"
+    r"|\b(?P<tok3>shoots?)\s+(?:of|from)\s+(?:the\s+)?"
+    r"(?:seed|soil|earth|bulb|stem|plant)\b"
     # a table utensil
-    r"|\b(butter|plastic|toy|wooden|blunt|palette|putty)\s+knife\b"
-    # PHOTOGRAPHY. "Shoot with Kavya as she tries to twist the
-    # rotating lens" - a toy-camera story, refused as violence. The
-    # window is deliberately local rather than whole-text: a camera
-    # mentioned three scenes away must not licence a real shooting.
-    r"|\bshoot\w*\b[^.!?]{0,60}?\b(camera|lens|photo\w*|picture|film|snap|portrait|selfie)\b"
-    r"|\b(camera|lens|photo\w*|picture|film|snap|portrait|selfie)\b[^.!?]{0,60}?\bshoot\w*\b",
+    r"|\b(?:butter|plastic|toy|wooden|blunt|palette|putty)\s+(?P<tok4>knife)\b"
+    # PHOTOGRAPHY. A toy-camera story said "Shoot with Kavya as she tries
+    # to twist the rotating lens". The window is local, never whole-text.
+    r"|\b(?P<tok5>shoot\w*)\b[^.!?]{0,60}?"
+    r"\b(?:camera|lens|photo\w*|picture|film|snap|portrait|selfie)\b"
+    r"|\b(?:camera|lens|photo\w*|picture|film|snap|portrait|selfie)\b"
+    r"[^.!?]{0,60}?\b(?P<tok6>shoot\w*)\b",
+    re.I)
+
+_TOK_GROUPS = ("tok1", "tok2", "tok3", "tok4", "tok5", "tok6")
+
+# A PERSON OR ANIMAL AS THE OBJECT. No camera nearby makes this
+# photography, so the exemption is withdrawn for the whole text rather than
+# argued with word by word.
+_SHOOT_A_PERSON = re.compile(
+    r"\bshoot\w*\s+(?:at\s+)?(?:him|her|them|me|us|you|"
+    r"the\s+(?:boy|girl|man|woman|child|kid|baby|dog|cat|bird|deer|horse)|"
+    r"someone|somebody|anyone|people|"
+    r"a\s+(?:person|man|woman|child|boy|girl|dog|cat|bird))\b",
     re.I)
 
 
@@ -197,9 +236,14 @@ def violence_in(text: str) -> bool:
     A function rather than a cleverer regex because `re` has no
     variable-width lookbehind, and "battery ... is dead" needs one.
     """
-    benign_strong = ([] if _WEAPON.search(text)
-                     else [(m.start(), m.end())
-                           for m in _BENIGN_STRONG.finditer(text)])
+    if _WEAPON.search(text) or _SHOOT_A_PERSON.search(text):
+        benign_strong: list[tuple[int, int]] = []   # no innocent reading
+    else:
+        benign_strong = []
+        for m in _BENIGN_STRONG.finditer(text):
+            for name in _TOK_GROUPS:
+                if m.group(name) is not None:
+                    benign_strong.append(m.span(name))
     if _WEAPON_DECISIVE.search(text):
         return True                     # no innocent reading exists
     for match in re.finditer(_VIOLENCE_STRONG, text, re.I):

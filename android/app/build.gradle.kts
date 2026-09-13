@@ -15,8 +15,8 @@ android {
         // Samsung Galaxy M34 5G ships Android 13/14; 26 keeps older devices usable.
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Default backend address. Overridable at runtime in Settings.
