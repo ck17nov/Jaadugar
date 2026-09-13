@@ -247,6 +247,10 @@ SQLite, WAL mode, one file at `workspace/autotube.db` (path from
 
 ### Tables
 
+**16 project tables.** A live database reports 17 — the extra is
+`sqlite_sequence`, which SQLite creates itself for `AUTOINCREMENT` columns and
+is not ours.
+
 | Table | Holds |
 |---|---|
 | `bank_entries` | The live script bank: one row per script, with `used_at`/`used_job_id`. |
@@ -261,7 +265,7 @@ SQLite, WAL mode, one file at `workspace/autotube.db` (path from
 | `quota_usage` | Daily YouTube API unit ledger. |
 | `kids_confirmations` | Records an explicit Made-for-Kids confirmation. |
 | `assets` | Generated media registry. |
-| `schedules` | Scheduling rows. **Currently empty.** |
+| `schedules` | **Dead.** Created with an index, and not one SQL statement anywhere reads or writes it. Scheduling state lives in `automations` and in YouTube's own `publishAt`. |
 | `user_settings` | Key/value settings. |
 | `niche_profiles` | **Created and never read or written. Dead.** |
 | `service_configs` | **Created and never read or written. Dead.** |
