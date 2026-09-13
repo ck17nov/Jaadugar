@@ -11,6 +11,7 @@ driven from an Android app.
 | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) | Where everything lives, file by file |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Rebuilding the whole system from nothing |
 | [SCRIPT_BANK_GENERATION_PROMPT.md](SCRIPT_BANK_GENERATION_PROMPT.md) | The standard for authoring new scripts |
+| [AI_HANDOFF_PROMPT.md](AI_HANDOFF_PROMPT.md) | The message to send a new AI or developer so they read the above in order |
 
 > **"Oracle" here is Oracle Cloud compute — a free ARM VM. There is no Oracle
 > Database.** The datastore is SQLite. See PROJECT_OVERVIEW.md §2.
@@ -125,9 +126,14 @@ was connected to. If you change anything the app can see - groups, topics,
 languages, an endpoint - **it does not reach the phone until the server is
 updated.**
 
-Host, credentials and the update procedure are in `DEPLOYMENT.local.md` in
-this directory. It is gitignored, because it names a machine that holds a
-YouTube publishing token.
+**Deploying:** `python scripts/deploy.py --confirm`. It resolves the SSH key
+from `.secrets/oracle.key` and the host from `ORACLE_SSH_HOST` in `.env` —
+both gitignored, because the box holds a YouTube publishing token and this
+repository is public. Full procedure: [DEPLOYMENT.md](DEPLOYMENT.md).
+
+(There is also a `DEPLOYMENT.local.md` here on the owner's machine. It is
+gitignored and **a fresh clone will not have it**, so do not depend on it;
+DEPLOYMENT.md is the committed, complete version.)
 
 Full instructions: [docs/SETUP.md](docs/SETUP.md).
 Run it without your laptop: [deploy/oracle/README.md](deploy/oracle/README.md)
@@ -169,6 +175,12 @@ from a words-per-minute estimate.
 **edge-tts is the default because it returns per-word timings.** That is what
 makes the karaoke captions frame-accurate. Piper is the licence-clean offline
 fallback; its captions are estimated from word length and punctuation.
+
+Piper is implemented and sits in `tts.provider_order`, but it reports
+`available=False` unless a voice model has been downloaded, and no model is
+shipped — so in practice the chain is **edge-tts → gTTS**, which is what
+`/health` reports. Treat Piper as available-if-you-install-it, not as a live
+fallback.
 
 **Duration is enforced against measured audio, and the estimate self-corrects.**
 The niche profiles guess a words-per-second rate, and the guess ran ~20% fast: a
