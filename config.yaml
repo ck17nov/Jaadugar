@@ -27,6 +27,23 @@ youtube:
   # finishes - is PUBLIC on the channel. It overrides default_privacy when
   # on, so setting default_privacy alone is not enough in either direction.
   force_private: false
+  # Is the Google OAuth consent screen PUBLISHED (status "In production")?
+  #
+  # This is a statement about a setting in Google Cloud that no API here can
+  # read, so it has to be recorded by hand. It matters because a project
+  # whose consent screen is still in "Testing" gets refresh tokens that
+  # expire 7 days after they are GRANTED - not 7 days after last use - so a
+  # connection that works today stops without warning, and `auth channels`
+  # is the only place that would have said so.
+  #
+  # true here: published 2026-09-13, unverified, which is enough to remove
+  # the 7-day limit. Verification is a separate thing and is NOT required
+  # for a personal app - it only removes the "unverified app" warning and
+  # the 100-user cap.
+  #
+  # Set it back to false if the consent screen ever returns to Testing, or
+  # `auth channels` will under-report the risk.
+  oauth_published: true
   default_category_id: "27"      # 27 = Education, 28 = Science & Technology
   # Default daily API quota for a new Google Cloud project.
   daily_quota_units: 10000

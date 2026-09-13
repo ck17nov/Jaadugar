@@ -275,16 +275,27 @@ def auth_channels(
         return
     default_id = store.default_id()
 
+    # The countdown only applies while the consent screen is in "Testing".
+    # Once the app is published it is not just wrong, it is worse than no
+    # column at all: it would report "2 days left" every week for a token
+    # that is not expiring, and a warning that cries wolf gets ignored on
+    # the day it is real. No API here can read the publishing status, so it
+    # is recorded in config (youtube.oauth_published).
+    published = bool(load_config().get("youtube.oauth_published", False))
+
     table = Table(title="Connected channels")
-    for col in ("", "Channel", "Niches", "Granted", "Testing-mode expiry"):
+    for col in ("", "Channel", "Niches", "Granted",
+                "Refresh token" if published else "Testing-mode expiry"):
         table.add_column(col)
     now = time.time()
     for ch in rows:
         age_days = (now - ch.added_at) / 86400.0 if ch.added_at else None
-        if age_days is None:
-            granted, expiry = "unknown", "[dim]unknown[/dim]"
+        granted = "unknown" if age_days is None else f"{age_days:.1f}d ago"
+        if published:
+            expiry = "[green]no 7-day limit[/green]"
+        elif age_days is None:
+            expiry = "[dim]unknown[/dim]"
         else:
-            granted = f"{age_days:.1f}d ago"
             left = 7.0 - age_days
             if left < 0:
                 expiry = f"[red]expired {-left:.1f}d ago[/red]"
@@ -299,9 +310,16 @@ def auth_channels(
                       ", ".join(ch.niches or []) or "-",
                       granted, expiry)
     console.print(table)
-    console.print("[dim]* default. Expiry assumes the OAuth consent screen "
-                  "is still in Testing; publishing the app removes the 7-day "
-                  "limit and is unrelated to the Play Store.[/dim]")
+    if published:
+        console.print("[dim]* default. The OAuth consent screen is recorded "
+                      "as published, so refresh tokens do not expire on a "
+                      "7-day clock. If that ever changes, set "
+                      "youtube.oauth_published back to false.[/dim]")
+    else:
+        console.print("[dim]* default. The consent screen is recorded as "
+                      "still in Testing, where a refresh token expires 7 "
+                      "days after it was GRANTED. Publishing the app removes "
+                      "the limit and is unrelated to the Play Store.[/dim]")
 
 
 @auth_app.command("logout")
