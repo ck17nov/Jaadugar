@@ -92,7 +92,8 @@ privacy policy.
 Tokens and local data persist until the operator deletes them. Two ways:
 
 * **In Jaadugar** — Settings → *Clear stored credentials*, or the command
-  `autotube auth logout`, which deletes the stored refresh tokens.
+  `python -m backend.cli auth logout`, which deletes the stored refresh
+  tokens.
 * **In a Google Account** — <https://myaccount.google.com/permissions>,
   which revokes Jaadugar's access from Google's side and invalidates the
   tokens immediately, whether or not the local copy is removed.
@@ -120,9 +121,11 @@ Google's privacy policy, not with this application.
 
 ## 7. Security
 
-* Credentials are held in environment variables and in files outside the
-  source repository, never in the source code, and the repository is checked
-  for accidentally committed secrets on every commit.
+* Credentials are held in environment variables and in files that are
+  excluded from version control, never in the source code. Some of those
+  files sit inside the project directory for convenience; they are ignored
+  by git, and a pre-commit hook reads staged content for key material so a
+  credential cannot be published by a mistyped filename.
 * Log output is passed through a redactor that removes tokens, API keys and
   OAuth secrets before anything is written.
 * The server exposes only an HTTPS endpoint, and the application itself

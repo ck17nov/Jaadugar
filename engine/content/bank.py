@@ -229,7 +229,10 @@ class BankEntry:
         return [s.beat for s in self.scenes if s.narration.strip()]
 
     def diversity_tuple(self) -> tuple[str, ...]:
-        """The six axes that must not all coincide with another entry.
+        """The SEVEN axes that must not all coincide with another entry.
+
+        Said "six" until someone counted the return value: outcome_class,
+        arc_variant and turn_kind joined the original four.
 
         Word overlap cannot catch "the same story with different names";
         this can, because the axes describe the story rather than its wording.

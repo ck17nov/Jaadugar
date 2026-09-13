@@ -261,13 +261,31 @@ else:
 PYTUNE
 
 # --------------------------------------------------------------------------
-say "Installing the systemd service"
+say "Installing the systemd units"
 sed -e "s|@APP_DIR@|$APP_DIR|g" \
     -e "s|@APP_USER@|$APP_USER|g" \
     -e "s|@PORT@|$PORT|g" \
     "$APP_DIR/deploy/oracle/autotube.service" > /etc/systemd/system/autotube.service
+
+# THE NIGHTLY BANK REBUILD, which this script used to leave out.
+#
+# README.md described the timer as part of the deployment while setup.sh
+# installed only autotube.service, so a box built from this script silently
+# lacked it: the database never caught up with a pulled banks/gen, and the
+# only symptom was a bank that stayed whatever size it was on deploy day.
+# These two units carry no @PLACEHOLDER@ tokens, so they copy as-is.
+for unit in autotube-bankrebuild.service autotube-bankrebuild.timer; do
+  if [ -f "$APP_DIR/deploy/oracle/$unit" ]; then
+    cp "$APP_DIR/deploy/oracle/$unit" "/etc/systemd/system/$unit"
+  fi
+done
+
 systemctl daemon-reload
 systemctl enable --now autotube.service
+if [ -f /etc/systemd/system/autotube-bankrebuild.timer ]; then
+  systemctl enable --now autotube-bankrebuild.timer
+  echo "nightly bank rebuild timer enabled"
+fi
 sleep 4
 systemctl is-active --quiet autotube.service \
   && echo "autotube.service is running" \

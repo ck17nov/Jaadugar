@@ -1,7 +1,12 @@
 """Import a bank file: validate, gate, de-duplicate, store.
 
-Four gates, in the order that makes the cheapest one fail first:
+Five gates plus two sub-gates, in the order that makes the cheapest one
+fail first. This list said FOUR for a while after gate 0 and the two
+refrain checks were added, which is the sort of drift that makes a
+reader trust the code and not the comment:
 
+  0. PROVENANCE - the bank holds only what the owner supplied, so an
+     entry a model wrote on a schedule is refused at the door.
   1. SCHEMA - is this a well-formed entry at all (bank.validate).
   2. STORY SHAPE - for narrative content, does it contain a story
      (story_gate.evaluate, the same gate live generation must pass).

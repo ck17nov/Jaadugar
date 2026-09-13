@@ -1,12 +1,27 @@
 # Jaadugar
 
-Automated YouTube research, production and publishing, driven from an Android
-app on a Samsung Galaxy M34 5G.
+Automated YouTube research, production and publishing across three channels,
+driven from an Android app.
 
-The phone is the **control centre**, not the renderer: it collects settings,
-queues jobs, shows progress, and approves uploads. All heavy work (LLM, TTS,
-image generation, FFmpeg rendering) happens in a Python backend you run on your
-own machine or a free-tier box.
+### Handover documents — start here
+
+| Document | What it answers |
+|---|---|
+| **[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)** | What this is, the real architecture, the honest current state. **Read this first.** |
+| [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) | Where everything lives, file by file |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Rebuilding the whole system from nothing |
+| [SCRIPT_BANK_GENERATION_PROMPT.md](SCRIPT_BANK_GENERATION_PROMPT.md) | The standard for authoring new scripts |
+
+> **"Oracle" here is Oracle Cloud compute — a free ARM VM. There is no Oracle
+> Database.** The datastore is SQLite. See PROJECT_OVERVIEW.md §2.
+
+The phone is the **control centre and the scheduler**: it collects settings,
+fires automations on their schedule, shows progress and approves uploads. All
+heavy work (LLM, TTS, image generation, FFmpeg rendering) happens in a Python
+backend running on a free-tier Oracle Cloud ARM box — not on a laptop, and not
+on the phone. One consequence worth knowing up front: because the schedule
+lives in the app, a phone that is off or battery-optimised means that day's
+video is not made. PROJECT_OVERVIEW.md §5 is precise about this.
 
 **Target cost: Rs 0/month.** The binding limit is not money, it is YouTube's API
 quota — **4 uploads/day** on a default project, because a published
@@ -222,12 +237,14 @@ Verified on this machine (Windows 11, Python 3.12, FFmpeg 9.0, JDK 17, Android S
 
 | Area | State |
 |---|---|
-| Engine: research -> script -> voice -> visuals -> render -> quality | Run end-to-end on Shorts and on a 4-minute long-form video, every artifact verified |
-| Python test suite | **446 tests passing** |
+| Engine: research -> script -> voice -> visuals -> render -> quality | Run end-to-end on Shorts and on long-form, every artifact verified. Render path confirmed on **both** ffmpeg 6.1.1 (server) and 9.0 (laptop) |
+| Python test suite | **1,487 tests passing, 0 skipped** |
 | Static analysis | pyflakes clean (bar 3 documented import-probes) |
-| Backend API + CLI | 18 endpoints, `doctor` / `run` / `research` / `quota` exercised |
-| Android app | **Compiles and packages: 24.0 MB debug APK** (`com.autotube.ai.debug`, minSdk 26, targetSdk 35) |
-| YouTube upload + analytics | Implemented against the official APIs; needs your OAuth credentials to exercise for real |
+| Backend API + CLI | 27 endpoints, `doctor` / `run` / `research` / `quota` exercised |
+| Android app | **Compiles and packages: 24.7 MB debug APK** (`com.autotube.ai` - debug carries no applicationIdSuffix on purpose, so the OAuth client matches; minSdk 26, targetSdk 35, versionCode 2 / 0.2.0) |
+| YouTube upload + analytics | **Exercised for real: 9 videos published, 3 channels connected and verified.** OAuth consent screen published, so tokens no longer expire weekly |
+| Script bank | **1,193 entries** across 46 cells; delivery files and database agree exactly |
+| Deployment | Live on an Oracle Cloud free ARM box behind Caddy; `python scripts/deploy.py --confirm` |
 
 ### What an end-to-end run actually produced
 
