@@ -1777,13 +1777,35 @@ class TestPictureIntegrity:
         assert not gate._black_spans(v), "a dark-but-visible shot was flagged"
 
     @pytest.mark.slow
-    def test_a_healthy_master_is_below_the_peak_ceiling(self, gate):
-        """A real delivered video must pass the check it is subjected to."""
-        real = Path("workspace/jobs/20260901-023216_ocean-trenches_40cd6b/video.mp4")
-        if not real.exists():
-            pytest.skip("no rendered video available")
-        peak = gate._peak_dbfs(real)
-        assert peak is not None and peak < gate.PEAK_CEILING_DBFS, peak
+    def test_a_healthy_master_is_below_the_peak_ceiling(self, gate, tmp_path):
+        """The other half of the clipping check: normal audio must PASS.
+
+        This used to open a hard-coded path -
+        `workspace/jobs/20260901-023216_ocean-trenches_40cd6b/video.mp4` -
+        and skip when it was missing. That directory was a leftover from one
+        test run on one laptop, so the test has only ever executed there: it
+        skipped in CI, it skipped on any other machine, and it skipped the
+        moment the workspace was tidied. A test that skips everywhere is not
+        a check, and its sibling below (deliberately overloaded audio must
+        FAIL) was therefore the only half being enforced.
+
+        Now it builds its own master at a realistic level, so it runs
+        everywhere and means the same thing every time.
+        """
+        v = tmp_path / "healthy.mp4"
+        subprocess.run(
+            [ffmpeg_bin(), "-y", "-loglevel", "error",
+             "-f", "lavfi", "-i", "color=c=teal:s=320x240:d=2",
+             "-f", "lavfi", "-i", "sine=frequency=440:d=2",
+             # -12 dB: speech-like headroom, comfortably under the ceiling
+             # without being so quiet that passing proves nothing.
+             "-af", "volume=-12dB", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-shortest", str(v)], check=True, timeout=240)
+        peak = gate._peak_dbfs(v)
+        assert peak is not None, "peak level was not measurable"
+        assert peak < gate.PEAK_CEILING_DBFS, (
+            f"headroom-normal audio measured {peak:.2f} dBFS, at or above "
+            f"the {gate.PEAK_CEILING_DBFS:.1f} ceiling")
 
     @pytest.mark.slow
     def test_clipping_is_measured(self, gate, tmp_path):
