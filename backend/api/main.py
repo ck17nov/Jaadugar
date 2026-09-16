@@ -720,10 +720,15 @@ def retry_job(job_id: str) -> dict[str, Any]:
     had not really been reached) meant that day's video was simply lost, and
     the only route back was to fill in the Create screen again from memory.
 
-    A NEW job, deliberately, rather than resetting the old one. The failure
-    is a record worth keeping: it carries the error that explains it, and
-    rewriting the row would erase the evidence while a retry was still
-    failing for the same reason.
+    THE FAILED JOB IS REMOVED once the replacement is safely queued.
+    Reusing its id is not possible - the pipeline mints a job id per run -
+    and the first version kept the failure in the list, which read as though
+    the retry had not worked. The previous error is carried back in this
+    response instead, so the information survives where it is useful without
+    two rows for one intention.
+    
+    Order matters: queue FIRST, delete second. If the submit throws, the
+    failed job is still there to retry again.
 
     Safe to call repeatedly. A failed job released its bank claim on the way
     out (`_release_bank`), so a retry claims a script normally instead of
@@ -753,20 +758,45 @@ def retry_job(job_id: str) -> dict[str, Any]:
                         "to run again. Create the automation from the app "
                         "instead.")})
 
+    previous_status = job.status
+    previous_error = job.error or ""
+
     request = AutomationRequest.from_dict(payload)
     # A retry is a one-off run of the same brief. Carrying the original
     # frequency would re-arm a schedule the phone already owns, which would
     # then fire twice a day for ever.
     request.frequency = "once"
     WORKER.submit(request)
+
+    # Now that a replacement is queued, take the failed row and its media
+    # away. `keep_active=False` because the job is FAILED or REJECTED by the
+    # check above - this cannot reach a render in flight.
+    removed = []
+    try:
+        removed = db.delete_jobs(job_ids=[job_id], keep_active=False)
+        for gone in removed:
+            if gone.dir:
+                from engine.core.storage import reclaim_job
+                reclaim_job(Path(gone.dir), gone.job_id)
+    except Exception as exc:                                   # noqa: BLE001
+        # A replacement is already running; failing to tidy up is not worth
+        # a 500. Say so rather than reporting a clean removal.
+        log_event("RETRY", "queued the replacement but could not remove the "
+                            "failed job", job=job_id, error=str(exc)[:160])
+
     log_event("RETRY", "resubmitted a failed job", job=job_id,
-              niche=request.niche, previous_error=str(job.error or "")[:120])
+              niche=request.niche, previous_error=previous_error[:120],
+              removed=bool(removed))
     return {"queued": True, "retried_job_id": job_id,
             "niche": request.niche,
-            "previous_status": job.status,
-            "previous_error": job.error or "",
-            "note": ("A new job has been queued from the same request. The "
-                     "failed job is kept as a record.")}
+            "previous_status": previous_status,
+            "previous_error": previous_error,
+            "removed_failed_job": bool(removed),
+            "note": ("A new job has been queued from the same request, and "
+                     "the failed one has been removed."
+                     if removed else
+                     "A new job has been queued. The failed job could not be "
+                     "removed and is still listed.")}
 
 
 @app.post("/maintenance/reclaim", dependencies=[Depends(require_api_key)])

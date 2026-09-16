@@ -169,10 +169,11 @@ What actually happens, in order:
 11. **Record.** Job status, `published_videos` row, quota ledger.
     A failed job can be run again — `POST /jobs/{id}/retry`, the **Retry**
     button on a failed card in the app, or `python -m backend.cli retry
-    <job_id>`. It queues a **new** job from the same request and keeps the
-    failed one, because the failure carries the error that explains it. A
-    failed job released its bank claim on the way out, so a retry does not
-    burn a second script.
+    <job_id>`. It queues a **new** job from the same request and then removes
+    the failed one, in that order: if the submit throws, the failed job is
+    still there to retry again. The previous error comes back in the response
+    instead of living on in the list. A failed job released its bank claim on
+    the way out, so a retry does not burn a second script.
 12. **Learn.** `analytics` collects your own view/retention figures later and
     updates `strategy_weights`, which nudges future idea ranking.
 
@@ -250,6 +251,16 @@ SQLite, WAL mode, one file at `workspace/autotube.db` (path from
    automations and jobs for the UI. Room uses **destructive migration**, so an
    app upgrade empties it; `AutomationWorker` re-fetches from the backend
    rather than concluding an automation was deleted.
+
+**Nothing is lost by uninstalling the app.** Automations live on the server;
+the phone only caches them. Two things had to be fixed for that to be true in
+practice, both reported after a real reinstall: startup now kicks an
+immediate sync (the periodic one is every 15 minutes, so the Schedule tab
+opened empty and looked as though the automation had gone), and `SyncWorker`
+now **re-arms the WorkManager schedules** after restoring the rows. An
+uninstall takes WorkManager's own database with it, so before this the
+automation reappeared in the list and never fired again — configured-looking
+and inert, which is worse than visibly missing.
 
 ### Tables
 

@@ -271,6 +271,8 @@ curl -s -H "X-API-Key: $TOKEN" http://127.0.0.1:8099/quota
 | No videos being produced | No recurring automation, or the phone is not firing | Check `frequency` is not `once`; exempt the app from battery optimisation |
 | "daily video limit reached" while `/quota` shows `0/10000` | Was a rolling 24-hour window; fixed 16 Sep 2026 to count from midnight in `timezone.default` | Update past `e85c61b`. The message now names the zone and when it resets |
 | A run failed and there is no way to repeat it | Nothing re-ran a FAILED job before | **Retry** on the failed card in the app, `POST /jobs/{id}/retry`, or `python -m backend.cli retry <job_id>` |
+| An automation vanished after installing a new build | Room's migration is destructive and the periodic sync is 15-minutely | Fixed 16 Sep 2026: startup syncs immediately. Automations live on the **server**, so nothing is lost — reopen the app |
+| An automation is listed but never fires after a reinstall | An uninstall wipes WorkManager; the rows came back, the schedules did not | Fixed 16 Sep 2026: `SyncWorker` re-arms them. On an older build, toggle the automation off and on |
 | Kids video stuck `AWAITING_APPROVAL` | Made-for-Kids never confirmed | Tick the disclosure on Create |
 | `git pull --ff-only` refuses on the server | Something wrote into the checkout | `git status`; never run `bank_rebuild.py` there without `--no-promote` |
 | Tokens expiring weekly | Consent screen still in *Testing* | Publish the app, then **re-grant every channel** |

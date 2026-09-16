@@ -45,6 +45,17 @@ class AutoTubeApp : Application() {
         // Safe to call every launch: uses a unique-work policy.
         runCatching { WorkScheduler.scheduleSync(this) }
             .onFailure { Log.w(TAG, "sync schedule: ${it.javaClass.simpleName}") }
+        // And one RIGHT NOW, not only the periodic one.
+        //
+        // The periodic sync has a 15-minute interval, so on a fresh install
+        // or after an upgrade the app opened to an empty Schedule tab -
+        // Room's migration is destructive, and nothing had refilled it yet.
+        // The automation was safe on the backend the whole time, but from
+        // the outside it had simply vanished, which is indistinguishable
+        // from having lost it. This is also what re-arms the WorkManager
+        // schedules an uninstall took with it (see SyncWorker).
+        runCatching { WorkScheduler.syncNow(this) }
+            .onFailure { Log.w(TAG, "sync now: ${it.javaClass.simpleName}") }
         runCatching { WorkScheduler.cancelRetiredWork(this) }
             .onFailure { Log.w(TAG, "retired work: ${it.javaClass.simpleName}") }
     }

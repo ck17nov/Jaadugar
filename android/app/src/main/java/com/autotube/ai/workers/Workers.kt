@@ -63,9 +63,51 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
         // until the user happens to open the Schedule tab.
         runCatching { repo.syncAutomations() }
 
+        // RE-ARM THE SCHEDULES, not just the rows.
+        //
+        // syncAutomations() restores Room from the backend, so after an
+        // upgrade or a reinstall the automation REAPPEARS IN THE LIST - and
+        // never fires again. An uninstall takes WorkManager's own database
+        // with it, and nothing here ever enqueued the periodic work a second
+        // time, so the row said "daily" while no schedule existed. It looked
+        // configured and was inert, which is the worst of both.
+        //
+        // Safe on every sync: scheduleAutomation uses
+        // ExistingPeriodicWorkPolicy.UPDATE, so an existing schedule is
+        // updated in place rather than duplicated. The initial delay is a
+        // full interval, matching how a new automation is armed - the run
+        // that is due now is the backend's business, not a catch-up burst
+        // from the phone.
+        runCatching { rearmSchedules(app) }
+
         notifyIfNeeded(app)
         repo.prune()
         return Result.success()
+    }
+
+    /**
+     * Give every enabled recurring automation its periodic work back.
+     *
+     * Idempotent by construction (UPDATE policy), so this runs on every
+     * sync rather than trying to detect "have we just been reinstalled?",
+     * which is not a question WorkManager can answer.
+     */
+    private suspend fun rearmSchedules(app: AutoTubeApp) {
+        for (row in app.database.automations().all()) {
+            if (!row.enabled) continue
+            if (row.frequency == "once") continue
+            val intervalHours = if (row.frequency == "weekly") 168L else 24L
+            WorkScheduler.scheduleAutomation(
+                app,
+                row.id,
+                intervalHours,
+                initialDelayMinutes = intervalHours * 60,
+                // Already a List<Int> on the entity (Database.kt:40) - the
+                // first version parsed it as a comma-separated string and
+                // did not compile.
+                days = row.days,
+            )
+        }
     }
 
     /** Surface anything waiting on the user (spec section 24). */

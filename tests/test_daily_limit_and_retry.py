@@ -109,14 +109,34 @@ class TestRetryingAFailedJob:
             start = src.index("retry")
             assert 'frequency = "once"' in src, f"{path} re-arms the schedule"
 
-    def test_the_failed_job_is_kept_not_rewritten(self):
-        """The failure carries the error that explains it. Resetting the row
-        would erase the evidence while a retry failed for the same reason."""
+    def test_the_failed_job_is_removed_after_the_replacement_is_queued(self):
+        """Changed on the owner's report: keeping the failed row in the list
+        read as though the retry had not worked.
+
+        The ORDER is the correctness property. Queue first, delete second -
+        if the submit throws, the failed job must still be there to retry
+        again. A delete-then-queue would lose the brief on a transient
+        failure.
+        """
         src = Path("backend/api/main.py").read_text(encoding="utf-8")
         start = src.index('@app.post("/jobs/{job_id}/retry"')
         block = src[start:src.index("@app.post", start + 10)]
+        assert "WORKER.submit(request)" in block
+        assert "delete_jobs" in block
+        assert block.index("WORKER.submit(request)") < block.index("delete_jobs"),             "the replacement must be queued BEFORE the failed row is deleted"
+        # The error still reaches the caller, since the row no longer holds it.
         assert "previous_error" in block
+        # Never resets the row in place - it is removed, not rewritten.
         assert "save_job" not in block and "update_job" not in block
+
+    def test_deleting_the_failed_job_cannot_touch_a_running_one(self):
+        """`keep_active=False` is only safe because the status check above
+        has already refused anything that is not FAILED or REJECTED."""
+        src = Path("backend/api/main.py").read_text(encoding="utf-8")
+        start = src.index('@app.post("/jobs/{job_id}/retry"')
+        block = src[start:src.index("@app.post", start + 10)]
+        assert "keep_active=False" in block
+        assert block.index("not_retryable") < block.index("keep_active=False"),             "the status guard must come before the unguarded delete"
 
     def test_the_cli_command_exists(self):
         src = Path("backend/cli.py").read_text(encoding="utf-8")
@@ -152,3 +172,45 @@ class TestRetryingAFailedJob:
         block = src[start:start + 200]
         assert "FAILED" in block and "REJECTED" in block
         assert "PUBLISHED" not in block and "SCHEDULED" not in block
+
+
+# ==========================================================================
+class TestAutomationsSurviveAReinstall:
+    """Reported after installing a new build: "already set automation
+    disappeared".
+
+    Two separate defects, and the second was silent:
+
+      1. The periodic sync runs every 15 minutes, so a fresh install opened
+         to an empty Schedule tab. Room's migration is destructive and
+         nothing had refilled it yet. The automation was safe on the backend
+         the whole time, but from the outside it had vanished.
+
+      2. `syncAutomations()` restored the ROWS and never re-armed
+         WorkManager. An uninstall takes WorkManager's database with it, so
+         the automation reappeared in the list and NEVER FIRED AGAIN. That
+         is worse than disappearing, because it looks configured.
+    """
+
+    def test_startup_kicks_an_immediate_sync(self):
+        src = Path("android/app/src/main/java/com/autotube/ai/"
+                   "AutoTubeApp.kt").read_text(encoding="utf-8")
+        assert "WorkScheduler.syncNow(this)" in src,             "a fresh install must not wait up to 15 minutes to populate"
+
+    def test_the_sync_worker_rearms_the_schedules(self):
+        src = Path("android/app/src/main/java/com/autotube/ai/workers/"
+                   "Workers.kt").read_text(encoding="utf-8")
+        assert "rearmSchedules" in src
+        body = src[src.index("private suspend fun rearmSchedules"):]
+        body = body[:body.index("/** Surface anything")]
+        assert "scheduleAutomation" in body
+        assert 'row.frequency == "once"' in body,             "a one-off automation must not be given a periodic schedule"
+        assert "!row.enabled" in body,             "a disabled automation must not be re-armed"
+
+    def test_rearming_is_idempotent_by_policy(self):
+        """Called on every sync, so it must update rather than duplicate."""
+        src = Path("android/app/src/main/java/com/autotube/ai/workers/"
+                   "Workers.kt").read_text(encoding="utf-8")
+        block = src[src.index("fun scheduleAutomation"):]
+        block = block[:block.index("fun cancelAutomation")]
+        assert "ExistingPeriodicWorkPolicy.UPDATE" in block
