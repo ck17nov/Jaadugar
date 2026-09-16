@@ -15,6 +15,7 @@ import com.autotube.ai.data.remote.ClearRequestDto
 import com.autotube.ai.data.remote.NicheGroupListDto
 import com.autotube.ai.data.remote.ScriptBankDto
 import com.autotube.ai.data.remote.NicheMapBodyDto
+import com.autotube.ai.data.remote.RetryAckDto
 import com.autotube.ai.data.remote.YouTubeAccountListDto
 import com.autotube.ai.data.remote.CancelAckDto
 import com.autotube.ai.data.remote.HealthDto
@@ -171,6 +172,12 @@ class AutoTubeRepository(
         api.service().approve(jobId)
         logEvent("APPROVAL", "approved $jobId", jobId)
         Unit
+    }
+
+    suspend fun retryJob(jobId: String): Result<RetryAckDto> = call {
+        val ack = api.service().retryJob(jobId)
+        logEvent("RETRY", "re-queued $jobId", jobId)
+        ack
     }
 
     suspend fun reject(jobId: String, reason: String): Result<Unit> = call {

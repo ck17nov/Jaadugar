@@ -44,7 +44,7 @@ Constraints you must not break (PROJECT_OVERVIEW.md explains each):
 
 How to work with me:
   - Verify against the code before claiming anything works. Run
-    `python -m pytest tests/ -q` (1,487 tests, ~5 min).
+    `python -m pytest tests/ -q` (1,501 tests, ~5 min).
   - Tell me plainly when something is broken, missing or your mistake.
   - Note that `autotube` is not a command; use `python -m backend.cli`.
 

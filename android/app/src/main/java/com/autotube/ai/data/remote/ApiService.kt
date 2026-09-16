@@ -85,6 +85,15 @@ interface ApiService {
     @POST("jobs/{jobId}/approve")
     suspend fun approve(@Path("jobId") jobId: String): SimpleAckDto
 
+    /**
+     * Run a failed job's request again, as a NEW job on the server.
+     *
+     * The failed job is kept: it carries the error that explains it, and
+     * the retry is a separate run rather than a rewrite of history.
+     */
+    @POST("jobs/{jobId}/retry")
+    suspend fun retryJob(@Path("jobId") jobId: String): RetryAckDto
+
     @POST("jobs/{jobId}/reject")
     suspend fun reject(
         @Path("jobId") jobId: String,

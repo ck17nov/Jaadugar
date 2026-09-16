@@ -244,6 +244,29 @@ class DashboardViewModel(
 
     fun reject(jobId: String, reason: String = "rejected from dashboard") =
         runTask<Unit>({ info("Rejected."); refresh() }) { repo.reject(jobId, reason) }
+
+    /**
+     * Re-run a failed job's request. The server makes a NEW job; this one
+     * stays in the list with its error.
+     *
+     * The message repeats the original error on purpose. The most common
+     * retry is against something that has not changed - a missing key, a
+     * provider resting - and a bare "Re-queued" invites tapping it again.
+     */
+    fun retry(jobId: String) = runTask<com.autotube.ai.data.remote.RetryAckDto>(
+        { ack ->
+            if (ack.previousError.isNotBlank()) {
+                info(
+                    "Re-queued. It failed before with: " +
+                        ack.previousError.take(140) +
+                        " - if that has not changed, it will fail again."
+                )
+            } else {
+                info("Re-queued as a new job.")
+            }
+            refresh()
+        }
+    ) { repo.retryJob(jobId) }
 }
 
 // --------------------------------------------------------------------------

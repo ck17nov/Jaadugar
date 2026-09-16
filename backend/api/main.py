@@ -710,6 +710,65 @@ def reclaim_one(job_id: str) -> dict[str, Any]:
     return reclaim_job(Path(job.dir), job_id).to_dict()
 
 
+@app.post("/jobs/{job_id}/retry", dependencies=[Depends(require_api_key)])
+def retry_job(job_id: str) -> dict[str, Any]:
+    """Run a failed job's request again, as a fresh job.
+
+    There was no way to do this. `reclaim` frees disk, `resume_pending`
+    recovers jobs a crash interrupted, and neither re-runs something that
+    FAILED - so a transient failure (a provider resting, a daily limit that
+    had not really been reached) meant that day's video was simply lost, and
+    the only route back was to fill in the Create screen again from memory.
+
+    A NEW job, deliberately, rather than resetting the old one. The failure
+    is a record worth keeping: it carries the error that explains it, and
+    rewriting the row would erase the evidence while a retry was still
+    failing for the same reason.
+
+    Safe to call repeatedly. A failed job released its bank claim on the way
+    out (`_release_bank`), so a retry claims a script normally instead of
+    burning a second one - the one case that is NOT released is a job whose
+    upload already succeeded, and that job is not FAILED.
+    """
+    db = _db()
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"error": "job_not_found"})
+
+    retryable = (JobStatus.FAILED.value, JobStatus.REJECTED.value)
+    if job.status not in retryable:
+        raise HTTPException(status_code=409, detail={
+            "error": "not_retryable",
+            "status": job.status,
+            "message": (f"This job is {job.status}. Only a FAILED or REJECTED "
+                        f"job can be retried - a queued or rendering one is "
+                        f"already on its way, and a published one must not be "
+                        f"published twice.")})
+
+    payload = dict(job.request or {})
+    if not payload:
+        raise HTTPException(status_code=422, detail={
+            "error": "no_request_recorded",
+            "message": ("This job has no stored request, so there is nothing "
+                        "to run again. Create the automation from the app "
+                        "instead.")})
+
+    request = AutomationRequest.from_dict(payload)
+    # A retry is a one-off run of the same brief. Carrying the original
+    # frequency would re-arm a schedule the phone already owns, which would
+    # then fire twice a day for ever.
+    request.frequency = "once"
+    WORKER.submit(request)
+    log_event("RETRY", "resubmitted a failed job", job=job_id,
+              niche=request.niche, previous_error=str(job.error or "")[:120])
+    return {"queued": True, "retried_job_id": job_id,
+            "niche": request.niche,
+            "previous_status": job.status,
+            "previous_error": job.error or "",
+            "note": ("A new job has been queued from the same request. The "
+                     "failed job is kept as a record.")}
+
+
 @app.post("/maintenance/reclaim", dependencies=[Depends(require_api_key)])
 def reclaim_sweep(older_than_days: float = Query(7.0, ge=0.0, le=3650.0)
                   ) -> dict[str, Any]:

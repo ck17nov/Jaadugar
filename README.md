@@ -250,9 +250,9 @@ Verified on this machine (Windows 11, Python 3.12, FFmpeg 9.0, JDK 17, Android S
 | Area | State |
 |---|---|
 | Engine: research -> script -> voice -> visuals -> render -> quality | Run end-to-end on Shorts and on long-form, every artifact verified. Render path confirmed on **both** ffmpeg 6.1.1 (server) and 9.0 (laptop) |
-| Python test suite | **1,487 tests passing, 0 skipped** |
+| Python test suite | **1,501 tests passing, 0 skipped** |
 | Static analysis | pyflakes clean (bar 3 documented import-probes) |
-| Backend API + CLI | 27 endpoints, `doctor` / `run` / `research` / `quota` exercised |
+| Backend API + CLI | 28 endpoints, `doctor` / `run` / `research` / `quota` exercised |
 | Android app | **Compiles and packages: 24.7 MB debug APK** (`com.autotube.ai` - debug carries no applicationIdSuffix on purpose, so the OAuth client matches; minSdk 26, targetSdk 35, versionCode 2 / 0.2.0) |
 | YouTube upload + analytics | **Exercised for real: 9 videos published, 3 channels connected and verified.** OAuth consent screen published, so tokens no longer expire weekly |
 | Script bank | **1,193 entries** across 46 cells; delivery files and database agree exactly |

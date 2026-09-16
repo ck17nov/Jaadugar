@@ -167,6 +167,12 @@ What actually happens, in order:
     thumbnail, and optionally adds it to a playlist. `AUTO` publishes; anything
     else parks the job at `AWAITING_APPROVAL`.
 11. **Record.** Job status, `published_videos` row, quota ledger.
+    A failed job can be run again — `POST /jobs/{id}/retry`, the **Retry**
+    button on a failed card in the app, or `python -m backend.cli retry
+    <job_id>`. It queues a **new** job from the same request and keeps the
+    failed one, because the failure carries the error that explains it. A
+    failed job released its bank claim on the way out, so a retry does not
+    burn a second script.
 12. **Learn.** `analytics` collects your own view/retention figures later and
     updates `strategy_weights`, which nudges future idea ranking.
 
@@ -391,13 +397,24 @@ ones that matter:
 | `youtube.force_private` | **false** | Rehearsal switch, off — AUTO publishes publicly. |
 | `youtube.oauth_published` | true | Consent screen is in production, so no 7-day token expiry. |
 | `automation.approval_required` | true | A **default** that per-automation `AUTO` overrides. Not a floor. |
-| `automation.daily_video_limit` | 4 | Clamped to the quota ceiling. |
+| `automation.daily_video_limit` | 4 | How many videos **you** want per day. Counted from midnight in `timezone.default`, and clamped to the quota ceiling. |
 | `quality.minimum_score` | see config | A request may raise this, never lower it. |
 | `content.llm_provider_order` | gemini, groq, template | Ollama deliberately excluded. |
 
 **Quota:** each published upload costs **2,050 units** (1,600 insert + 400
 captions + 50 thumbnail) against 10,000/day, so **4 uploads/day** is the hard
 ceiling, leaving room for research.
+
+**Two different days, on purpose.** The quota ledger buckets by
+`pacific_day()` because that is when Google resets. `daily_video_limit`
+counts from midnight in `timezone.default` because it answers a question
+about *your* calendar. They can straddle each other harmlessly, since the
+limit equals the ceiling.
+
+This used to be three days, and the third was a bug: the limit was enforced
+against a rolling 24-hour window, so four videos finished at 22:00 blocked
+the next evening's run at 21:00 while `/quota` reported `0/10000`. Fixed
+16 September 2026.
 
 `api.cors_origins` and `api.rate_limit_per_minute` are read by the backend but
 have **no `api:` section in config.yaml**, so both run on code defaults.
@@ -433,7 +450,7 @@ have **no `api:` section in config.yaml**, so both run on code defaults.
 - Render path verified on **both** ffmpeg 6.1.1 (server) and 9.0 (laptop).
 - 3 channels connected, all verified refreshing; OAuth published so tokens no
   longer expire weekly.
-- **1,487 tests pass, 0 skipped.**
+- **1,501 tests pass, 0 skipped.**
 - Server rebooted onto current glibc, 2 GB swap, root SSH off.
 
 ### Partially working
@@ -480,6 +497,7 @@ execution, phone-triggered).
 | Free-tier LLM rate limits | Gemini rests under load | Already falls forward to Groq |
 | Bank selection is first-available | No quality ordering | Rank claim candidates |
 | A test leaves a render running past teardown | 8.5 MB of scratch per suite run | Shut the executor down |
+| A retry re-runs the brief, not the exact failed render | A bank-backed retry may claim a different script | Intended: the released entry goes back to the pool |
 | No packaging file | `autotube` is not a command; use `python -m backend.cli` | Add `pyproject.toml` if wanted |
 | Release APK unsigned | Cannot install a release build | Add a keystore + register its SHA-1 |
 
@@ -543,6 +561,6 @@ child-directed. **Read before you change.**
 
 ### Before you claim something works
 
-Run `python -m pytest tests/ -q` (1,487 tests, ~5 minutes). The suite renders
+Run `python -m pytest tests/ -q` (1,501 tests, ~5 minutes). The suite renders
 real video with ffmpeg. A `conftest.py` fixture deletes what the run created;
 if you see `workspace/jobs` growing, that fixture broke.

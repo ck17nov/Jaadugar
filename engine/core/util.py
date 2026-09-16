@@ -310,6 +310,32 @@ def pacific_day() -> str:
     return datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d")
 
 
+def local_day_start(tz_name: str = "Asia/Kolkata") -> float:
+    """Unix time at midnight TODAY in the operator's timezone.
+
+    For "how many videos have I made today?", which is a different question
+    from "how much Google quota is left?". Quota resets at midnight Pacific
+    (`pacific_day` above); a person's day starts at their own midnight.
+
+    THE BUG THIS FIXES. `daily_video_limit` was enforced against
+    `time.time() - 86400`, a ROLLING 24-hour window. So four videos finished
+    at 22:00 still blocked the next evening's run at 21:00 - a full calendar
+    day later, with the Pacific-day quota ledger reading 0/10000 and nothing
+    to explain the refusal. The reported symptom was exactly that: "daily
+    video limit reached, but I see quota as 0/10000".
+
+    A rolling window also means the limit never resets at a predictable
+    moment, so "wait until tomorrow" was not even true advice.
+    """
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:                                    # noqa: BLE001
+        tz = ZoneInfo("UTC")
+    now = datetime.now(tz)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight.timestamp()
+
+
 # --------------------------------------------------------------------------
 # Misc
 # --------------------------------------------------------------------------

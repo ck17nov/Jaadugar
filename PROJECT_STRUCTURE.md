@@ -20,7 +20,7 @@ Vid App/
 ├── backend/         (7 files)   FastAPI surface + Typer CLI
 ├── android/         (58 files)  Kotlin/Compose app; ALSO the scheduler
 ├── banks/           (141 files) the script bank, as JSONL
-├── tests/           (55 files)  1,487 tests
+├── tests/           (56 files)  1,501 tests
 ├── scripts/         (12 files)  operator tooling
 ├── deploy/oracle/   (6 files)   systemd units, Caddyfile, setup.sh
 ├── docs/            (12 files)  setup guides + the public privacy/terms pages
@@ -67,7 +67,7 @@ No HTTP, no framework. Importable and testable on its own.
 
 | Path | What it does |
 |---|---|
-| `api/main.py` | 27 endpoints, the worker thread and queue, auth, rate limiting. |
+| `api/main.py` | 28 endpoints, the worker thread and queue, auth, rate limiting. |
 | `cli.py` | Typer CLI. Invoke as `python -m backend.cli` — there is no packaging file, so `autotube` is **not** a command. |
 | `stories_cli.py` | `stories` subcommands for bank import/export. |
 

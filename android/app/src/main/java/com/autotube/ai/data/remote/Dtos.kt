@@ -347,6 +347,24 @@ data class SimpleAckDto(
     val status: String = "",
 )
 
+/**
+ * The answer to POST /jobs/{id}/retry.
+ *
+ * `previousError` is carried back deliberately: a retry that fails for the
+ * same reason as the original is the common case, and showing the old error
+ * next to the new attempt is what stops someone tapping Retry five times
+ * against a missing API key.
+ */
+@Serializable
+data class RetryAckDto(
+    val queued: Boolean = false,
+    @SerialName("retried_job_id") val retriedJobId: String = "",
+    val niche: String = "",
+    @SerialName("previous_status") val previousStatus: String = "",
+    @SerialName("previous_error") val previousError: String = "",
+    val note: String = "",
+)
+
 @Serializable
 data class CancelAckDto(
     val cancelled: Boolean = false,

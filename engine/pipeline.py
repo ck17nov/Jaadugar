@@ -35,7 +35,8 @@ from .core.models import (AutomationRequest, ContentIdea, JobStatus, Mode,
                           VideoJob, VideoMetadata)
 from .core.niche import build_profile
 from .core.util import (clamp, count_words, ensure_dir, have_ffmpeg,
-                        read_json, safe_write_json, sha1, slugify)
+                        local_day_start, read_json, safe_write_json, sha1,
+                        slugify)
 from .quality.gate import QualityGate
 from .research.gaps import cluster_videos, find_gaps, research_context_block
 from .research.youtube import QuotaGuard, YouTubeResearch
@@ -253,15 +254,30 @@ class Pipeline:
                     f"GROQ_API_KEY or GEMINI_API_KEY (both free, no credit "
                     f"card - docs/API_SETUP.md), or request a shorter video.")
 
+        # TODAY means today, in the operator's timezone.
+        #
+        # This was `time.time() - 86400`, a rolling 24-hour window, so four
+        # videos finished at 22:00 still blocked the next evening's run at
+        # 21:00 - a calendar day later, while the quota ledger (which buckets
+        # by Pacific day, because that is when Google resets) read 0/10000.
+        # The refusal was real and the explanation was nowhere.
+        #
+        # Deliberately the operator's midnight and not Pacific midnight:
+        # `daily_video_limit` answers "how many do I want per day", which is
+        # a question about the owner's calendar. The Pacific boundary still
+        # governs the hard quota ceiling, and the two can straddle each other
+        # harmlessly because the limit equals that ceiling.
         limit = int(self.cfg.get("automation.daily_video_limit", 3))
-        since = time.time() - 86400
+        tz_name = str(self.cfg.get("timezone.default", "Asia/Kolkata"))
+        since = local_day_start(tz_name)
         made_today = self.db.count_jobs_since(
             since, (JobStatus.PUBLISHED.value, JobStatus.SCHEDULED.value,
                     JobStatus.READY.value))
         if made_today >= limit:
             problems.append(
-                f"daily video limit reached ({made_today}/{limit}) - "
-                f"raise automation.daily_video_limit to continue")
+                f"daily video limit reached ({made_today}/{limit} today in "
+                f"{tz_name}) - it resets at midnight {tz_name}, or raise "
+                f"automation.daily_video_limit to continue")
 
         similar = self._recent_similarity_run()
         halt_after = int(self.cfg.get("automation.stop_after_similar_videos", 3))

@@ -290,6 +290,7 @@ fun DashboardScreen(
                     job = job,
                     onClick = { onOpenJob(job.jobId) },
                     onCancel = { vm.cancelJob(job.jobId) },
+                    onRetry = { vm.retry(job.jobId) },
                 )
             }
         }
@@ -369,9 +370,15 @@ private val STOPPABLE = setOf(
     "QUALITY_CHECK",
 )
 
+// A run that ended badly and can be started again. Deliberately NOT
+// PUBLISHED or SCHEDULED: those are on YouTube, or about to be, and
+// publishing the same video twice is the one mistake with no undo.
+private val RETRYABLE = setOf("FAILED", "REJECTED")
+
 @Composable
 fun JobRow(job: JobEntity, onClick: () -> Unit,
-           onCancel: (() -> Unit)? = null) {
+           onCancel: (() -> Unit)? = null,
+           onRetry: (() -> Unit)? = null) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
@@ -421,6 +428,14 @@ fun JobRow(job: JobEntity, onClick: () -> Unit,
             if (onCancel != null && job.status in STOPPABLE) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onCancel) { Text("Stop") }
+                }
+            }
+            // A failed run was a dead end: the only way back was to fill in
+            // the Create screen again from memory. This re-submits the same
+            // request, and the failed job stays in the list with its error.
+            if (onRetry != null && job.status in RETRYABLE) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onRetry) { Text("Retry") }
                 }
             }
         }

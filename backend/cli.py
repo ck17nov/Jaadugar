@@ -518,6 +518,53 @@ def reject(job_id: str = typer.Argument(...),
 
 
 @app.command()
+def retry(job_id: str = typer.Argument(...),
+          force: bool = typer.Option(False, "--force",
+                                     help="retry regardless of status")) -> None:
+    """Run a FAILED or REJECTED job's request again, as a new job.
+
+    Runs the pipeline in this process, unlike the API endpoint which queues
+    it on the server's worker. Use the app or `curl` against
+    `POST /jobs/<id>/retry` if you want the server to do the work.
+    """
+    from engine.core.models import JobStatus
+
+    pipe = _pipeline()
+    try:
+        job = pipe.db.get_job(job_id)
+        if job is None:
+            console.print(f"[red]unknown job {job_id}[/red]")
+            raise typer.Exit(1)
+
+        retryable = (JobStatus.FAILED.value, JobStatus.REJECTED.value)
+        if job.status not in retryable and not force:
+            console.print(f"[red]job {job_id} is {job.status}, not one of "
+                          f"{', '.join(retryable)}[/red]")
+            console.print("re-run with --force only if you are sure; a "
+                          "published job must not be published twice.")
+            raise typer.Exit(1)
+
+        payload = dict(job.request or {})
+        if not payload:
+            console.print(f"[red]job {job_id} has no stored request - "
+                          f"nothing to run again[/red]")
+            raise typer.Exit(1)
+
+        if job.error:
+            console.print(f"[dim]previous failure: "
+                          f"{str(job.error)[:160]}[/dim]")
+
+        request = AutomationRequest.from_dict(payload)
+        # One-off: carrying the original frequency would re-arm a schedule.
+        request.frequency = "once"
+        console.print(f"retrying {job_id} ({request.niche})...")
+        result = pipe.run(request)
+        console.print(json.dumps(result, indent=2, default=str)[:2000])
+    finally:
+        pipe.close()
+
+
+@app.command()
 def upload(job: str = typer.Option(..., "--job"),
            publish_now: bool = typer.Option(False, "--now",
                                             help="ignore the schedule"),
