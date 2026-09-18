@@ -75,7 +75,9 @@ fun DashboardScreen(
                 Text(
                     "Removes finished jobs from this list and deletes their " +
                         "video files from the backend. Anything still " +
-                        "rendering or waiting for your approval is kept."
+                        "rendering or waiting for your approval is kept.\n\n" +
+                        "\"Older than 7 days\" keeps today's jobs, including " +
+                        "today's failures."
                 )
             },
             confirmButton = {

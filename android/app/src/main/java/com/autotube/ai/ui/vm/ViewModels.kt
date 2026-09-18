@@ -216,9 +216,21 @@ class DashboardViewModel(
      */
     fun clearJobs(olderThanDays: Double) =
         runTask<com.autotube.ai.data.remote.ClearAckDto>({
+            // "Nothing to clear." was reported as "clear does not work": the
+            // owner had failed jobs on screen from TODAY and swept with the
+            // 7-day option, which correctly keeps them - and then said
+            // nothing about why. Name the cutoff that spared them.
+            val days = olderThanDays.toInt()
             info(
-                if (it.cleared == 0) "Nothing to clear."
-                else "Cleared ${it.cleared} jobs and freed ${it.freedMb} MB."
+                when {
+                    it.cleared > 0 ->
+                        "Cleared ${it.cleared} jobs and freed ${it.freedMb} MB."
+                    olderThanDays > 0 ->
+                        "Nothing finished more than $days days ago. " +
+                            "Newer jobs were kept - use \"Clear all now\" " +
+                            "to remove those too."
+                    else -> "Nothing to clear."
+                }
             )
             refresh()
         }) { repo.clearJobs(olderThanDays) }
@@ -508,9 +520,26 @@ class CreateViewModel(
                     // per weekday would be seven schedules to keep in step.
                     else -> 24L
                 }
+                //
+                // A FULL INTERVAL IS THE WRONG ANCHOR, though: it makes the
+                // daily slot "whenever this automation was created" instead
+                // of the uploadTime on screen. Four automations created in
+                // one sitting then all fired together. Aim at the next
+                // occurrence of the chosen time, and skip it when it is less
+                // than 90 minutes away - the run queued above is still in
+                // flight, and two videos an hour apart is the duplicate this
+                // delay exists to prevent.
+                val untilSlot = com.autotube.ai.workers.ScheduleClock
+                    .minutesUntilNext(request.uploadTime, request.timezone)
+                val delay = when {
+                    request.frequency == "weekly" -> intervalHours * 60
+                    untilSlot < 0 -> intervalHours * 60
+                    untilSlot < 90 -> untilSlot + 24 * 60
+                    else -> untilSlot
+                }
                 com.autotube.ai.workers.WorkScheduler.scheduleAutomation(
                     app, it, intervalHours,
-                    initialDelayMinutes = intervalHours * 60,
+                    initialDelayMinutes = delay,
                     days = request.days,
                 )
             }

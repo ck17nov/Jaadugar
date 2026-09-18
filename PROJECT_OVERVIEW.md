@@ -112,6 +112,19 @@ SQLite schema instead (§6).
 **The one surprising edge:** the arrow from the phone is *load-bearing*. See
 §5.
 
+**And the phone decides *when*.** A recurring automation is a WorkManager
+`PeriodicWorkRequest` whose initial delay is the distance to the next
+occurrence of the automation's `upload_time` in its own timezone
+(`ScheduleClock.minutesUntilNext`). It used to be a flat `intervalHours * 60`
+— 24 hours from whenever the request was armed — so the daily slot was
+"whenever you last created or re-armed this", not the time on screen. Since
+`SyncWorker.rearmSchedules` walks every automation in one pass, automations
+set for 16:00, 17:00, 18:00 and 19:00 were armed within the same second and
+then produced **together**: four uploads inside one minute, which overran the
+Pacific quota day and failed the runs behind them. A slot less than 20
+minutes away is left alone, because `ExistingPeriodicWorkPolicy.UPDATE`
+re-applies the delay from now and would push an imminent run to tomorrow.
+
 ### Components and how they talk
 
 - **Android → backend:** Retrofit over HTTPS, `X-API-Key` header matching
@@ -174,6 +187,25 @@ What actually happens, in order:
     still there to retry again. The previous error comes back in the response
     instead of living on in the list. A failed job released its bank claim on
     the way out, so a retry does not burn a second script.
+
+    A retry queues with `persist=False` (`backend/api/main.py`). That is not
+    cosmetic: the retry request carries the **original automation's id**, and
+    `save_automation` upserts on that id with
+    `ON CONFLICT(id) DO UPDATE SET frequency=excluded.frequency`. Retry sets
+    `frequency="once"`, so a persisting retry silently rewrote the operator's
+    live `daily` automation to `once`, and it vanished from the Schedule tab
+    until the phone next POSTed the daily request. One 17:00 automation never
+    came back on its own and had to be repaired by hand. A retry must never
+    write to the automations table.
+
+    A retry also re-runs **the same script**. The failed job released its
+    bank claim on the way out, so the entry is back in the pool and the retry
+    asks for it by name (`prefer_bank_entry`, taken from the failed job's
+    `bank_entry_id`). Without that it claimed whatever was next, and the
+    released entry went to the following scheduled run — so a retry produced
+    a different video and the next run produced the one that had been
+    retried. The preference cannot bypass the review gates, and falls back to
+    the normal search if the entry is gone or has been claimed since.
 12. **Learn.** `analytics` collects your own view/retention figures later and
     updates `strategy_weights`, which nudges future idea ranking.
 
@@ -321,6 +353,29 @@ On the **server** it runs with `--no-promote`, which verifies read-only and
 never writes into the git checkout — because `banks/` there *is* the checkout,
 and dirtying it breaks `git pull --ff-only`.
 
+**The rebuild must not forget what was published.** The delivery JSONL carries
+no `used_at` — usage lives only in the live table. The rebuild clears that
+table and re-imports, so it used to hand the whole catalogue back as unused
+**every night**, and the live channel ended up with one title published four
+times and two more three times (1,193 of 1,193 entries reading "unused"
+against 27 uploads). `bank_rebuild.py` now takes
+`live.bank_usage_snapshot()` *before* the clear and calls
+`live.restore_bank_usage(usage)` on **both** exit paths — including the
+`--no-promote` early return the server actually uses. The restore only fills
+rows still reading `used_at<=0`, so a script claimed by a render that started
+mid-rebuild keeps its newer claim.
+
+A snapshot cannot help when the table is *already* wrong, which is the state
+the nightly rebuild had left behind — and only 5 of the 27 published scripts
+could be identified by title, because the metadata stage rewrites titles. So
+every job now records **`bank_entry_id`** in its payload
+(`engine/core/models.py`), and `Database.bank_usage_from_jobs()` re-derives
+usage from the job history, which no rebuild touches. FAILED and REJECTED
+jobs are excluded: they released their claim, so their script really is
+unused. For the runs that predate that field,
+`scripts/bank_repair_from_runs.py` reads `{"source": "bank:<entry_id>"}` out
+of each run's `idea.json`.
+
 ### Identity and duplicates
 
 `entry_id` = `{group}-{language}-{blake2b(narration)[:10]}`. It is a hash of
@@ -416,11 +471,24 @@ ones that matter:
 captions + 50 thumbnail) against 10,000/day, so **4 uploads/day** is the hard
 ceiling, leaving room for research.
 
-**Two different days, on purpose.** The quota ledger buckets by
-`pacific_day()` because that is when Google resets. `daily_video_limit`
-counts from midnight in `timezone.default` because it answers a question
-about *your* calendar. They can straddle each other harmlessly, since the
-limit equals the ceiling.
+**Two different days, on purpose — and they OVERLAP.** The quota ledger
+buckets by `pacific_day()` because that is when Google resets.
+`daily_video_limit` counts from midnight in `timezone.default` because it
+answers a question about *your* calendar.
+
+An earlier version of this section said the two "straddle each other
+harmlessly, since the limit equals the ceiling". **That was wrong.** The
+limit counts per OPERATOR day; the ceiling is per PACIFIC day, so two
+operator days can share one ceiling. Midnight in Asia/Kolkata is 11:30 the
+previous morning in Los Angeles, so automations at 16:00-19:00 IST and one
+just after midnight IST land in the same Pacific quota day. Measured on
+18 September 2026: four uploads at 23:57 IST plus two at 05:11 and 05:18 IST
+were six in one Pacific day - 12,300 units against 10,000 - and the runs
+died at the upload with "video_insert needs 1600 units, 285 available".
+
+Preflight now asks the quota ledger whether an upload would fit *before*
+rendering, so a run that cannot publish is refused instead of paying for the
+render first.
 
 This used to be three days, and the third was a bug: the limit was enforced
 against a rolling 24-hour window, so four videos finished at 22:00 blocked
@@ -461,7 +529,7 @@ have **no `api:` section in config.yaml**, so both run on code defaults.
 - Render path verified on **both** ffmpeg 6.1.1 (server) and 9.0 (laptop).
 - 3 channels connected, all verified refreshing; OAuth published so tokens no
   longer expire weekly.
-- **1,501 tests pass, 0 skipped.**
+- **1,528 tests pass, 0 skipped.**
 - Server rebooted onto current glibc, 2 GB swap, root SSH off.
 
 ### Partially working
@@ -508,7 +576,8 @@ execution, phone-triggered).
 | Free-tier LLM rate limits | Gemini rests under load | Already falls forward to Groq |
 | Bank selection is first-available | No quality ordering | Rank claim candidates |
 | A test leaves a render running past teardown | 8.5 MB of scratch per suite run | Shut the executor down |
-| A retry re-runs the brief, not the exact failed render | A bank-backed retry may claim a different script | Intended: the released entry goes back to the pool |
+| A retry re-runs the brief, not the exact failed render | Everything after the script is produced again — new voice, new images, a new render | Intended. The *script* is the same: the retry asks for the failed job's entry by name |
+| "Older than 7 days" looks like Clear did nothing | Today's failures are correctly kept, and nothing says so | Report how many rows were removed |
 | No packaging file | `autotube` is not a command; use `python -m backend.cli` | Add `pyproject.toml` if wanted |
 | Release APK unsigned | Cannot install a release build | Add a keystore + register its SHA-1 |
 
@@ -572,6 +641,6 @@ child-directed. **Read before you change.**
 
 ### Before you claim something works
 
-Run `python -m pytest tests/ -q` (1,501 tests, ~5 minutes). The suite renders
+Run `python -m pytest tests/ -q` (1,528 tests, ~5 minutes). The suite renders
 real video with ffmpeg. A `conftest.py` fixture deletes what the run created;
 if you see `workspace/jobs` growing, that fixture broke.

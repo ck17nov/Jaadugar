@@ -20,7 +20,7 @@ Vid App/
 ├── backend/         (7 files)   FastAPI surface + Typer CLI
 ├── android/         (58 files)  Kotlin/Compose app; ALSO the scheduler
 ├── banks/           (141 files) the script bank, as JSONL
-├── tests/           (56 files)  1,501 tests
+├── tests/           (57 files)  1,528 tests
 ├── scripts/         (12 files)  operator tooling
 ├── deploy/oracle/   (6 files)   systemd units, Caddyfile, setup.sh
 ├── docs/            (12 files)  setup guides + the public privacy/terms pages
@@ -76,11 +76,12 @@ No HTTP, no framework. Importable and testable on its own.
 | Path | What it does |
 |---|---|
 | `workers/Workers.kt` | **The scheduler.** `AutomationWorker` fires automations; `SyncWorker` refreshes state every 15 min. |
+| `workers/ScheduleClock.kt` | Minutes until an automation's next `upload_time` in its own zone. Pure java.time, so it has real unit tests. |
 | `data/remote/` | Retrofit service and DTOs (`ignoreUnknownKeys` on). |
 | `data/local/Database.kt` | Room cache. Destructive migration — an upgrade empties it. |
 | `data/repo/AutoTubeRepository.kt` | The single path between UI and backend. |
 | `ui/screens/` | Create, Dashboard, Settings, Preview, Content & Scheduler. |
-| `app/build.gradle.kts` | `applicationId com.autotube.ai`, versionCode 2 / 0.2.0. No release signing config. |
+| `app/build.gradle.kts` | `applicationId com.autotube.ai`, versionCode 3 / 0.2.1. No release signing config. |
 
 ## banks/ — the script bank
 
@@ -98,7 +99,8 @@ The importer derives the expected group from the filename.
 | Script | Purpose |
 |---|---|
 | `deploy.py` | **Deploy to the VM.** Finds the key, pulls, rebuilds, restarts. |
-| `bank_rebuild.py` | Reconcile staged → delivered → live. `--no-promote` on the server. |
+| `bank_rebuild.py` | Reconcile staged → delivered → live. `--no-promote` on the server. Snapshots and restores `used_at`. |
+| `bank_repair_from_runs.py` | One-off: re-derive bank usage from `idea.json` for jobs that predate `bank_entry_id`. |
 | `bank_fill.py` | `plan` / `prompt` / `check` / `absorb` — the add-scripts workflow. |
 | `bank_spec.py` | Generates the authoring spec handed to an outside AI. |
 | `bank_absorb_all.py` | Import every staged batch at once. |

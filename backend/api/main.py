@@ -357,16 +357,33 @@ class Worker:
                                            name="autotube-worker")
             self.thread.start()
 
-    def submit(self, request: AutomationRequest) -> None:
-        # Recorded before queueing so it can be listed and cancelled even if
-        # the process dies before the run starts.
-        try:
-            _db().save_automation(
-                request,
-                last_topic=(request.niche if request.topic_rotate else ""))
-        except Exception as exc:
-            log_event("WORKER", "could not persist the automation",
-                      error=str(exc)[:160])
+    def submit(self, request: AutomationRequest,
+               *, persist: bool = True) -> None:
+        """Queue a run. With `persist`, also record it as an automation.
+
+        `persist=False` EXISTS FOR RETRY, and the reason is a bug this caused.
+        `save_automation` upserts on `request.id` with
+        `ON CONFLICT(id) DO UPDATE SET frequency=excluded.frequency`, and a
+        retry rebuilds its request from the failed job - which carries the
+        ORIGINAL automation's id. Retrying therefore rewrote the operator's
+        live `daily` automation to `once`, which hid it from the schedule as
+        "finished". It reappeared only when the phone's next run POSTed the
+        daily request back, so the symptom read as a flickering list, and any
+        automation that did not fire again stayed lost.
+
+        A retry is an execution, not a definition. It must not touch the
+        automations table at all.
+        """
+        if persist:
+            # Recorded before queueing so it can be listed and cancelled even
+            # if the process dies before the run starts.
+            try:
+                _db().save_automation(
+                    request,
+                    last_topic=(request.niche if request.topic_rotate else ""))
+            except Exception as exc:
+                log_event("WORKER", "could not persist the automation",
+                          error=str(exc)[:160])
         self.queue.put(request)
         self.start()
 
@@ -733,7 +750,9 @@ def retry_job(job_id: str) -> dict[str, Any]:
     Safe to call repeatedly. A failed job released its bank claim on the way
     out (`_release_bank`), so a retry claims a script normally instead of
     burning a second one - the one case that is NOT released is a job whose
-    upload already succeeded, and that job is not FAILED.
+    upload already succeeded, and that job is not FAILED. Because the entry is
+    back in the pool, the retry asks for THAT entry by name
+    (`prefer_bank_entry`) rather than taking whatever is next.
     """
     db = _db()
     job = db.get_job(job_id)
@@ -766,7 +785,27 @@ def retry_job(job_id: str) -> dict[str, Any]:
     # frequency would re-arm a schedule the phone already owns, which would
     # then fire twice a day for ever.
     request.frequency = "once"
-    WORKER.submit(request)
+    # RE-RUN THE SCRIPT THAT FAILED, not the next one in the pool.
+    #
+    # Reported directly: a retry produced a different video and the next
+    # scheduled run then produced the one that had been retried, which read
+    # as the system duplicating itself. The failed job released its claim on
+    # the way out, so the entry is back in the pool and can simply be asked
+    # for by name. A preference, not a requirement - if it is gone or has
+    # been claimed since, the normal search runs.
+    request.prefer_bank_entry = str(
+        getattr(job, "bank_entry_id", "") or "").strip()
+    # persist=False IS THE FIX FOR A BUG THIS ENDPOINT CAUSED.
+    #
+    # The request rebuilt above carries the ORIGINAL automation's id, and
+    # save_automation upserts on that id - so the line above, combined with a
+    # persisting submit, rewrote the operator's live `daily` automation to
+    # `once`. That hid it from the schedule as "finished", and it returned
+    # only when the phone next POSTed the daily request. Four automations at
+    # 16:00-19:00 became three, and the missing one never fired again.
+    #
+    # A retry executes a brief; it does not define an automation.
+    WORKER.submit(request, persist=False)
 
     # Now that a replacement is queued, take the failed row and its media
     # away. `keep_active=False` because the job is FAILED or REJECTED by the

@@ -575,6 +575,11 @@ class Database:
                 (entry_id,)).fetchone()
         return dict(row) if row is not None else None
 
+    def bank_entry(self, entry_id: str) -> dict | None:
+        """One entry by id, claimed or not. None if it is not in the bank."""
+        return self.query_one(
+            "SELECT * FROM bank_entries WHERE entry_id=?", (entry_id,))
+
     def bank_candidates(self, *, group: str, language: str,
                         video_format: str, topics: Sequence[str] = (),
                         near_seconds: float = 0.0,
@@ -611,6 +616,82 @@ class Database:
             f"SELECT * FROM bank_entries WHERE {' AND '.join(clauses)} "
             f"ORDER BY imported_at LIMIT ?", (*params, limit))
         return [dict(r) for r in rows]
+
+    def restore_bank_usage(self, usage: dict[str, tuple[float, str]]) -> int:
+        """Re-apply used_at/used_job_id after a rebuild re-imported the bank.
+
+        THIS EXISTS BECAUSE ITS ABSENCE PUBLISHED THE SAME VIDEO FOUR TIMES.
+        `save_bank_entry` preserves usage by reading the row it is replacing,
+        but `bank_rebuild.py` DELETES every row before re-importing, so there
+        is nothing left to read and all 1,193 entries came back unused. With
+        the rebuild running nightly, the whole catalogue became claimable
+        again every night and the pipeline re-used scripts it had already
+        published - measured on the live channel as one title out four times
+        and two more three times.
+
+        `used_at>0` is skipped rather than overwritten: an entry claimed by a
+        render that started DURING the rebuild must keep the newer claim.
+        """
+        applied = 0
+        with self._lock:
+            for entry_id, (used_at, used_job) in usage.items():
+                if not used_at:
+                    continue
+                cur = self._conn.execute(
+                    "UPDATE bank_entries SET used_at=?, used_job_id=? "
+                    "WHERE entry_id=? AND used_at<=0",
+                    (float(used_at), str(used_job or ""), entry_id))
+                applied += cur.rowcount
+            self._conn.commit()
+        return applied
+
+    def bank_usage_snapshot(self) -> dict[str, tuple[float, str]]:
+        """Every entry that has been used, so a rebuild can put it back."""
+        rows = self.query(
+            "SELECT entry_id, used_at, used_job_id FROM bank_entries "
+            "WHERE used_at > 0")
+        return {r["entry_id"]: (float(r["used_at"]),
+                                str(r["used_job_id"] or ""))
+                for r in rows}
+
+    def bank_usage_from_jobs(self) -> dict[str, tuple[float, str]]:
+        """Re-derive bank usage from the JOB history.
+
+        The second source, and the one that survives what the first does not.
+        `bank_usage_snapshot` reads the live table, so it is useless if that
+        table is already wrong - a restore from an older archive, a fresh
+        database, or the night the rebuild cleared it before anything
+        captured a snapshot. Job payloads carry `bank_entry_id` and are never
+        cleared by a rebuild.
+
+        FAILED and REJECTED jobs are excluded on purpose: those released
+        their claim back into the pool (`_release_bank`), so their script is
+        genuinely unused and re-marking it would retire a good script nobody
+        ever saw.
+
+        A CANCELLED job is counted as used, which is the conservative way
+        round: it may retire a script nobody saw, and the alternative risks
+        publishing one twice.
+
+        Recovers nothing for jobs that ran before `bank_entry_id` existed -
+        for those, `scripts/bank_repair_from_runs.py` reads `idea.json`.
+        """
+        spent: dict[str, tuple[float, str]] = {}
+        rows = self.query(
+            "SELECT job_id, status, updated_at, payload FROM video_jobs "
+            "WHERE status NOT IN (?, ?) ORDER BY updated_at",
+            (JobStatus.FAILED.value, JobStatus.REJECTED.value))
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"] or "{}")
+            except Exception:                   # noqa: BLE001
+                continue
+            entry_id = str(payload.get("bank_entry_id") or "").strip()
+            if not entry_id:
+                continue
+            spent[entry_id] = (float(row["updated_at"] or time.time()),
+                               str(row["job_id"]))
+        return spent
 
     def release_bank_entry(self, entry_id: str) -> None:
         """Put an entry back in the pool.

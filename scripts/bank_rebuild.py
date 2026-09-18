@@ -260,6 +260,19 @@ def _run() -> int:
     try:
         # 1. Archive, then clear. The archive carries used_at/used_job_id,
         # which no JSONL file holds.
+        #
+        # AND THAT IS EXACTLY WHY THE SNAPSHOT BELOW EXISTS. Archiving the
+        # usage to a file nobody reads back is not preserving it. The clear
+        # removed every row, the delivery JSONL has no used_at, and
+        # save_bank_entry can only preserve what it finds - so the whole
+        # catalogue returned UNUSED. With this running nightly, every script
+        # became claimable again every night, and the live channel published
+        # one title four times and two more three times before anyone noticed.
+        #
+        # Captured before the clear so BOTH exit paths are covered: the
+        # developer path that falls through to step 5, and the server's
+        # --no-promote path that returns in step 3.
+        usage = live.bank_usage_snapshot()
         rows = live.bank_entries(limit=100_000)
         stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
         out = BANKS / "archive" / stamp
@@ -344,10 +357,24 @@ def _run() -> int:
             landed_ids = set()
             for ids in landed.values():
                 landed_ids |= ids
+
+            # THE SERVER RETURNS HERE, so the restore has to happen here too.
+            # This is the path the nightly timer takes: without it, every
+            # night marked the whole catalogue unused again and the pipeline
+            # re-published scripts it had already used.
+            restored = live.restore_bank_usage(usage)
+            # Second source: the job history. Covers the case the snapshot
+            # cannot - a table that was ALREADY wrong when this run started.
+            restored += live.restore_bank_usage(live.bank_usage_from_jobs())
+
             stored = len(live.bank_entries(limit=100_000))
             print(f"\nstaged lines : {offered}")
             print(f"landed       : {len(landed_ids)}")
             print(f"live database: {stored} entries")
+            print(f"used markers : restored {restored} of {len(usage)}")
+            if usage and restored < len(usage):
+                print(f"  {len(usage) - restored} used entries are no longer "
+                      f"in the staged set, so their claim had nowhere to go")
             if stored < len(landed_ids):
                 print("NOTE: fewer rows than entries that landed - two "
                       "staged lines share a content hash")
@@ -393,6 +420,19 @@ def _run() -> int:
             live.delete_bank_entry(row["entry_id"])
         print("\nrebuilding the live database from the delivery copy:")
         _import_all(live, delivered, reviewer=args.reviewer, tool=args.tool)
+
+        # PUT THE CLAIMS BACK, or this rebuild re-publishes the catalogue.
+        restored = live.restore_bank_usage(usage)
+        from_jobs = live.restore_bank_usage(live.bank_usage_from_jobs())
+        if from_jobs:
+            print(f"re-derived {from_jobs} more used marker(s) from the job "
+                  f"history")
+        restored += from_jobs
+        print(f"restored {restored} of {len(usage)} used markers")
+        if usage and restored < len(usage):
+            print(f"  {len(usage) - restored} used entries are no longer in "
+                  f"the delivery copy, so their claim had nowhere to go - "
+                  f"expected when an entry was pruned or rewritten")
 
         total = sum(len(_lines_of(p)) for p in delivered)
         stored = len(live.bank_entries(limit=100_000))

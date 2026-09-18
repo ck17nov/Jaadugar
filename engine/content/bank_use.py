@@ -108,8 +108,17 @@ def reviewed_by_human(entry: BankEntry) -> bool:
 def claim(db, *, group: str, language: str, video_format: str, job_id: str,
           topics: Sequence[str] = (), near_seconds: float = 0.0,
           require_review: bool = True,
-          require_human: bool = False) -> BankClaim | None:
+          require_human: bool = False,
+          prefer_entry: str = "") -> BankClaim | None:
     """Take the next unused entry for this group, or None.
+
+    `prefer_entry` asks for one specific entry first, and is how a RETRY
+    re-runs the script that failed rather than a different one. The operator
+    reported this directly: a retry took a new script and the next scheduled
+    run then took the failed one, so the two runs looked like duplicates of
+    each other. If the preferred entry is gone, already claimed, or fails the
+    review gates, the normal search follows - a retry must never be refused
+    because one entry became unavailable.
 
     `require_review` skips entries nobody has approved. On by default: the
     whole argument for a bank over live generation is that somebody read it,
@@ -122,6 +131,33 @@ def claim(db, *, group: str, language: str, video_format: str, job_id: str,
     anything where a person signing off actually matters.
     """
     import json
+
+    if prefer_entry:
+        wanted = db.bank_entry(prefer_entry)
+        if wanted is None:
+            log_event("BANK", "the preferred entry is no longer in the bank",
+                      entry=prefer_entry)
+        else:
+            try:
+                entry = BankEntry.from_dict(json.loads(wanted["payload"]))
+            except Exception:                       # noqa: BLE001
+                entry = None
+            gated = entry is not None and (
+                (require_review and not approved(entry))
+                or (require_human and not reviewed_by_human(entry)))
+            if entry is not None and not gated:
+                if db.claim_specific_bank_entry(entry.entry_id,
+                                                job_id) is not None:
+                    log_event("BANK", "preferred entry claimed for a retry",
+                              entry=entry.entry_id, title=entry.title[:60])
+                    return BankClaim(entry=entry, entry_id=entry.entry_id)
+                log_event("BANK", "the preferred entry is already claimed; "
+                                  "falling back to the pool",
+                          entry=prefer_entry)
+            elif gated:
+                log_event("BANK", "the preferred entry no longer passes the "
+                                  "review gates; falling back to the pool",
+                          entry=prefer_entry)
 
     # DECIDE FIRST, CLAIM SECOND.
     #

@@ -97,11 +97,30 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
             if (!row.enabled) continue
             if (row.frequency == "once") continue
             val intervalHours = if (row.frequency == "weekly") 168L else 24L
+
+            // ANCHOR ON THE TIME THE OPERATOR CHOSE, not on the moment this
+            // pass happens to run. See `minutesUntilNext`: a full interval
+            // from now armed every automation at the same second and they
+            // then produced together.
+            //
+            // Weekly keeps the interval-based delay: the time of day is
+            // known but the weekday is not, so anchoring on the clock alone
+            // would move the automation to a different day of the week.
+            val delay = if (row.frequency == "weekly") intervalHours * 60
+                        else ScheduleClock.minutesUntilNext(row.uploadTime,
+                                                            row.timezone)
+            if (delay in 0..19) {
+                // Too close to touch. `UPDATE` re-applies the initial delay
+                // from now, so re-arming a slot that is about to fire would
+                // push it to tomorrow and silently lose today's video.
+                continue
+            }
             WorkScheduler.scheduleAutomation(
                 app,
                 row.id,
                 intervalHours,
-                initialDelayMinutes = intervalHours * 60,
+                initialDelayMinutes = if (delay < 0) intervalHours * 60
+                                      else delay,
                 // Already a List<Int> on the entity (Database.kt:40) - the
                 // first version parsed it as a comma-separated string and
                 // did not compile.

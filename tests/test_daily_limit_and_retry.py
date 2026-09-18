@@ -121,9 +121,13 @@ class TestRetryingAFailedJob:
         src = Path("backend/api/main.py").read_text(encoding="utf-8")
         start = src.index('@app.post("/jobs/{job_id}/retry"')
         block = src[start:src.index("@app.post", start + 10)]
-        assert "WORKER.submit(request)" in block
+        # persist=False was added later: a retry must not rewrite the
+        # operator's recurring automation. See
+        # tests/test_retry_and_quota_regressions.py for why.
+        queue = "WORKER.submit(request, persist=False)"
+        assert queue in block
         assert "delete_jobs" in block
-        assert block.index("WORKER.submit(request)") < block.index("delete_jobs"),             "the replacement must be queued BEFORE the failed row is deleted"
+        assert block.index(queue) < block.index("delete_jobs"),             "the replacement must be queued BEFORE the failed row is deleted"
         # The error still reaches the caller, since the row no longer holds it.
         assert "previous_error" in block
         # Never resets the row in place - it is removed, not rewritten.

@@ -150,6 +150,15 @@ class AutomationRequest(JsonMixin):
     #                default for a recurring automation, which must keep
     #                producing after the bank runs dry.
     script_source: str = "live"
+    # Re-run ONE specific banked script. Set only by the retry endpoint, from
+    # the failed job's `bank_entry_id`.
+    #
+    # Without it a retry claimed whatever was next in the pool, and the
+    # released entry then went to the following scheduled run - so the
+    # operator saw a retry produce a different video and the next run produce
+    # the one they had retried. A preference, not a requirement: if the entry
+    # is gone or already claimed, the normal search runs instead.
+    prefer_bank_entry: str = ""
     # Which group's bank to draw from. Empty derives it from the niche, which
     # is right whenever the niche is one of the group's listed topics.
     niche_group: str = ""
@@ -377,4 +386,14 @@ class VideoJob(JsonMixin):
     youtube_video_id: str = ""
     scheduled_for: str = ""
     published_at: str = ""
+    # Which bank entry this job consumed, if any.
+    #
+    # Recorded on the JOB because `bank_entries.used_at` lives in one table
+    # that the nightly rebuild clears and re-imports. When that lost every
+    # claim, the only surviving link was `idea.json` on disk - and run
+    # directories are deleted to reclaim space. The job payload outlives
+    # both, so usage can always be re-derived (`bank_usage_from_jobs`).
+    # Left set on a FAILED job: the entry was released back to the pool,
+    # and the derivation filters on status rather than on this field.
+    bank_entry_id: str = ""
     logs: list[str] = field(default_factory=list)

@@ -279,6 +279,46 @@ class Pipeline:
                 f"{tz_name}) - it resets at midnight {tz_name}, or raise "
                 f"automation.daily_video_limit to continue")
 
+        # CAN THIS EVEN BE PUBLISHED? Ask before spending minutes rendering.
+        #
+        # The operator's day and Google's quota day are different windows and
+        # they OVERLAP: midnight in Asia/Kolkata is 11:30 the previous morning
+        # in America/Los_Angeles, where the quota resets. So an automation at
+        # 16:00-19:00 IST and one just after midnight IST land in the SAME
+        # Pacific quota day. Measured on the live channel: four uploads at
+        # 23:57 IST plus two at 05:11 and 05:18 IST were six in one Pacific
+        # day - 12,300 units against a 10,000 ceiling - and the runs failed at
+        # the very last step with "video_insert needs 1600 units, 285
+        # available", after a full render had already been paid for.
+        #
+        # An earlier version of this comment claimed the two calendars
+        # straddle each other harmlessly because the limit equals the
+        # ceiling. That was wrong: the limit counts per OPERATOR day and the
+        # ceiling is per PACIFIC day, so two operator days can share one
+        # ceiling.
+        #
+        # Checked without the upload reserve, because that reserve exists to
+        # protect THIS upload.
+        if bool(self.cfg.get("youtube.upload_enabled", False)):
+            try:
+                quota = self.quota
+                # per_upload is the real price: insert + thumbnail + captions.
+                need = quota.per_upload
+                spare = quota.remaining(respect_reserve=False)
+                if spare < need:
+                    problems.append(
+                        f"not enough YouTube quota left to publish: needs "
+                        f"~{need} units, {spare} available "
+                        f"(used {quota.used()}/{quota.limit} in the Pacific "
+                        f"quota day, which resets at midnight "
+                        f"America/Los_Angeles). Rendering now would fail at "
+                        f"the upload, so it is refused before the work is "
+                        f"done.")
+            except Exception as exc:                        # noqa: BLE001
+                # A quota probe must never be the reason a run cannot start.
+                log_event("PREFLIGHT", "could not read the quota ledger",
+                          error=str(exc)[:120])
+
         similar = self._recent_similarity_run()
         halt_after = int(self.cfg.get("automation.stop_after_similar_videos", 3))
         if similar >= halt_after:
@@ -391,7 +431,8 @@ class Pipeline:
             topics=[request.niche], near_seconds=0.0,
             require_review=bool(self.cfg.get("bank.require_review", True)),
             require_human=bool(self.cfg.get("bank.require_human_review",
-                                            False)))
+                                            False)),
+            prefer_entry=getattr(request, "prefer_bank_entry", ""))
         if claim is None:
             counts = {f"{r['grp']}/{r['language']}/{r['video_format']}":
                       f"{r['unused']}/{r['total']}"
@@ -462,6 +503,10 @@ class Pipeline:
             request.made_for_kids = True
 
         job.request = request.to_dict()
+        # The durable record of what this job consumed. `bank_entries.used_at`
+        # is authoritative while it survives; this is what it can be rebuilt
+        # from when it does not.
+        job.bank_entry_id = claim.entry_id
         safe_write_json(Path(job.dir) / "bank_entry.json",
                         claim.entry.to_dict())
         return claim
@@ -1642,8 +1687,21 @@ class Pipeline:
 
         if not skip_preflight:
             problems = self.preflight(request)
-            blocking = [p for p in problems if "ffmpeg" in p or "limit" in p
-                        or "YOUTUBE_API_KEY" in p]
+            # Which preflight problems stop the run, decided by substring.
+            #
+            # FRAGILE BY CONSTRUCTION, and it already bit: a new check for
+            # "not enough YouTube quota left to publish" matched none of the
+            # three tokens below, so it would have been reported and then
+            # ignored - rendering for minutes before failing at the upload,
+            # which is the exact waste the check exists to prevent.
+            #
+            # Kept as substrings rather than restructured because preflight
+            # returns prose the app displays; the tokens are listed in one
+            # place so a new check can be added to the list instead of
+            # silently falling through it.
+            blocking_tokens = ("ffmpeg", "limit", "YOUTUBE_API_KEY", "quota")
+            blocking = [p for p in problems
+                        if any(t in p for t in blocking_tokens)]
             if blocking:
                 job.error = " | ".join(blocking)
                 self._advance(job, JobStatus.FAILED, job.error)
