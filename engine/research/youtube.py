@@ -59,25 +59,49 @@ class QuotaGuard:
 
         The insert alone was the figure everywhere - in the reserve, in the
         /quota endpoint, in the docs - and it is not what an upload spends.
-        Every video this pipeline publishes also sets a thumbnail and
-        attaches a caption track, so the true price is 2050, not 1600. The
-        difference is the whole gap between the "6 uploads/day" the app used
-        to promise and the 4 the quota actually buys.
+        Every video this pipeline publishes also sets a thumbnail, so the
+        price is at least 1650, not 1600. The difference is the whole gap
+        between the "6 uploads/day" the app used to promise and what the
+        quota actually buys.
+
+        THE CAPTION TRACK IS CONDITIONAL, because attaching one is a choice
+        (`youtube.attach_captions`) and it is off: the renderer already burns
+        subtitles into the frame, and 400 units is the difference between
+        four uploads a day and five. Charging for a call the publisher will
+        not make would hold back a fifth of the budget for nothing - which is
+        precisely what it did while captions were failing with a 403 and the
+        ledger showed 1,600 a video against a 2,050 reserve.
         """
-        # A worst-case figure, deliberately. The thumbnail is skipped on an
-        # unverified channel and the caption track on a video with no
-        # subtitle file, so a particular upload can cost less - but a
-        # reserve that assumes the cheap case is a reserve that runs out.
-        # The playlist add is NOT included: nothing sets a playlist by
-        # default, and charging every upload for it would shrink the
+        # A worst-case figure otherwise, deliberately. The thumbnail is
+        # skipped on an unverified channel, so a particular upload can cost
+        # less - but a reserve that assumes the cheap case is a reserve that
+        # runs out. The playlist add is NOT included: nothing sets a playlist
+        # by default, and charging every upload for it would shrink the
         # research budget for a call that usually does not happen.
-        return (self.cost("video_insert") + self.cost("thumbnail_set")
-                + self.cost("captions_insert"))
+        total = self.cost("video_insert") + self.cost("thumbnail_set")
+        if bool(self.cfg.get("youtube.attach_captions", False)):
+            total += self.cost("captions_insert")
+        return total
+
+    @property
+    def research_reserve(self) -> int:
+        """Units held back for research, so uploads cannot eat the budget."""
+        return max(0, int(self.cfg.get("youtube.research_reserve_units", 1500)))
 
     @property
     def max_uploads_per_day(self) -> int:
-        """The real ceiling. One definition, read by the API, CLI and app."""
-        return max(0, self.limit // max(self.per_upload, 1))
+        """The real ceiling. One definition, read by the API, CLI and app.
+
+        RESEARCH IS SUBTRACTED FIRST. This used to be `limit // per_upload`,
+        which models no research at all - it was right by accident while an
+        upload cost 2,050 (10,000/2,050 = 4, and the 1,800 left over happened
+        to cover the searches). Switching captions off drops an upload to
+        1,650, and the old sum would have answered SIX: six uploads leaves
+        100 units and the first `search.list` of the day - 100 units - would
+        have been the call that failed.
+        """
+        spendable = max(0, self.limit - self.research_reserve)
+        return max(0, spendable // max(self.per_upload, 1))
 
     @property
     def uploads_today(self) -> int:

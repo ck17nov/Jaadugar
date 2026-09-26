@@ -165,8 +165,19 @@ Default: **10,000 units/day per project**, resetting at midnight US Pacific.
 | `captions.insert` | 400 |
 
 A full research run costs about **302 units**. A published video with a
-thumbnail and captions costs **2,050**. So the practical ceiling is about
-**four fully-featured uploads per day**, research included.
+thumbnail costs **1,650**; add a caption track and it is **2,050**.
+
+Captions are **off** (`youtube.attach_captions: false`) because the renderer
+already burns subtitles into the frame and that 400 units is the difference
+between four uploads a day and five. So the ceiling is **five uploads per
+day**, research included:
+
+```
+(10,000 - 1,500 reserved for research) / 1,650 = 5
+```
+
+Quota is charged per **call**, not per byte or per minute — a 30-minute
+long-form upload costs the same 1,600 as a 30-second short.
 
 Check your spend at any time:
 
@@ -174,8 +185,10 @@ Check your spend at any time:
 .venv/Scripts/python -m backend.cli quota
 ```
 
-`QuotaGuard` reserves `2,050 units x the uploads still owed today`
-(1,600 insert + 50 thumbnail + 400 captions), decremented as uploads
+`QuotaGuard` reserves `1,650 units x the uploads still owed today`
+(1,600 insert + 50 thumbnail; the caption track's 400 is added only when
+`attach_captions` is on, since reserving for a call that is never made held
+back a fifth of the budget for nothing), decremented as uploads
 land, so research can never eat
 the budget you need for publishing, and refuses a call that would exceed the cap
 rather than letting Google return an opaque 403 mid-upload.

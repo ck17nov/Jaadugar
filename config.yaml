@@ -64,6 +64,37 @@ youtube:
     video_insert: 1600
     thumbnail_set: 50
     captions_insert: 400
+  # ATTACH A YOUTUBE CAPTION TRACK? No - and this is a deliberate trade.
+  #
+  # The renderer already burns subtitles into the frame with libass, so the
+  # words are on screen either way. A YouTube caption track adds the CC
+  # toggle, search indexing and screen-reader access on top of that, and
+  # costs 400 units per upload.
+  #
+  # 400 is the whole difference between four uploads a day and five. With
+  # this off an upload costs 1,650 and the day buys five; with it on an
+  # upload costs 2,050 and the day buys four. The fifth video was judged
+  # worth more than a second copy of subtitles the viewer can already read.
+  #
+  # Turning it back on needs TWO other things, or it fails at publish with
+  # `403 insufficient authentication scopes`: add
+  # `https://www.googleapis.com/auth/youtube.force-ssl` to SCOPES in BOTH
+  # engine/youtube/auth.py and YouTubeAuthManager.kt, then reconnect every
+  # channel - a token never widens the scopes it was minted with.
+  attach_captions: false
+  # Units held back for research, so the upload ceiling cannot eat the
+  # budget that finds the content gap.
+  #
+  # Measured over six consecutive Pacific days: 900-1,200 units a day, all
+  # of it `search.list` at 100 a call. 1,500 is that plus a margin for a
+  # fourth query or a retry.
+  #
+  # This exists because `limit // per_upload` models no research at all. It
+  # gave the right answer by accident while an upload cost 2,050
+  # (10,000/2,050 = 4, leaving 1,800 spare) and would have said SIX the
+  # moment captions were switched off - six uploads leaves 100 units, and
+  # the first search of the day would fail.
+  research_reserve_units: 1500
   made_for_kids: false
   # YouTube requires disclosure of realistic synthetic media.
   synthetic_disclosure: true
@@ -438,13 +469,19 @@ originality:
 
 automation:
   approval_required: true        # APPROVAL MODE is the default (spec section 24)
-  # Four, because that is what the YouTube quota actually buys.
+  # Five, because that is what the quota buys with captions off.
   #
-  # A full upload spends 1600 (insert) + 50 (thumbnail) + 400 (captions) =
-  # 2050 units, and the free daily grant is 10,000. Anything above four is a
-  # limit that cannot be reached: the fifth video uploads and then fails to
-  # attach its captions. QuotaGuard clamps to the same number.
-  daily_video_limit: 4
+  # An upload spends 1600 (insert) + 50 (thumbnail) = 1,650 while
+  # `youtube.attach_captions` is false. Against a 10,000 grant, holding back
+  # `research_reserve_units` (1,500) for the searches:
+  #   (10,000 - 1,500) / 1,650 = 5
+  # With captions on an upload is 2,050 and the same sum gives 4, which is
+  # what this said before - the number moved because the cost did.
+  #
+  # Never set this above `QuotaGuard.max_uploads_per_day`; the guard clamps
+  # to it anyway, and a limit that cannot be reached is a limit that fails
+  # at the last video of the day instead of refusing it up front.
+  daily_video_limit: 5
   max_retries: 3
   retry_backoff_seconds: 20
   # Anti-spam (spec section 46)

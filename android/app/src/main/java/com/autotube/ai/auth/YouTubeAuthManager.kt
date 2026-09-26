@@ -245,18 +245,20 @@ class YouTubeAuthManager(context: Context, private val store: SecureStore) {
         /**
          * MUST MATCH engine/youtube/auth.py SCOPES.
          *
-         * force-ssl is here because captions.insert needs it and nothing
-         * else in this list covers it. Without it every upload logged
-         * `captions failed ... 403 insufficient authentication scopes` and
-         * carried on, so every published video went out with no caption
-         * track. A token minted before this keeps its old scopes for ever -
-         * refreshing does not widen them - so each channel must be
-         * reconnected once.
+         * This list is the one that decides, because the phone mints the
+         * token and the backend only stores it.
+         *
+         * `youtube.force-ssl` is deliberately absent. It is what
+         * captions.insert needs, and captions are off by choice
+         * (`youtube.attach_captions`) because the renderer already burns
+         * subtitles into the frame and a caption track costs 400 quota units
+         * - the difference between four uploads a day and five. Requesting a
+         * permission nothing uses would widen the consent screen and force a
+         * reconnect of every channel for no benefit.
          */
         val SCOPES = listOf(
             "https://www.googleapis.com/auth/youtube.upload",
             "https://www.googleapis.com/auth/youtube",
-            "https://www.googleapis.com/auth/youtube.force-ssl",
             "https://www.googleapis.com/auth/yt-analytics.readonly",
         )
     }

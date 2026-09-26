@@ -251,7 +251,22 @@ class YouTubeUploader:
                           error=str(exc)[:160])
 
         # ---- captions --------------------------------------------------
-        if subtitle is not None and subtitle.exists():
+        #
+        # OFF BY CHOICE, not by accident - and the distinction matters,
+        # because it was off by accident for a week. Every upload called
+        # captions.insert, got `403 insufficient authentication scopes`,
+        # logged a truncated line and published without a caption track.
+        #
+        # The subtitles are burned into the frame by the renderer either way.
+        # A YouTube track adds the CC toggle, search indexing and
+        # screen-reader access, and costs 400 units - the difference between
+        # four uploads a day and five. See `youtube.attach_captions`.
+        if not bool(self.cfg.get("youtube.attach_captions", False)):
+            if subtitle is not None and subtitle.exists():
+                log_event("YOUTUBE", "caption track not attached, by config",
+                          note=("subtitles are burned into the frame; "
+                                "youtube.attach_captions is false"))
+        elif subtitle is not None and subtitle.exists():
             try:
                 if self.quota is not None:
                     self.quota.check("captions_insert", respect_reserve=False)

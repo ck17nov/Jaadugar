@@ -25,8 +25,11 @@ lives in the app, a phone that is off or battery-optimised means that day's
 video is not made. PROJECT_OVERVIEW.md §5 is precise about this.
 
 **Target cost: Rs 0/month.** The binding limit is not money, it is YouTube's API
-quota — **4 uploads/day** on a default project, because a published
-video costs 2,050 units (insert + thumbnail + captions) out of 10,000. See
+quota — **5 uploads/day** on a default project: a published video costs 1,650
+units (insert + thumbnail) out of 10,000, and 1,500 is held back for
+research. Attaching a YouTube caption track would add 400 and cost the fifth
+upload, so it is deliberately off — the subtitles are burned into the frame
+instead. See
 [docs/SERVICE_COSTS.md](docs/SERVICE_COSTS.md) for every service, its real free
 tier, and what it cannot do.
 
@@ -250,11 +253,11 @@ Verified on this machine (Windows 11, Python 3.12, FFmpeg 9.0, JDK 17, Android S
 | Area | State |
 |---|---|
 | Engine: research -> script -> voice -> visuals -> render -> quality | Run end-to-end on Shorts and on long-form, every artifact verified. Render path confirmed on **both** ffmpeg 6.1.1 (server) and 9.0 (laptop) |
-| Python test suite | **1,539 tests passing, 0 skipped** |
+| Python test suite | **1,549 tests passing, 0 skipped** |
 | Static analysis | pyflakes clean (bar 3 documented import-probes) |
 | Backend API + CLI | 28 endpoints, `doctor` / `run` / `research` / `quota` exercised |
 | Android unit tests | **19 passing** (`gradlew testDebugUnitTest`) - Kotlin string assertions elsewhere in `tests/` cannot catch a compile error, so anything with real logic belongs here |
-| Android app | **Compiles and packages: 24.7 MB debug APK** (`com.autotube.ai` - debug carries no applicationIdSuffix on purpose, so the OAuth client matches; minSdk 26, targetSdk 35, versionCode 4 / 0.2.2) |
+| Android app | **Compiles and packages: 24.7 MB debug APK** (`com.autotube.ai` - debug carries no applicationIdSuffix on purpose, so the OAuth client matches; minSdk 26, targetSdk 35, versionCode 5 / 0.2.3) |
 | YouTube upload + analytics | **Exercised for real: 9 videos published, 3 channels connected and verified.** OAuth consent screen published, so tokens no longer expire weekly |
 | Script bank | **1,193 entries** across 46 cells; delivery files and database agree exactly |
 | Deployment | Live on an Oracle Cloud free ARM box behind Caddy; `python scripts/deploy.py --confirm` |
@@ -309,9 +312,14 @@ exists to stop.
 
 ### Known limits, stated plainly
 
-- **4 uploads/day** on a default YouTube quota - 10,000 units, and a
-  video with its thumbnail and caption track costs 2,050. Hard ceiling,
-  not a bug.
+- **5 uploads/day** on a default YouTube quota - 10,000 units, a video
+  with its thumbnail costs 1,650, and 1,500 is reserved for research.
+  Hard ceiling, not a bug. Quota is charged per API CALL, so a 30-minute
+  long-form upload costs exactly the same as a 30-second short.
+- **No YouTube caption track**, by choice. `captions.insert` costs 400 units
+  - the whole difference between four uploads a day and five - and the
+  renderer already burns the subtitles into the frame. See
+  `youtube.attach_captions`.
 - **YouTube refuses videos over 15 minutes** until your channel is verified.
   Verifying is free and takes a minute; the app warns you above 15 minutes.
 - **Long-form needs an LLM key.** The template builder cannot honestly fill

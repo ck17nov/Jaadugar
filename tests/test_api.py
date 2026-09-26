@@ -189,16 +189,23 @@ class TestQuotaEndpoint:
         assert body["costs"]["video_insert"] == 1600
         assert body["costs"]["search_list"] == 100
         assert body["limit"] == 10000
-        # FOUR, and derived from the cost table rather than asserted, so
-        # the number cannot drift away from the costs again. It read 6 for
-        # as long as it divided by the insert alone and ignored the
-        # thumbnail and the caption track every upload also pays for.
+        # FIVE, and derived rather than asserted, so the number cannot
+        # drift away from the costs again. It read 6 for as long as it
+        # divided by the insert alone and ignored the thumbnail; it read 4
+        # while every upload was budgeted for a caption track.
+        #
+        # Captions are now off by choice (`youtube.attach_captions`): the
+        # renderer burns subtitles into the frame, and the 400 units a track
+        # costs is the difference between four uploads a day and five.
         assert body["costs"]["thumbnail_set"] == 50
-        assert body["costs"]["captions_insert"] == 400
-        assert body["units_per_upload"] == 2050
-        assert body["max_uploads_per_day"] == 4
+        assert body["costs"]["captions_insert"] == 400,             "the cost table still knows the price, even unused"
+        assert body["units_per_upload"] == 1650
+        assert body["max_uploads_per_day"] == 5
+        # RESEARCH IS SUBTRACTED FIRST. The naive sum answers 6, which
+        # leaves 100 units - the price of exactly one search.list.
+        assert body["limit"] // body["units_per_upload"] == 6
         assert body["max_uploads_per_day"] == (
-            body["limit"] // body["units_per_upload"])
+            (body["limit"] - 1500) // body["units_per_upload"])
         assert "Pacific" in body["resets"]
 
     def test_reserve_is_subtracted_from_research_budget(self, client):

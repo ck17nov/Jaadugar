@@ -25,23 +25,29 @@ from typing import Any
 from ..core.config import Config
 from ..core.logging import log_event
 
-# CAPTIONS NEED force-ssl, AND THEIR ABSENCE WAS SILENT.
+# THE SCOPE captions.insert NEEDS, AND IT IS DELIBERATELY NOT REQUESTED.
 #
-# Every upload logged `captions failed ... 403 Request had insufficient
-# authentication scopes` and carried on, so every published video went out
-# with no caption track and nobody noticed for a week. `captions.insert` is
-# the one call in this pipeline that youtube.upload + youtube do not cover.
+# `captions.insert` is the one call in this pipeline that youtube.upload and
+# youtube do not cover. For a week every upload called it anyway, got
+# `403 Request had insufficient authentication scopes`, logged a truncated
+# line and published with no caption track - found not in the log but in the
+# quota ledger, which showed 1,600 units a video where 2,000 was budgeted.
 #
-# Adding it here only affects a NEW consent. A token minted under the old
-# list keeps the old scopes for ever - refreshing does not widen them - so
-# every channel has to be reconnected once. `missing_scopes()` below is what
-# tells the operator that, instead of leaving them to read a 403 in a log.
+# Captions are now off on purpose (`youtube.attach_captions`): the renderer
+# burns subtitles into the frame, and the 400 units a track costs is the
+# difference between four uploads a day and five.
+#
+# So this scope is NOT in SCOPES. Asking for a permission nothing uses means
+# a wider consent screen and a reconnect for every channel, for nothing. To
+# turn captions on: set `youtube.attach_captions: true`, add this constant to
+# SCOPES here AND to YouTubeAuthManager.kt, then reconnect every channel - a
+# token never widens the scopes it was minted with, so a config flag alone
+# brings the 403 straight back.
 CAPTIONS_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube",
-    CAPTIONS_SCOPE,
     "https://www.googleapis.com/auth/yt-analytics.readonly",
 ]
 

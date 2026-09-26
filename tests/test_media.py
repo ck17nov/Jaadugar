@@ -240,12 +240,14 @@ class TestQuotaGuard:
         guard = QuotaGuard(cfg, db)
         try:
             # Reserve = the uploads STILL OWED x what one really costs.
-            # 2050, not 1600: a published video also sets a thumbnail and
-            # attaches captions.
+            # 1650, not 1600: a published video also sets a thumbnail. The
+            # caption track's 400 is NOT included - captions are off by
+            # choice, and reserving for a call the publisher will not make
+            # held back a fifth of the day's budget for nothing.
             planned = min(int(cfg.get("automation.daily_video_limit")),
                           guard.max_uploads_per_day)
-            assert guard.per_upload == 2050
-            assert guard.reserve == planned * 2050
+            assert guard.per_upload == 1650
+            assert guard.reserve == planned * 1650
             assert guard.remaining() == guard.limit - guard.reserve
             # Uploads may ignore the reserve; research may not.
             guard.check("video_insert", respect_reserve=False)
@@ -274,8 +276,10 @@ class TestQuotaGuard:
                           guard.max_uploads_per_day)
             start = guard.reserve
             for done in range(1, planned + 1):
-                for op in ("video_insert", "thumbnail_set",
-                           "captions_insert"):
+                # No captions_insert: that call is not made while
+                # `youtube.attach_captions` is false, so spending it here
+                # would model a cost the real publisher never pays.
+                for op in ("video_insert", "thumbnail_set"):
                     guard.spend(op)
                 assert guard.reserve == (planned - done) * guard.per_upload
                 # And the point of it: research still has room to run.
@@ -286,20 +290,41 @@ class TestQuotaGuard:
             db.close()
 
     def test_the_ceiling_counts_the_whole_upload(self, cfg):
-        """4, not 6. The app showed 6 because it divided by the insert."""
+        """5, and every part of that number has moved at least once.
+
+        It read 6 while the app divided by the insert alone. It read 4 once
+        the thumbnail and the caption track were counted. It reads 5 now
+        that captions are off by choice - the renderer burns subtitles into
+        the frame, and 400 units a video is what buys the fifth upload.
+
+        Research is subtracted BEFORE the division. The naive sum still
+        answers 6, which would leave 100 units - the price of exactly one
+        `search.list`, so the first search of the day would be the call that
+        failed.
+        """
         from engine.research.youtube import QuotaGuard
         guard = QuotaGuard(cfg, None)
         assert guard.per_upload == (guard.cost("video_insert")
-                                    + guard.cost("thumbnail_set")
-                                    + guard.cost("captions_insert"))
-        assert guard.max_uploads_per_day == guard.limit // guard.per_upload
+                                    + guard.cost("thumbnail_set"))
+        assert guard.cost("captions_insert") == 400,             "the price is still known, it is just not being paid"
+        assert guard.limit // guard.per_upload == 6, "the naive sum"
+        assert guard.max_uploads_per_day == (
+            (guard.limit - guard.research_reserve) // guard.per_upload)
+        assert guard.max_uploads_per_day == 5
+
+    def test_captions_on_returns_the_ceiling_to_four(self, cfg):
+        """The trade is reversible, and reversing it costs the fifth video."""
+        from engine.research.youtube import QuotaGuard
+        cfg.set("youtube.attach_captions", True)
+        guard = QuotaGuard(cfg, None)
+        assert guard.per_upload == 2050
         assert guard.max_uploads_per_day == 4
 
     def test_an_impossible_daily_limit_cannot_pin_research_at_zero(self, cfg,
                                                                    tmp_path):
         """daily_video_limit above the ceiling would reserve the whole day.
 
-        5 x 2050 is 10,250 - more than the entire grant - so an unclamped
+        9 x 1650 is 14,850 - more than the entire grant - so an unclamped
         reserve leaves remaining() at 0 permanently and no job ever
         researches anything again.
         """

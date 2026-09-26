@@ -283,6 +283,7 @@ def auth_channels(
     # the day it is real. No API here can read the publishing status, so it
     # is recorded in config (youtube.oauth_published).
     published = bool(load_config().get("youtube.oauth_published", False))
+    captions_on = bool(load_config().get("youtube.attach_captions", False))
 
     table = Table(title="Connected channels")
     for col in ("", "Channel", "Niches", "Granted",
@@ -307,15 +308,18 @@ def auth_channels(
                 expiry = f"[yellow]{left:.1f}d left[/yellow]"
             else:
                 expiry = f"{left:.1f}d left"
-        # A SCOPE GAP HAS TO BE VISIBLE HERE.
+        # WHY THIS COLUMN EXISTS: captions.insert answered 403 on every
+        # upload for a week while the videos published fine without a track,
+        # and nothing on screen said so - it was only in journalctl.
         #
-        # force-ssl was added after these channels were connected, and a
-        # refresh does not widen a token's scopes - so captions.insert
-        # answered 403 on every upload for a week while the videos published
-        # fine without captions. Nothing on screen said so; it was only in
-        # journalctl.
+        # It now reports the CHOICE first. Captions are off by config, so
+        # "no scope" is not a fault to fix; it would only become one if
+        # someone set attach_captions without also widening the scopes and
+        # reconnecting, which is exactly the state that produced the 403.
         gaps = missing_scopes(ch.scopes)
-        if not ch.scopes:
+        if not captions_on:
+            captions = "[dim]off (burned in)[/dim]"
+        elif not ch.scopes:
             captions = "[dim]unknown[/dim]"
         elif CAPTIONS_SCOPE in gaps:
             captions = "[red]no - reconnect[/red]"
@@ -328,13 +332,21 @@ def auth_channels(
                       ", ".join(ch.niches or []) or "-",
                       granted, expiry, captions)
     console.print(table)
-    if any(CAPTIONS_SCOPE in missing_scopes(ch.scopes) for ch in rows):
+    if not captions_on:
+        console.print(
+            "[dim]Captions: no YouTube caption track is attached "
+            "(youtube.attach_captions is false). The subtitles are burned "
+            "into the frame by the renderer, and the 400 units a track costs "
+            "is what pays for the fifth upload each day.[/dim]")
+    elif any(CAPTIONS_SCOPE in missing_scopes(ch.scopes) for ch in rows):
         console.print(
             "[yellow]One or more channels cannot attach captions.[/yellow] "
-            "They were authorised before the youtube.force-ssl scope was "
-            "required, and refreshing a token does not widen its scopes. "
-            "Reconnect each one from the app's Channels screen; nothing else "
-            "about the channel changes.")
+            "attach_captions is on, but these tokens do not carry "
+            "youtube.force-ssl and refreshing does not widen a token's "
+            "scopes. Add the scope to SCOPES in engine/youtube/auth.py AND "
+            "YouTubeAuthManager.kt, then reconnect each channel from the "
+            "app - otherwise every upload will log a 403 and publish without "
+            "a caption track.")
     if published:
         console.print("[dim]* default. The OAuth consent screen is recorded "
                       "as published, so refresh tokens do not expire on a "

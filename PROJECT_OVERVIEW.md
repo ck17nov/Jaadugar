@@ -467,31 +467,53 @@ ones that matter:
 | `quality.minimum_score` | see config | A request may raise this, never lower it. |
 | `content.llm_provider_order` | gemini, groq, template | Ollama deliberately excluded. |
 
-**Quota:** each published upload is budgeted at **2,050 units** (1,600
-insert + 400 captions + 50 thumbnail) against 10,000/day, so **4 uploads/day**
-is the ceiling, leaving room for research.
+**Quota:** each published upload costs **1,650 units** (1,600 insert + 50
+thumbnail) against 10,000/day. Holding back 1,500 for research gives
+**5 uploads/day**:
 
-**2,050 is the worst case, and what the ledger actually recorded was 1,600.**
+```
+(10,000 - 1,500) / 1,650 = 5
+```
+
+Research is subtracted *before* the division, which it never used to be.
+`limit // per_upload` models no research at all — it happened to give the
+right answer while an upload cost 2,050, and would have said **six** the
+moment captions were switched off. Six uploads leaves 100 units, and the
+first `search.list` of the day costs exactly 100.
+
+**How the caption track came to be off, and then stayed off on purpose.**
+
+It was budgeted at 400 units and charged at zero, which is what gave it away.
 Measured over six consecutive Pacific days in September 2026: 7,308–7,610
-units for four uploads, broken down as 4 × `videos.insert` (1,600 each) plus
-9–12 × `search.list` (100 each) plus a handful of 1-unit list calls. Neither
-the thumbnail nor the caption track was being charged — because neither was
-happening. `captions.insert` was answering `403 Request had insufficient
-authentication scopes` on **every** upload for a week: it requires
-`youtube.force-ssl`, and the tokens carried only `youtube.upload`, `youtube`
-and `yt-analytics.readonly`. The video published fine, so the only symptom was
-a truncated line in `journalctl` and 400 units of unspent quota.
+units for four uploads — 4 × `videos.insert` (1,600) plus 9–12 ×
+`search.list` (100) plus a handful of 1-unit list calls. Neither the caption
+track nor the thumbnail appeared. `captions.insert` had been answering
+`403 Request had insufficient authentication scopes` on **every** upload for
+a week: it needs `youtube.force-ssl`, and the tokens carried only
+`youtube.upload`, `youtube` and `yt-analytics.readonly`. The video published
+fine, so the only symptom was a truncated line in `journalctl` and 400 units
+of unspent quota. **The ledger found it, not the log.**
 
-The scope is now requested in **both** lists — `engine/youtube/auth.py` and
-`YouTubeAuthManager.kt`, and the phone's is the one that decides, since the
-phone mints the token. A token keeps the scopes it was minted with; refreshing
-does not widen them, so every channel has to be reconnected once.
-`missing_scopes()` reports the gap and `auth channels` shows it in a
-**Captions** column, so it cannot go unnoticed again.
+It is now off **by decision**, via `youtube.attach_captions: false`:
 
-**Note the trade.** Working captions cost 400 units per upload. At 1,600 there
-is room for a fifth upload a day; at 2,000 there is not. The spare capacity
-existed *because* a feature was broken.
+- The renderer already burns subtitles into the frame with libass, so the
+  words are on screen either way. A YouTube track adds the CC toggle, search
+  indexing and screen-reader access on top of that.
+- It costs 400 units, which is the entire difference between four uploads a
+  day and five. The fifth video was judged worth more than a second copy of
+  subtitles the viewer can already read.
+- `youtube.force-ssl` is therefore **not** in `SCOPES` — in either list.
+  Requesting a permission nothing uses widens the consent screen and forces a
+  reconnect of every channel for no benefit.
+
+**Turning it back on takes three changes, not one.** Set
+`attach_captions: true`, add `CAPTIONS_SCOPE` to `SCOPES` in **both**
+`engine/youtube/auth.py` and `YouTubeAuthManager.kt`, and reconnect every
+channel — a token never widens the scopes it was minted with, so the flag
+alone brings the 403 straight back. `per_upload` returns to 2,050 and the
+ceiling to 4 on its own. `auth channels` has a **Captions** column that reads
+`off (burned in)` now and would read `no - reconnect` in that half-done
+state, so it cannot go unnoticed again.
 
 **Quota units do not depend on video length.** The API charges per call, not
 per byte, second or resolution: `videos.insert` is 1,600 units for a
@@ -556,7 +578,7 @@ have **no `api:` section in config.yaml**, so both run on code defaults.
 - Render path verified on **both** ffmpeg 6.1.1 (server) and 9.0 (laptop).
 - 3 channels connected, all verified refreshing; OAuth published so tokens no
   longer expire weekly.
-- **1,539 tests pass, 0 skipped.**
+- **1,549 tests pass, 0 skipped.**
 - Server rebooted onto current glibc, 2 GB swap, root SSH off.
 
 ### Partially working
@@ -599,7 +621,8 @@ execution, phone-triggered).
 | No off-instance backup | VM loss costs tokens, job history, learned state | Periodic export to object storage or git |
 | Long-form cells hold 1 entry | One render empties the cell | Author more long-form |
 | No human review | `require_human_review` would empty the pool | Review, or accept machine-reviewed |
-| 4 uploads/day hard ceiling | Cannot exceed without a quota increase | Apply to YouTube with an audit |
+| 5 uploads/day hard ceiling | Cannot exceed without a quota increase | Apply to YouTube with an audit |
+| No YouTube caption track | No CC toggle, no caption search indexing | Deliberate: the subtitles are burned into the frame, and 400 units a video is what buys the fifth upload |
 | Free-tier LLM rate limits | Gemini rests under load | Already falls forward to Groq |
 | Bank selection is first-available | No quality ordering | Rank claim candidates |
 | A test leaves a render running past teardown | 8.5 MB of scratch per suite run | Shut the executor down |
@@ -670,6 +693,6 @@ child-directed. **Read before you change.**
 
 ### Before you claim something works
 
-Run `python -m pytest tests/ -q` (1,539 tests, ~5 minutes). The suite renders
+Run `python -m pytest tests/ -q` (1,549 tests, ~5 minutes). The suite renders
 real video with ffmpeg. A `conftest.py` fixture deletes what the run created;
 if you see `workspace/jobs` growing, that fixture broke.
