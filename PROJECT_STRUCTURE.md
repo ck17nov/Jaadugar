@@ -20,7 +20,7 @@ Vid App/
 ├── backend/         (7 files)   FastAPI surface + Typer CLI
 ├── android/         (58 files)  Kotlin/Compose app; ALSO the scheduler
 ├── banks/           (141 files) the script bank, as JSONL
-├── tests/           (57 files)  1,528 tests
+├── tests/           (56 files)  1,539 tests
 ├── scripts/         (12 files)  operator tooling
 ├── deploy/oracle/   (6 files)   systemd units, Caddyfile, setup.sh
 ├── docs/            (12 files)  setup guides + the public privacy/terms pages
@@ -81,7 +81,7 @@ No HTTP, no framework. Importable and testable on its own.
 | `data/local/Database.kt` | Room cache. Destructive migration — an upgrade empties it. |
 | `data/repo/AutoTubeRepository.kt` | The single path between UI and backend. |
 | `ui/screens/` | Create, Dashboard, Settings, Preview, Content & Scheduler. |
-| `app/build.gradle.kts` | `applicationId com.autotube.ai`, versionCode 3 / 0.2.1. No release signing config. |
+| `app/build.gradle.kts` | `applicationId com.autotube.ai`, versionCode 4 / 0.2.2. No release signing config. |
 
 ## banks/ — the script bank
 

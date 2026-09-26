@@ -467,9 +467,36 @@ ones that matter:
 | `quality.minimum_score` | see config | A request may raise this, never lower it. |
 | `content.llm_provider_order` | gemini, groq, template | Ollama deliberately excluded. |
 
-**Quota:** each published upload costs **2,050 units** (1,600 insert + 400
-captions + 50 thumbnail) against 10,000/day, so **4 uploads/day** is the hard
-ceiling, leaving room for research.
+**Quota:** each published upload is budgeted at **2,050 units** (1,600
+insert + 400 captions + 50 thumbnail) against 10,000/day, so **4 uploads/day**
+is the ceiling, leaving room for research.
+
+**2,050 is the worst case, and what the ledger actually recorded was 1,600.**
+Measured over six consecutive Pacific days in September 2026: 7,308–7,610
+units for four uploads, broken down as 4 × `videos.insert` (1,600 each) plus
+9–12 × `search.list` (100 each) plus a handful of 1-unit list calls. Neither
+the thumbnail nor the caption track was being charged — because neither was
+happening. `captions.insert` was answering `403 Request had insufficient
+authentication scopes` on **every** upload for a week: it requires
+`youtube.force-ssl`, and the tokens carried only `youtube.upload`, `youtube`
+and `yt-analytics.readonly`. The video published fine, so the only symptom was
+a truncated line in `journalctl` and 400 units of unspent quota.
+
+The scope is now requested in **both** lists — `engine/youtube/auth.py` and
+`YouTubeAuthManager.kt`, and the phone's is the one that decides, since the
+phone mints the token. A token keeps the scopes it was minted with; refreshing
+does not widen them, so every channel has to be reconnected once.
+`missing_scopes()` reports the gap and `auth channels` shows it in a
+**Captions** column, so it cannot go unnoticed again.
+
+**Note the trade.** Working captions cost 400 units per upload. At 1,600 there
+is room for a fifth upload a day; at 2,000 there is not. The spare capacity
+existed *because* a feature was broken.
+
+**Quota units do not depend on video length.** The API charges per call, not
+per byte, second or resolution: `videos.insert` is 1,600 units for a
+30-second short and 1,600 for a 30-minute long-form. Long-form costs more
+render time and more free-tier LLM and image calls — not more YouTube quota.
 
 **Two different days, on purpose — and they OVERLAP.** The quota ledger
 buckets by `pacific_day()` because that is when Google resets.
@@ -529,7 +556,7 @@ have **no `api:` section in config.yaml**, so both run on code defaults.
 - Render path verified on **both** ffmpeg 6.1.1 (server) and 9.0 (laptop).
 - 3 channels connected, all verified refreshing; OAuth published so tokens no
   longer expire weekly.
-- **1,528 tests pass, 0 skipped.**
+- **1,539 tests pass, 0 skipped.**
 - Server rebooted onto current glibc, 2 GB swap, root SSH off.
 
 ### Partially working
@@ -577,6 +604,8 @@ execution, phone-triggered).
 | Bank selection is first-available | No quality ordering | Rank claim candidates |
 | A test leaves a render running past teardown | 8.5 MB of scratch per suite run | Shut the executor down |
 | A retry re-runs the brief, not the exact failed render | Everything after the script is produced again — new voice, new images, a new render | Intended. The *script* is the same: the retry asks for the failed job's entry by name |
+| A stale card needs one sync to clear | A job removed on the backend disappears from the phone on the next refresh, not instantly | `refreshJobs` reconciles; pull to refresh if impatient |
+| Adding an OAuth scope means reconnecting every channel | A token never widens its own scopes | `auth channels` names which ones are short |
 | "Older than 7 days" looks like Clear did nothing | Today's failures are correctly kept, and nothing says so | Report how many rows were removed |
 | No packaging file | `autotube` is not a command; use `python -m backend.cli` | Add `pyproject.toml` if wanted |
 | Release APK unsigned | Cannot install a release build | Add a keystore + register its SHA-1 |
@@ -641,6 +670,6 @@ child-directed. **Read before you change.**
 
 ### Before you claim something works
 
-Run `python -m pytest tests/ -q` (1,528 tests, ~5 minutes). The suite renders
+Run `python -m pytest tests/ -q` (1,539 tests, ~5 minutes). The suite renders
 real video with ffmpeg. A `conftest.py` fixture deletes what the run created;
 if you see `workspace/jobs` growing, that fixture broke.

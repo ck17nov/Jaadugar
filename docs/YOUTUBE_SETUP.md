@@ -39,10 +39,20 @@ You need two separate credentials:
 1. **APIs and Services -> OAuth consent screen**.
 2. User type **External**. (Internal only exists for Workspace organisations.)
 3. Fill in app name, support email, developer email.
-4. **Scopes** — add exactly these three:
+4. **Scopes** — add exactly these four:
    - `.../auth/youtube.upload`
    - `.../auth/youtube`
+   - `.../auth/youtube.force-ssl` — **required for captions.** Without it
+     `captions.insert` answers `403 Request had insufficient authentication
+     scopes`, the video publishes anyway, and every upload silently goes out
+     with no caption track. This was missing for a week before the quota
+     ledger gave it away: 1,600 units per upload instead of 2,000.
    - `.../auth/yt-analytics.readonly`
+
+   **A token keeps the scopes it was minted with.** Refreshing does not widen
+   them, so adding a scope here means reconnecting every channel once.
+   `python -m backend.cli auth channels` has a **Captions** column that says
+   which ones still need it.
 5. **Test users** — add your own Google account.
 6. Leave the app in **Testing** if you like.
 

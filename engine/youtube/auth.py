@@ -25,11 +25,45 @@ from typing import Any
 from ..core.config import Config
 from ..core.logging import log_event
 
+# CAPTIONS NEED force-ssl, AND THEIR ABSENCE WAS SILENT.
+#
+# Every upload logged `captions failed ... 403 Request had insufficient
+# authentication scopes` and carried on, so every published video went out
+# with no caption track and nobody noticed for a week. `captions.insert` is
+# the one call in this pipeline that youtube.upload + youtube do not cover.
+#
+# Adding it here only affects a NEW consent. A token minted under the old
+# list keeps the old scopes for ever - refreshing does not widen them - so
+# every channel has to be reconnected once. `missing_scopes()` below is what
+# tells the operator that, instead of leaving them to read a 403 in a log.
+CAPTIONS_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
+
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube",
+    CAPTIONS_SCOPE,
     "https://www.googleapis.com/auth/yt-analytics.readonly",
 ]
+
+
+def missing_scopes(granted: list[str] | None) -> list[str]:
+    """Which required scopes a stored token does NOT carry.
+
+    Exists so a scope gap is reported, not discovered in a log. When
+    force-ssl was added, every already-connected channel kept the narrower
+    consent it was minted with - refreshing a token does not widen its
+    scopes - and the only symptom was `captions failed ... 403` buried in
+    journalctl while the videos published fine without captions.
+
+    An empty/None list is treated as UNKNOWN rather than "missing
+    everything": tokens imported from the phone before scopes were recorded
+    have nothing stored, and claiming those are broken would be a false
+    alarm. The 403 at call time remains the backstop.
+    """
+    if not granted:
+        return []
+    have = {str(s).strip() for s in granted}
+    return [s for s in SCOPES if s not in have]
 
 
 class AuthError(RuntimeError):

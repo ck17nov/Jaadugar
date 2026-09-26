@@ -162,6 +162,31 @@ class AutoTubeRepository(
                 )
             }
         )
+
+        // RECONCILE, do not just merge.
+        //
+        // This used to end at the upsert, so a job the backend no longer had
+        // stayed on the phone for ever. Both of the reported symptoms were
+        // that one stranded row: "Clear does not clear it" (the backend only
+        // names what it actually deleted, and it cannot delete what it does
+        // not have) and "Retry does nothing" (the backend answers 404
+        // job_not_found). Measured on the live box: 12 PUBLISHED, 4
+        // SCHEDULED, ZERO FAILED - while the phone still listed failures.
+        //
+        // The window matters. `limit` truncates the reply, so a full page is
+        // not evidence that older jobs are gone; only sweep as far back as
+        // the reply reaches.
+        val keep = response.jobs.map { it.jobId }
+        when {
+            keep.isEmpty() -> db.jobs().deleteAll()
+            response.jobs.size < limit -> db.jobs().deleteMissing(keep)
+            else -> db.jobs().deleteMissingSince(
+                keep,
+                response.jobs.minOf { it.updatedAt }.let {
+                    if (it > 0) (it * 1000).toLong() else 0L
+                },
+            )
+        }
         response.jobs.size
     }
 
@@ -174,10 +199,24 @@ class AutoTubeRepository(
         Unit
     }
 
-    suspend fun retryJob(jobId: String): Result<RetryAckDto> = call {
-        val ack = api.service().retryJob(jobId)
-        logEvent("RETRY", "re-queued $jobId", jobId)
-        ack
+    suspend fun retryJob(jobId: String): Result<RetryAckDto> {
+        val result = call { api.service().retryJob(jobId) }
+        result.onSuccess { logEvent("RETRY", "re-queued $jobId", jobId) }
+        // A JOB THE BACKEND DOES NOT HAVE MUST NOT STAY ON SCREEN.
+        //
+        // Retry answered 404 job_not_found and the card sat there, so the
+        // button looked dead. That card was a local leftover: the backend had
+        // already removed the job - a previous retry queued its replacement
+        // and deleted it, or a clear succeeded with its ack lost in transit.
+        // Take the row away here too, and say why.
+        result.onFailure { error ->
+            if (error is RepositoryException && error.errorSlug == "job_not_found") {
+                withContext(Dispatchers.IO) { db.jobs().deleteByIds(listOf(jobId)) }
+                logEvent("RETRY", "removed a job the backend no longer has",
+                         jobId)
+            }
+        }
+        return result
     }
 
     suspend fun reject(jobId: String, reason: String): Result<Unit> = call {

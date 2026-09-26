@@ -757,7 +757,17 @@ def retry_job(job_id: str) -> dict[str, Any]:
     db = _db()
     job = db.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail={"error": "job_not_found"})
+        # SAY SO, rather than leaving the app to print "Backend error 404".
+        # A card can outlive its job: an earlier retry queued a replacement
+        # and deleted this row, or a clear succeeded with its acknowledgement
+        # lost in transit. The button then looked dead. The app now removes
+        # the stale card when it sees this slug.
+        raise HTTPException(status_code=404, detail={
+            "error": "job_not_found",
+            "message": ("This job is no longer on the backend, so there is "
+                        "nothing to retry. It was most likely already "
+                        "retried or cleared; the card was left behind. It "
+                        "has been removed.")})
 
     retryable = (JobStatus.FAILED.value, JobStatus.REJECTED.value)
     if job.status not in retryable:

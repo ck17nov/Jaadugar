@@ -272,8 +272,31 @@ class YouTubeUploader:
                     self.quota.spend("captions_insert")
                 log_event("YOUTUBE", "captions uploaded")
             except Exception as exc:
-                result.warnings.append(f"captions not set: {str(exc)[:160]}")
-                log_event("YOUTUBE", "captions failed", error=str(exc)[:160])
+                # NAME THE CAUSE. A 403 here is one of two things and the
+                # truncated exception said neither, so every upload for a
+                # week logged `captions failed ... Request had insuff` and
+                # published without a caption track while nobody could tell
+                # why from the log.
+                text = str(exc)
+                if "insufficient authentication scopes" in text or (
+                        "403" in text and "scope" in text.lower()):
+                    advice = (
+                        "captions not set: this channel's token does not "
+                        "carry the youtube.force-ssl scope, which "
+                        "captions.insert requires. It was authorised before "
+                        "that scope was requested, and refreshing a token "
+                        "does not widen its scopes - reconnect the channel "
+                        "from the app's Channels screen. The video itself "
+                        "published fine.")
+                else:
+                    advice = f"captions not set: {text[:160]}"
+                result.warnings.append(advice)
+                log_event("YOUTUBE", "captions failed",
+                          reason=("missing the force-ssl scope; reconnect "
+                                  "this channel"
+                                  if "insufficient authentication scopes" in text
+                                  else "see error"),
+                          error=text[:160])
 
         # ---- playlist --------------------------------------------------
         target_playlist = playlist_id or meta.playlist_id

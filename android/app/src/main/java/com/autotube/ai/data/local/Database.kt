@@ -250,6 +250,35 @@ interface JobDao {
      */
     @Query("DELETE FROM jobs WHERE job_id IN (:jobIds)")
     suspend fun deleteByIds(jobIds: List<String>)
+
+    /**
+     * Delete local jobs the backend no longer has.
+     *
+     * THIS IS WHY "CLEAR" AND "RETRY" BOTH APPEARED BROKEN. `refreshJobs`
+     * only ever upserted, so once a job vanished server-side - cleared while
+     * the ack was lost, or removed by the retry endpoint after it queued the
+     * replacement - the local row was stranded permanently. Clear could not
+     * touch it, because the backend only names what it actually deleted and
+     * a job it does not have is not in that list. Retry could not either: the
+     * backend answers 404 job_not_found. Measured on the live box on
+     * 26 September: 12 PUBLISHED and 4 SCHEDULED jobs, and ZERO FAILED ones,
+     * while the phone was still showing failures to clear and retry.
+     *
+     * `since` bounds the sweep to the window the server's reply actually
+     * covered. The jobs list is limited, so a truncated reply is not evidence
+     * that anything older has gone - deleting on that basis would wipe the
+     * history the app deliberately keeps for 30 days.
+     */
+    @Query("DELETE FROM jobs WHERE job_id NOT IN (:keep) AND updated_at >= :since")
+    suspend fun deleteMissingSince(keep: List<String>, since: Long)
+
+    /** The same sweep with no lower bound, for a reply known to be complete. */
+    @Query("DELETE FROM jobs WHERE job_id NOT IN (:keep)")
+    suspend fun deleteMissing(keep: List<String>)
+
+    /** Nothing on the backend at all, so nothing should be listed here. */
+    @Query("DELETE FROM jobs")
+    suspend fun deleteAll()
 }
 
 @Dao

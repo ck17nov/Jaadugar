@@ -259,7 +259,8 @@ def auth_channels(
     working connection gives no warning before it stops working. Publishing
     the app (which is unrelated to the Play Store) removes the limit.
     """
-    from engine.youtube.auth import YouTubeAuth
+    from engine.youtube.auth import (CAPTIONS_SCOPE, YouTubeAuth,
+                                     missing_scopes)
 
     auth = YouTubeAuth(load_config())
     if live:
@@ -285,7 +286,8 @@ def auth_channels(
 
     table = Table(title="Connected channels")
     for col in ("", "Channel", "Niches", "Granted",
-                "Refresh token" if published else "Testing-mode expiry"):
+                "Refresh token" if published else "Testing-mode expiry",
+                "Captions"):
         table.add_column(col)
     now = time.time()
     for ch in rows:
@@ -305,11 +307,34 @@ def auth_channels(
                 expiry = f"[yellow]{left:.1f}d left[/yellow]"
             else:
                 expiry = f"{left:.1f}d left"
+        # A SCOPE GAP HAS TO BE VISIBLE HERE.
+        #
+        # force-ssl was added after these channels were connected, and a
+        # refresh does not widen a token's scopes - so captions.insert
+        # answered 403 on every upload for a week while the videos published
+        # fine without captions. Nothing on screen said so; it was only in
+        # journalctl.
+        gaps = missing_scopes(ch.scopes)
+        if not ch.scopes:
+            captions = "[dim]unknown[/dim]"
+        elif CAPTIONS_SCOPE in gaps:
+            captions = "[red]no - reconnect[/red]"
+        elif gaps:
+            captions = f"[yellow]{len(gaps)} scope(s) short[/yellow]"
+        else:
+            captions = "[green]yes[/green]"
         table.add_row("*" if ch.channel_id == default_id else "",
                       ch.title or ch.channel_id,
                       ", ".join(ch.niches or []) or "-",
-                      granted, expiry)
+                      granted, expiry, captions)
     console.print(table)
+    if any(CAPTIONS_SCOPE in missing_scopes(ch.scopes) for ch in rows):
+        console.print(
+            "[yellow]One or more channels cannot attach captions.[/yellow] "
+            "They were authorised before the youtube.force-ssl scope was "
+            "required, and refreshing a token does not widen its scopes. "
+            "Reconnect each one from the app's Channels screen; nothing else "
+            "about the channel changes.")
     if published:
         console.print("[dim]* default. The OAuth consent screen is recorded "
                       "as published, so refresh tokens do not expire on a "
