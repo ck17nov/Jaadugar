@@ -355,6 +355,139 @@ lands before they have answered. This one warns rather than blocks:
 a celebration line after the answer is a fine choice, and only using
 it as the repeated refrain is the mistake.
 
+### 10. What a 229-entry batch got wrong - ALL MEASURED, 28 September 2026
+
+A drop of 229 kids entries was submitted and **0 of 229 were stored**. Every
+cause is below with its count. These are not style notes; each one is a gate
+that refuses the entry.
+
+#### 10a. The refrain must be IN THE NARRATION - 212 of 229 failed this
+
+This was the single biggest cause, and §9 above already asked for it. The
+batch filled the `refrain` field, wrote a beautiful line, and then **never
+said it in any scene**. A refrain is not metadata. It is a line the narrator
+speaks.
+
+❌ **What the batch did** - declared, then spoken once:
+
+```json
+{"refrain": "सो जा नीलू, सो जा रात",
+ "scenes": [
+   {"beat": "open",   "narration": "नीलू खरगोश को नींद नहीं आ रही थी।"},
+   {"beat": "verse_a","narration": "उसने तारे गिने, फिर भी नींद न आई।"},
+   {"beat": "close",  "narration": "सो जा नीलू, सो जा रात।"}
+ ]}
+```
+
+✅ **What passes** - the same string, word for word, in three scenes:
+
+```json
+{"refrain": "सो जा नीलू, सो जा रात",
+ "scenes": [
+   {"beat": "open",     "narration": "नीलू खरगोश को नींद नहीं आ रही थी।"},
+   {"beat": "refrain",  "narration": "सो जा नीलू, सो जा रात।"},
+   {"beat": "verse_a",  "narration": "उसने तारे गिने, फिर भी नींद न आई।"},
+   {"beat": "refrain_2","narration": "सो जा नीलू, सो जा रात।"},
+   {"beat": "close",    "narration": "चाँद ने कहा - सो जा नीलू, सो जा रात।"}
+ ]}
+```
+
+Copy and paste the string. Do not re-word it, do not inflect it, do not add
+a word inside it. The check is a literal substring count, so "सो जा नीलू, सो
+जाओ रात" is a different line and counts zero.
+
+> **Blocking, restated as an instruction:** write the `refrain` value, then
+> paste that exact value into the `narration` of **three** scenes
+> (`narrative`, `poem`) or **two** (any other shape). If you cannot, leave
+> `refrain` empty - an empty field is never checked and costs nothing.
+
+#### 10b. The refrain must be at least FOUR words and CONCRETE - 6 failed
+
+Under four words it is not detected as a refrain at all. And every content
+word has to be something a child can point at, do, or count.
+
+❌ `"चमकता तारा प्यारा तारा"` - `प्यारा` (dear/lovely) is a feeling.
+❌ `"हिम्मत रखो"` - too short, and `हिम्मत` (courage) is an idea.
+✅ `"तारा चमका, कमरा चमका"` - a star and a room, both pointable.
+
+Blocked words include: प्यार, हिम्मत, सब्र, दया, खुशी, शांति, अच्छा बनो, and
+in English *sharing, kindness, quiet, calm, brave, patience, happy, love,
+friendship, sorry, proud*.
+
+#### 10c. Name the protagonist in HALF the scenes - 33 failed
+
+`narrative` and `poem` only. A drill has no protagonist and must not invent
+one. The check finds the most frequent word from scene 1 and requires it in
+**≥50%** of scenes, so a story that says the name twice and then "वह" six
+times is refused.
+
+This also fails when the most frequent word in scene 1 is not a name at all:
+44 entries in the batch had `बच्चों` ("children") picked as their
+protagonist, because the narration addresses the audience. If the piece has
+no character, set `shape` to `drill` and the check is skipped entirely.
+
+#### 10d. `arc_variant` and `outcome_class` are REQUIRED for stories, and must VARY - 149 empty
+
+Required for `narrative` and `poem`. **Omit them for `drill`** - a drill has
+no arc, and filling the field drags it into a diversity check it is exempt
+from.
+
+Leaving them blank is not the only failure. Of the 80 story entries in the
+batch, **66 were `alone` and 68 were `got_it`** - and the cap is **20% per
+arc** and **30% per outcome**, measured against the whole group+language
+cell, not just your batch. A batch where four entries in five share an arc
+cannot be accepted however good the individual scripts are.
+
+> **Blocking:** across any batch, no single `arc_variant` may exceed one in
+> five entries, and no single `outcome_class` more than three in ten. Plan
+> the spread BEFORE writing: pick the arcs first, then write a story for
+> each. The eight arcs are `alone`, `by_helping`, `reframe`, `wrong_want`,
+> `cooperate`, `noticed`, `granted_early`, `gave_it_away`; the five outcomes
+> are `got_it`, `got_better`, `gave_away`, `changed_mind`, `helped_another`.
+
+#### 10e. Write in the language you declared - 12 failed
+
+`"language": "hi"` with English narration is refused: a Hindi voice cannot
+read it. One entry read *"King of forest lion was threatening to kill
+everyone every day"* under a `hi` declaration. Every `narration` must be in
+Devanagari when `language` is `hi`. `caption` may be English - that is what
+it is for.
+
+#### 10f. No violence, in any language - 4 failed
+
+The same entry above also fails kids safety outright. *"threatening to kill
+everyone"* is not a kids bedtime story, whatever the moral at the end. No
+killing, no threatening to kill, no weapons, no one being hurt on purpose.
+This gate is never relaxed and an entry that trips it is discarded, not
+softened.
+
+#### 10g. No stray combining marks - 535 found
+
+Every narration in one batch ended `।्` - a danda followed by a virama.
+A virama suppresses the vowel of the consonant **before** it, so after a full
+stop it cannot mean anything. It is not punctuation and it is not invisible:
+it is in the text the voice reads.
+
+Write `।` and nothing after it. The same applies to a matra stranded outside
+a word, and to any Devanagari character sitting between two JSON objects -
+one batch had `},िक्षे {` in the middle of a file, which made it unparseable.
+
+#### 10h. Valid JSON, and nothing around it
+
+Faults found in one 89-file drop, all of which stopped the file being read:
+
+| written | should be |
+|---|---|
+| `"narration: "text"` | `"narration": "text"` |
+| `"narration", "text"` | `"narration": "text"` |
+| `"narrating": "text"` | `"narration": "text"` |
+| ` ```json ` … ` ``` ` | no fence - JSON only |
+| `[cite: 1]` | nothing - remove it |
+
+One object per line, or one object per file, or pretty-printed - all three
+are read. But no markdown fence, no commentary, no citation markers.
+
+
 ## The fields
 
 | field | when | requirement |

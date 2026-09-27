@@ -92,14 +92,23 @@ def main() -> int:
                 # would fail the catalogue-wide check in tests/test_bank.py,
                 # and would look like shipped content that cannot be used.
                 keep = []
+                # ONE ENTRY, ONE LINE. A staged file can hold the same
+                # content twice - two generations of the same story - and
+                # both lines pass the `in after` test, because they resolve
+                # to the SAME row. That shipped 26 duplicate lines across the
+                # catalogue: 1,404 lines describing 1,378 entries, so a line
+                # count overstated the bank and a reader could not tell
+                # which number was wrong.
+                written: set[str] = set()
                 for raw in lines:
                     try:
                         candidate = BankEntry.from_dict(json.loads(raw))
                     except Exception:              # noqa: BLE001
                         continue
                     candidate.recompute()
-                    if candidate.entry_id in after:
+                    if candidate.entry_id in after                             and candidate.entry_id not in written:
                         keep.append(raw)
+                        written.add(candidate.entry_id)
                 if keep:
                     out = ROOT / "banks" / path.name
                     out.write_text("\n".join(keep) + "\n", encoding="utf-8")
