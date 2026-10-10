@@ -253,7 +253,7 @@ Verified on this machine (Windows 11, Python 3.12, FFmpeg 9.0, JDK 17, Android S
 | Area | State |
 |---|---|
 | Engine: research -> script -> voice -> visuals -> render -> quality | Run end-to-end on Shorts and on long-form, every artifact verified. Render path confirmed on **both** ffmpeg 6.1.1 (server) and 9.0 (laptop) |
-| Python test suite | **1,549 tests passing, 0 skipped** |
+| Python test suite | **1,567 tests passing, 0 skipped** |
 | Static analysis | pyflakes clean (bar 3 documented import-probes) |
 | Backend API + CLI | 28 endpoints, `doctor` / `run` / `research` / `quota` exercised |
 | Android unit tests | **19 passing** (`gradlew testDebugUnitTest`) - Kotlin string assertions elsewhere in `tests/` cannot catch a compile error, so anything with real logic belongs here |

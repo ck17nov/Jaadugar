@@ -230,6 +230,55 @@ def _draw_object(draw: ImageDraw.ImageDraw, kind: str, box, accent, deep) -> Non
                   width=max(3, int(w // 40)))
 
 
+# Unicode block -> a language code `fonts.script_for_language` understands.
+_SCRIPT_BLOCKS = (
+    ("ऀ", "ॿ", "hi"),     # Devanagari
+    ("ঀ", "৿", "bn"),     # Bengali
+    ("઀", "૿", "gu"),     # Gujarati
+    ("஀", "௿", "ta"),     # Tamil
+    ("ఀ", "౿", "te"),     # Telugu
+)
+
+
+def _language_for_text(*texts: str) -> str:
+    """The language whose script these strings are written in, or "".
+
+    THE LETTER WAS BEING DRAWN AS BOXES. `display_font()` picks a face that
+    can draw a script - but only when told the language, and this provider
+    called it with none. It got Anton, which has no Devanagari, so the one
+    thing a Hindi alphabet drill exists to show - a big क or अ - rendered as
+    tofu. Found by rendering a frame, not by any check.
+
+    Read from the text being drawn rather than from the request: the request
+    carries no language, and the glyphs are what the font has to cover.
+    """
+    for text in texts:
+        for ch in text or "":
+            for lo, hi, lang in _SCRIPT_BLOCKS:
+                if lo <= ch <= hi:
+                    return lang
+    return ""
+
+
+def _cover(img: Image.Image, w: int, h: int) -> Image.Image:
+    """Scale and centre-crop so the picture fills a w x h frame, no borders.
+
+    The same cover rule as `visuals.base.condition_image`: crop the excess
+    from whichever axis overshoots, so nothing is letterboxed and nothing is
+    squashed. A generated 768x1344 portrait in a 1920x1080 frame loses its
+    top and bottom rather than shrinking to a strip down the middle.
+    """
+    src_w, src_h = img.size
+    scale = max(w / max(src_w, 1), h / max(src_h, 1))
+    scaled = img.resize((max(int(round(src_w * scale)), w),
+                         max(int(round(src_h * scale)), h)), Image.LANCZOS)
+    left = (scaled.width - w) // 2
+    # Bias slightly above centre, as condition_image does: subjects usually
+    # sit in the upper half, and the lower third carries the captions.
+    top = int((scaled.height - h) * 0.38)
+    return scaled.crop((left, top, left + w, top + h)).convert("RGB")
+
+
 def _background(size, pal, phase: float = 0.0) -> Image.Image:
     """A soft vertical wash with drifting blobs. Built ONCE per clip.
 
@@ -289,12 +338,43 @@ class KidsAnimationProvider:
         word = headline_word(req)
         drawable = _DRAWABLE.get(word.lower()) if word else None
 
+        # NO LETTER, NO CARD - hand back the plain picture, full frame.
+        #
+        # Reported by the operator as "not full screen images, very small
+        # cutouts", on long-form most of all. The card is a SQUARE sized
+        # min(w * 0.84, h * 0.44), so in a 1920x1080 frame it is bounded by
+        # the height and becomes a ~475px box in the middle of a frame four
+        # times as wide - measured on two published long-form videos, the
+        # picture filled about a sixth of the screen.
+        #
+        # The card exists for one reason: to sit a big bouncing letter above
+        # the picture in an alphabet drill. Words, numbers, shapes and
+        # sentences have no letter, and for them the card only shrank the
+        # image. Returning the still lets compose cover-crop it to the frame
+        # and apply the same Ken Burns motion every bedtime story gets.
+        if not letter and not drawable and self.subject_provider is not None:
+            try:
+                asset = self.subject_provider.fetch(req, out_path)
+                log_event("VISUAL", "kids learning scene shown full frame",
+                          scene=req.scene_index, word=word or "-",
+                          reason="no letter to show, so no card")
+                return asset
+            except Exception as exc:                    # noqa: BLE001
+                # Not fatal: fall through to the drawn card below rather than
+                # leave the scene empty.
+                log_event("VISUAL", "full-frame picture failed; using the "
+                          "drawn card", scene=req.scene_index,
+                          reason=str(exc)[:110])
+
         subject: Image.Image | None = None
         if self.subject_provider is not None and not drawable:
             subject = self._subject_photo(req, out_path)
 
         frames = max(int(round(seconds * self.fps)), 2)
-        font_path, _family = display_font()
+        # A face that can draw the letter's own script - see
+        # `_language_for_text`. Without this every Hindi letter was a box.
+        font_path, _family = display_font(
+            language=_language_for_text(letter, word))
 
         # Frames are piped to ffmpeg as raw RGB rather than written out as
         # PNGs. Encoding 120 PNGs at 1080x1920 and reading them back was the
@@ -384,11 +464,33 @@ class KidsAnimationProvider:
                 [0, 0, side - 1, side - 1], radius=int(side * 0.12), fill=255)
             subject_fitted.putalpha(mask)
 
-        backdrop = _background((w, h), pal)
+        # THE PICTURE IS THE BACKGROUND when there is one.
+        #
+        # It used to sit inside a small rounded card on a pastel wash, which
+        # in a landscape frame meant a picture filling about a sixth of the
+        # screen. Now it fills the frame and the letter sits on top of it -
+        # the letter's thick ink outline and the word's white pill were
+        # always built to stay readable over anything.
+        #
+        # Built ONCE, not per frame. `_background` records that full-size
+        # per-frame work cost 68 seconds per 4-second shot on this box; the
+        # motion comes from the letter, as it always has.
+        full_bleed = None
+        if subject is not None:
+            full_bleed = _cover(subject, w, h)
+        backdrop = full_bleed if full_bleed is not None else _background((w, h), pal)
         for i in range(frames):
             t = i / max(frames - 1, 1)
             img = backdrop.copy()
             draw = ImageDraw.Draw(img)
+            if full_bleed is not None:
+                # No card: the picture is already the whole frame. Straight
+                # to the letter and the word.
+                self._draw_letter_and_word(
+                    draw, t, w, h, letter, word, letter_size, word_size,
+                    f_letter, f_word, font_path, accent, ink)
+                yield img
+                continue
 
             # Card scales in with an overshoot, then breathes very slightly.
             intro = min(t / 0.28, 1.0)
@@ -424,36 +526,45 @@ class KidsAnimationProvider:
             else:
                 _draw_object(draw, "star", content, accent, ink)
 
-            # The letter bounces above the card on its own rhythm.
-            if letter:
-                bob = math.sin(t * 2 * math.pi * 1.15) * h * 0.012
-                pop = 0.75 + 0.25 * _ease_out_back(min(t / 0.22, 1.0))
-                size = max(int(letter_size * pop), 8)
-                fl = (f_letter if size == letter_size
-                      else ImageFont.truetype(str(font_path), size))
-                bbox = draw.textbbox((0, 0), letter, font=fl)
-                lx = w / 2 - (bbox[2] - bbox[0]) / 2 - bbox[0]
-                ly = h * LETTER_Y - (bbox[3] - bbox[1]) / 2 - bbox[1] + bob
-                # Thick outline: kids content is watched on small bright
-                # screens, often in daylight.
-                for ox in range(-6, 7, 3):
-                    for oy in range(-6, 7, 3):
-                        if ox or oy:
-                            draw.text((lx + ox, ly + oy), letter, font=fl,
-                                      fill=ink)
-                draw.text((lx, ly), letter, font=fl, fill=accent)
-
-            if word:
-                appear = _ease_in_out(min(max((t - 0.18) / 0.25, 0.0), 1.0))
-                if appear > 0.02:
-                    bbox = draw.textbbox((0, 0), word, font=f_word)
-                    wx = w / 2 - (bbox[2] - bbox[0]) / 2 - bbox[0]
-                    wy = h * WORD_Y - bbox[1] + (1.0 - appear) * h * 0.03
-                    pill = (wx - word_size * 0.5, wy - word_size * 0.22,
-                            wx + (bbox[2] - bbox[0]) + word_size * 0.5,
-                            wy + (bbox[3] - bbox[1]) + word_size * 0.40)
-                    _rounded(draw, pill, radius=int(word_size * 0.55),
-                             fill=(255, 255, 255))
-                    draw.text((wx, wy), word, font=f_word, fill=ink)
+            self._draw_letter_and_word(
+                draw, t, w, h, letter, word, letter_size, word_size,
+                f_letter, f_word, font_path, accent, ink)
 
             yield img
+
+    @staticmethod
+    def _draw_letter_and_word(draw, t, w, h, letter, word, letter_size,
+                              word_size, f_letter, f_word, font_path,
+                              accent, ink) -> None:
+        """The bouncing letter and the word label, shared by both layouts."""
+        # The letter bounces on its own rhythm.
+        if letter:
+            bob = math.sin(t * 2 * math.pi * 1.15) * h * 0.012
+            pop = 0.75 + 0.25 * _ease_out_back(min(t / 0.22, 1.0))
+            size = max(int(letter_size * pop), 8)
+            fl = (f_letter if size == letter_size
+                  else ImageFont.truetype(str(font_path), size))
+            bbox = draw.textbbox((0, 0), letter, font=fl)
+            lx = w / 2 - (bbox[2] - bbox[0]) / 2 - bbox[0]
+            ly = h * LETTER_Y - (bbox[3] - bbox[1]) / 2 - bbox[1] + bob
+            # Thick outline: kids content is watched on small bright
+            # screens, often in daylight - and now over a full picture.
+            for ox in range(-6, 7, 3):
+                for oy in range(-6, 7, 3):
+                    if ox or oy:
+                        draw.text((lx + ox, ly + oy), letter, font=fl,
+                                  fill=ink)
+            draw.text((lx, ly), letter, font=fl, fill=accent)
+
+        if word:
+            appear = _ease_in_out(min(max((t - 0.18) / 0.25, 0.0), 1.0))
+            if appear > 0.02:
+                bbox = draw.textbbox((0, 0), word, font=f_word)
+                wx = w / 2 - (bbox[2] - bbox[0]) / 2 - bbox[0]
+                wy = h * WORD_Y - bbox[1] + (1.0 - appear) * h * 0.03
+                pill = (wx - word_size * 0.5, wy - word_size * 0.22,
+                        wx + (bbox[2] - bbox[0]) + word_size * 0.5,
+                        wy + (bbox[3] - bbox[1]) + word_size * 0.40)
+                _rounded(draw, pill, radius=int(word_size * 0.55),
+                         fill=(255, 255, 255))
+                draw.text((wx, wy), word, font=f_word, fill=ink)

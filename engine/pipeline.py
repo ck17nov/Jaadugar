@@ -35,8 +35,8 @@ from .core.models import (AutomationRequest, ContentIdea, JobStatus, Mode,
                           VideoJob, VideoMetadata)
 from .core.niche import build_profile
 from .core.util import (clamp, count_words, ensure_dir, have_ffmpeg,
-                        local_day_start, read_json, safe_write_json, sha1,
-                        slugify)
+                        local_day_start, quota_reset_wait, read_json,
+                        safe_write_json, sha1, slugify)
 from .quality.gate import QualityGate
 from .research.gaps import cluster_videos, find_gaps, research_context_block
 from .research.youtube import QuotaGuard, YouTubeResearch
@@ -174,6 +174,36 @@ class Pipeline:
             job.logs.append(f"{time.strftime('%H:%M:%S')} {status.value}: {note}")
         self.db.save_job(job)
 
+    def _wait_for_quota_day(self, job: VideoJob) -> None:
+        """Hold a run until it would be charged against today's quota."""
+        tz_name = str(self.cfg.get("timezone.default", "Asia/Kolkata"))
+        wait = quota_reset_wait(tz_name)
+        if wait <= 0:
+            return
+        resume = time.time() + wait
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
+        try:
+            local = ZoneInfo(tz_name)
+        except Exception:                               # noqa: BLE001
+            local = ZoneInfo("UTC")
+        at = datetime.fromtimestamp(resume, local).strftime("%H:%M")
+        note = (f"waiting until {at} {tz_name}, when the YouTube quota day "
+                f"resets - starting now would charge this video to "
+                f"yesterday's quota")
+        job.logs.append(f"{time.strftime('%H:%M:%S')} WAITING: {note}")
+        job.updated_at = time.time()
+        self.db.save_job(job)
+        log_event("PIPELINE", "holding a run until the quota day resets",
+                  job=job.job_id, minutes=f"{wait / 60:.0f}", resumes=at)
+        # Short sleeps, so a cancel is honoured within seconds and not at
+        # 12:30.
+        while time.time() < resume:
+            self._raise_if_cancelled(job)
+            time.sleep(min(15.0, max(0.0, resume - time.time())))
+        log_event("PIPELINE", "quota day reset; starting the held run",
+                  job=job.job_id)
+
     def _raise_if_cancelled(self, job: VideoJob) -> None:
         if self.cancel_check is None or not self.cancel_check(job):
             return
@@ -264,9 +294,19 @@ class Pipeline:
         #
         # Deliberately the operator's midnight and not Pacific midnight:
         # `daily_video_limit` answers "how many do I want per day", which is
-        # a question about the owner's calendar. The Pacific boundary still
-        # governs the hard quota ceiling, and the two can straddle each other
-        # harmlessly because the limit equals that ceiling.
+        # a question about the owner's calendar. The Pacific boundary governs
+        # the hard quota ceiling.
+        #
+        # This comment used to say the two days "straddle each other
+        # harmlessly because the limit equals that ceiling". They do not:
+        # the limit counts per operator day and the ceiling per Pacific day,
+        # so two operator days can share one ceiling. What keeps them aligned
+        # now is `_wait_for_quota_day`, which holds a run until the Pacific
+        # day that belongs to the operator's day has begun.
+        #
+        # Counted by when each job was MADE (`count_jobs_since` reads
+        # created_at). Counting by updated_at re-counted old videos whose
+        # rows a nightly pass had touched, and refused the last slot daily.
         limit = int(self.cfg.get("automation.daily_video_limit", 3))
         tz_name = str(self.cfg.get("timezone.default", "Asia/Kolkata"))
         since = local_day_start(tz_name)
@@ -1684,6 +1724,36 @@ class Pipeline:
         job = VideoJob(automation_id=request.id, request=request.to_dict())
         job_dir = self._job_dir(job, request)
         self.db.save_job(job)
+
+        # WAIT FOR THE QUOTA DAY THAT BELONGS TO TODAY.
+        #
+        # Requested by the operator after one automation failed every day.
+        # Between the operator's midnight and Google's reset at midnight
+        # Pacific, the quota day in progress is the one already holding the
+        # previous evening's batch - see `quota_reset_wait`. Four automations
+        # fired every morning at 11:30-12:20 IST, which is 23:00-23:50
+        # Pacific: minutes from charging a fifth and sixth video against a
+        # full day.
+        #
+        # The job row exists FIRST, so the app shows a waiting job with the
+        # reason rather than nothing at all - a run that silently does not
+        # appear reads as "the button is broken", which this project has
+        # been told more than once. Cancellable throughout.
+        #
+        # Durability is the worker queue's, no better and no worse: a restart
+        # during the wait loses the run, exactly as it already lost any run
+        # queued behind a render. The phone fires again the next day.
+        #
+        # Only when something will actually be UPLOADED - the same gate as
+        # the quota preflight. A dry run spends no quota, so there is no day
+        # to protect; and the test suite runs dry, so a suite started before
+        # 12:30 IST does not sleep for hours.
+        if (not skip_preflight
+                and bool(self.cfg.get("youtube.upload_enabled", False))
+                and not bool(self.cfg.get("dry_run", True))
+                and bool(self.cfg.get("automation.start_after_quota_reset",
+                                      True))):
+            self._wait_for_quota_day(job)
 
         if not skip_preflight:
             problems = self.preflight(request)

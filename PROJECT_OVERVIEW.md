@@ -168,6 +168,22 @@ What actually happens, in order:
 7. **Visuals** (`stage_visuals`). Per scene, from the entry's own
    `image_brief` where present: Cloudflare Workers AI → Pollinations →
    Pexels/Pixabay stock.
+
+   **Every picture fills the frame.** Kids alphabet, numbers, words, shapes
+   and sentences use the `KIDS_LEARNING` template, whose flashcard renderer
+   (`engine/visuals/kids_animation.py`) used to put each picture in a small
+   square card on a pastel wash. The card was sized `min(w × 0.84, h × 0.44)`,
+   so in a 1920×1080 long-form frame it was bounded by the height and filled
+   about a sixth of the screen — reported as "very small cutouts". Now a scene
+   with no letter returns the plain picture and gets the same full-frame Ken
+   Burns as a bedtime story, and a scene WITH a letter draws the picture
+   full-bleed with the letter on top. The card survives only when there is no
+   picture at all, around a drawn shape.
+
+   Rendering a frame to check that also showed **the letter had always been
+   tofu**: the renderer called `display_font()` with no language and got
+   Anton, which has no Devanagari. The script is now read from the text being
+   drawn, and a Hindi letter gets Noto Sans Devanagari.
 8. **Render** (`stage_render`). ffmpeg: Ken Burns `zoompan` per shot, hard
    cuts within a scene, `xfade` between scenes, burned-in subtitles via
    libass, ducked music bed, transition SFX.
@@ -544,6 +560,28 @@ against a rolling 24-hour window, so four videos finished at 22:00 blocked
 the next evening's run at 21:00 while `/quota` reported `0/10000`. Fixed
 16 September 2026.
 
+**The limit counts when a video was MADE.** `count_jobs_since` reads
+`created_at`. It read `updated_at`, and for two weeks the 20:00 slot was
+refused `daily video limit reached (5/5)` on most days while the quota
+ledger never passed 9,259. A published job's row is written again long after
+it was made — a nightly pass touched every recent one at 00:09 — so
+yesterday's videos re-counted as today's. At the refusal on 10 October, two
+of the five jobs counted had been created on the 8th and 9th.
+
+**A run waits for the quota day that belongs to today.** The phone fired four
+automations every morning at 11:30–12:20 IST — 23:00–23:50 Pacific, inside
+the quota day already holding the previous evening's batch, minutes from the
+reset. `quota_reset_wait` (`engine/core/util.py`) returns how long to hold,
+and the pipeline holds after the job row exists, so the app shows a job
+reading `WAITING: waiting until 12:30 Asia/Kolkata, when the YouTube quota
+day resets`. The reset is computed, not written down: **12:30 IST** while the
+US is on daylight time and **13:30 IST** from the first Sunday of November.
+Only for zones ahead of Pacific, only when something will actually be
+uploaded, and switchable with `automation.start_after_quota_reset`.
+
+The videos still publish at their slots: generation moves, `publishAt` does
+not. A held batch of five starts at 12:30 and is finished long before 16:00.
+
 `api.cors_origins` and `api.rate_limit_per_minute` are read by the backend but
 have **no `api:` section in config.yaml**, so both run on code defaults.
 
@@ -578,7 +616,7 @@ have **no `api:` section in config.yaml**, so both run on code defaults.
 - Render path verified on **both** ffmpeg 6.1.1 (server) and 9.0 (laptop).
 - 3 channels connected, all verified refreshing; OAuth published so tokens no
   longer expire weekly.
-- **1,549 tests pass, 0 skipped.**
+- **1,567 tests pass, 0 skipped.**
 - Server rebooted onto current glibc, 2 GB swap, root SSH off.
 
 ### Partially working
@@ -627,6 +665,8 @@ execution, phone-triggered).
 | Bank selection is first-available | No quality ordering | Rank claim candidates |
 | A test leaves a render running past teardown | 8.5 MB of scratch per suite run | Shut the executor down |
 | A retry re-runs the brief, not the exact failed render | Everything after the script is produced again — new voice, new images, a new render | Intended. The *script* is the same: the retry asks for the failed job's entry by name |
+| A run held for the quota reset lives in memory | A restart during the hold (up to ~1h each morning, longer just after midnight) loses that day's run | Same durability as any run queued behind a render; the phone fires again next day. Do not deploy 11:30–12:30 IST |
+| The phone does not fire at the slot time | Automations fire in a burst hours early; the server holds them, then publishes at the slot | Cosmetic since the hold. The 0.2.1 `ScheduleClock` fix only anchors NEW work - `ExistingPeriodicWorkPolicy.UPDATE` keeps an existing schedule's timing |
 | A stale card needs one sync to clear | A job removed on the backend disappears from the phone on the next refresh, not instantly | `refreshJobs` reconciles; pull to refresh if impatient |
 | Adding an OAuth scope means reconnecting every channel | A token never widens its own scopes | `auth channels` names which ones are short |
 | "Older than 7 days" looks like Clear did nothing | Today's failures are correctly kept, and nothing says so | Report how many rows were removed |
@@ -693,6 +733,6 @@ child-directed. **Read before you change.**
 
 ### Before you claim something works
 
-Run `python -m pytest tests/ -q` (1,549 tests, ~5 minutes). The suite renders
+Run `python -m pytest tests/ -q` (1,567 tests, ~5 minutes). The suite renders
 real video with ffmpeg. A `conftest.py` fixture deletes what the run created;
 if you see `workspace/jobs` growing, that fixture broke.

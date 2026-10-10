@@ -336,6 +336,61 @@ def local_day_start(tz_name: str = "Asia/Kolkata") -> float:
     return midnight.timestamp()
 
 
+def quota_reset_wait(tz_name: str = "Asia/Kolkata",
+                     now: float | None = None) -> float:
+    """Seconds until a run may start without joining YESTERDAY's quota day.
+
+    Zero when it may start now.
+
+    THE WINDOW. Google resets quota at midnight America/Los_Angeles, which in
+    Asia/Kolkata is 12:30 (13:30 once the US leaves daylight time on the
+    first Sunday of November). Between the operator's midnight and that reset
+    the Pacific quota day still in progress is the one that ALREADY holds the
+    previous evening's batch - so a run started then is charged against a
+    day that is full. Measured on the live channel: four automations fired
+    every morning at 11:30-12:20 IST, which is 23:00-23:50 Pacific, minutes
+    before the reset. One slipping past 12:30 would have put six uploads in
+    one quota day.
+
+    The rule is stated in terms of the two calendars rather than as "12:30",
+    so it survives daylight saving: if the current Pacific day began BEFORE
+    the operator's day did, wait for the next Pacific midnight.
+
+    ONLY FOR A TIMEZONE AHEAD OF PACIFIC, which covers Asia, Europe and
+    Africa. There the straddle is a MORNING problem and waiting moves a run
+    forward into the right quota day. A first version claimed the rule also
+    held for zones behind Pacific and "never waits" there - backwards. In
+    Honolulu the Pacific day begins at 21:00 the previous evening, so the
+    rule fired at every local hour and would have held a morning run until
+    21:00, into the very overlap it exists to avoid. A test caught it. For a
+    zone behind Pacific the overlap is the late evening, waiting cannot move
+    a run backwards, so this returns 0 and leaves it to the quota preflight.
+    """
+    try:
+        local = ZoneInfo(tz_name)
+    except Exception:                                    # noqa: BLE001
+        local = ZoneInfo("UTC")
+    pacific = ZoneInfo("America/Los_Angeles")
+    instant = datetime.fromtimestamp(now if now is not None else time.time(),
+                                     tz=local)
+
+    # At or behind Pacific: not this function's problem - see above.
+    if instant.utcoffset() <= instant.astimezone(pacific).utcoffset():
+        return 0.0
+
+    local_start = instant.replace(hour=0, minute=0, second=0, microsecond=0)
+    pac_now = instant.astimezone(pacific)
+    pac_start = pac_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if pac_start >= local_start:
+        return 0.0
+    # Built from the DATE, not by adding 24 hours: a Pacific day is 23 or 25
+    # hours long on the two daylight-saving changeovers.
+    next_date = pac_start.date() + timedelta(days=1)
+    next_reset = datetime(next_date.year, next_date.month, next_date.day,
+                          tzinfo=pacific)
+    return max(0.0, next_reset.timestamp() - instant.timestamp())
+
+
 # --------------------------------------------------------------------------
 # Misc
 # --------------------------------------------------------------------------

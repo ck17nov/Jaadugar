@@ -930,9 +930,23 @@ class Database:
         return [VideoJob.from_dict(json.loads(r["payload"])) for r in rows]
 
     def count_jobs_since(self, since_ts: float, statuses: tuple[str, ...]) -> int:
+        """Jobs MADE since `since_ts` that are in one of `statuses`.
+
+        By `created_at`. This used to read `updated_at`, and that one column
+        failed the last automation of the day on most days for two weeks.
+        A published job's row is written again long after it was made - a
+        nightly pass touched every recent one at 00:09 - so yesterday's video
+        and the day before's were re-counted as "made today". Measured at the
+        refusal on 10 October: of the five jobs the limit counted, two had
+        been created on 8 and 9 October. Four videos plus two stragglers is
+        "5/5", so the 20:00 slot was refused with quota to spare.
+
+        "How many videos did I make today" is a question about when each one
+        was made. When it was last saved is not an answer to it.
+        """
         placeholders = ",".join("?" * len(statuses))
         row = self.query_one(
-            f"SELECT COUNT(*) c FROM video_jobs WHERE updated_at >= ? "
+            f"SELECT COUNT(*) c FROM video_jobs WHERE created_at >= ? "
             f"AND status IN ({placeholders})", (since_ts, *statuses))
         return int(row["c"]) if row else 0
 

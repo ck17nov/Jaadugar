@@ -20,7 +20,7 @@ Vid App/
 ├── backend/         (7 files)   FastAPI surface + Typer CLI
 ├── android/         (58 files)  Kotlin/Compose app; ALSO the scheduler
 ├── banks/           (141 files) the script bank, as JSONL
-├── tests/           (56 files)  1,549 tests
+├── tests/           (57 files)  1,567 tests
 ├── scripts/         (12 files)  operator tooling
 ├── deploy/oracle/   (6 files)   systemd units, Caddyfile, setup.sh
 ├── docs/            (12 files)  setup guides + the public privacy/terms pages
